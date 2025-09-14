@@ -1,0 +1,7 @@
+chromedriver
+creds.sh
+venv/
+test.avi
+debug/*.txt
+__pycache__/
+old/
