@@ -68,27 +68,39 @@ def print_tool_result(result: str, output_limit: int = 50) -> None:
         truncated_chars = original_length - output_limit
 
     lines = result.strip().split('\n')
-    max_width = max(50, max(len(line) for line in lines) + 4)
 
-    # If we have truncated characters, add a truncation notice
+    # Calculate max width needed for content
+    content_widths = [len(line) for line in lines]
     if truncated_chars > 0:
         truncation_notice = f"...{truncated_chars} characters truncated"
         lines.append(truncation_notice)
-        max_width = max(max_width, len(truncation_notice) + 4)
+        content_widths.append(len(truncation_notice))
 
-    print(f"{Colors.GREEN}┌{'─' * (max_width - 2)}┐{Colors.RESET}")
-    print(f"{Colors.GREEN}│ {Colors.BOLD}Result:{' ' * (max_width - 9)}{Colors.RESET}{Colors.GREEN}│{Colors.RESET}")
-    print(f"{Colors.GREEN}├{'─' * (max_width - 2)}┤{Colors.RESET}")
+    # Frame width = max content width + 4 (for "│ " and " │")
+    max_content_width = max(content_widths) if content_widths else 0
+    frame_width = max(50, max_content_width + 4)
+
+    # Header width check - "Result:" is 7 chars, so we need at least 11 total width
+    frame_width = max(frame_width, 11)
+
+    print(f"{Colors.GREEN}┌{'─' * (frame_width - 2)}┐{Colors.RESET}")
+
+    # Header: "│ Result:" + padding + " │"
+    header_padding = frame_width - 2 - 7 - 1  # -2 for borders, -7 for "Result:", -1 for space after
+    print(f"{Colors.GREEN}│ {Colors.BOLD}Result:{' ' * header_padding}{Colors.RESET}{Colors.GREEN}│{Colors.RESET}")
+
+    print(f"{Colors.GREEN}├{'─' * (frame_width - 2)}┤{Colors.RESET}")
 
     for i, line in enumerate(lines):
-        padded_line = f"{line:<{max_width - 4}}"
-        # If this is the truncation notice, make it dim
-        if truncated_chars > 0 and i == len(lines) - 1:
-            print(f"{Colors.GREEN}│ {Colors.DIM}{Colors.LIGHT_GREEN}{padded_line}{Colors.RESET}{Colors.GREEN} │{Colors.RESET}")
-        else:
-            print(f"{Colors.GREEN}│ {Colors.LIGHT_GREEN}{padded_line}{Colors.RESET}{Colors.GREEN} │{Colors.RESET}")
+        # Content: "│ " + line + padding + "│"
+        content_padding = frame_width - 3 - len(line)  # -3 for "│ " and "│"
 
-    print(f"{Colors.GREEN}└{'─' * (max_width - 2)}┘{Colors.RESET}")
+        if truncated_chars > 0 and i == len(lines) - 1:
+            print(f"{Colors.GREEN}│ {Colors.DIM}{Colors.LIGHT_GREEN}{line}{' ' * content_padding}{Colors.RESET}{Colors.GREEN}│{Colors.RESET}")
+        else:
+            print(f"{Colors.GREEN}│ {Colors.LIGHT_GREEN}{line}{' ' * content_padding}{Colors.RESET}{Colors.GREEN}│{Colors.RESET}")
+
+    print(f"{Colors.GREEN}└{'─' * (frame_width - 2)}┘{Colors.RESET}")
     print()  # Add spacing after result
 
 

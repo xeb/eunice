@@ -17,11 +17,16 @@ eunice implements an agentic workflow where:
 5. The loop continues until the agent determines the task is complete
 
 ### Tool System
-Currently supports two hardcoded tools:
+eunice supports two types of tool integration:
+
+#### Built-in Tools (Hardcoded)
 - **`list_files(path: str)`** - Lists files and directories at the specified path
 - **`read_file(path: str)`** - Reads and returns the contents of a file
 
-Both tools return structured data that the AI models can process and act upon.
+#### MCP Server Integration
+Supports Model Context Protocol (MCP) servers for extended tool capabilities through JSON configuration. MCP servers run as separate processes and communicate via stdio, providing tools like filesystem access, database connections, API integrations, and more.
+
+All tools return structured data that the AI models can process and act upon.
 
 ### Provider Support
 - **OpenAI**: gpt-3.5-turbo, gpt-4, gpt-4o, gpt-4-turbo, gpt-5, chatgpt-4o-latest
@@ -71,12 +76,14 @@ This ensures models like `gpt-oss` (an Ollama model) are correctly routed to Oll
 eunice "How many files are in the current directory?"
 eunice --model="gpt-4" "analyze this codebase"
 eunice --model="gemini-2.5-pro" --prompt=./analysis_request.txt
+eunice --config=./mcp-config.json "analyze my project structure"
 ```
 
 ### Options
 - `--model=MODEL` - Specify AI model (default: gpt-3.5-turbo)
 - `--prompt=PROMPT` - Prompt as named argument (can be file path or string)
 - `--tool-output-limit=N` - Limit tool output display (default: 50, 0 = no limit)
+- `--config=CONFIG_FILE` - Path to JSON configuration file for MCP servers
 - `--list-models` - Show all available models grouped by provider
 - `--help` - Enhanced help with model availability and API key status
 
@@ -84,6 +91,118 @@ eunice --model="gemini-2.5-pro" --prompt=./analysis_request.txt
 - Prompts can be provided as positional arguments or via `--prompt`
 - Automatic file detection: if prompt looks like a file path and exists, content is read
 - Supports both direct strings and file-based prompts
+
+### MCP Server Configuration
+
+The `--config` option allows integration with Model Context Protocol (MCP) servers to extend tool capabilities beyond the built-in file operations.
+
+#### Configuration File Format
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory",
+        "."
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking",
+        "."
+      ]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
+    },
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time"
+      ]
+    }
+  }
+}
+```
+
+#### MCP Server Lifecycle
+1. **Startup**: eunice spawns each configured MCP server as a subprocess
+2. **Initialization**: Handshake and capability exchange via stdio
+3. **Tool Discovery**: Each MCP server exposes its available tools via the MCP protocol
+4. **Tool Registration**: Tools are registered with server name prefix (e.g., `time.get_current_time`)
+5. **Tool Execution**: AI model can call MCP tools alongside built-in tools
+6. **Shutdown**: MCP servers are terminated when eunice exits
+
+#### Tool Registration and Naming
+Each MCP server can expose multiple tools. To avoid naming conflicts and provide clear tool origin, all MCP tools are registered with a server name prefix:
+
+**Naming Convention**: `{server_name}.{tool_name}`
+
+**Examples from configuration:**
+- `time` server with `get_current_time` tool → registered as `time.get_current_time`
+- `filesystem` server with `read_file` tool → registered as `filesystem.read_file`
+- `fetch` server with `fetch` tool → registered as `fetch.fetch`
+- `memory` server with `store` tool → registered as `memory.store`
+
+**Tool Discovery Process:**
+1. eunice connects to each configured MCP server
+2. Sends `tools/list` request to discover available tools
+3. Registers each tool with `{server_name}.{tool_name}` format
+4. Merges MCP tools with built-in tools (`list_files`, `read_file`)
+5. Presents unified tool list to AI model
+
+**Tool Routing:**
+- Built-in tools: Executed directly by eunice
+- MCP tools: Routed to appropriate server based on prefix
+- Tool calls like `time.get_current_time` are sent to the `time` server
+- Server name is stripped before forwarding: `get_current_time` sent to server
+
+#### Common MCP Servers and Their Tools
+- **Filesystem** (`@modelcontextprotocol/server-filesystem`): `read_file`, `write_file`, `list_directory`, `create_directory`
+- **Memory** (`@modelcontextprotocol/server-memory`): `store`, `retrieve`, `search`, `delete`
+- **Sequential Thinking** (`@modelcontextprotocol/server-sequential-thinking`): `think`, `reflect`, `summarize`
+- **Fetch** (`mcp-server-fetch`): `fetch`, `post`, `get_headers`
+- **Time** (`mcp-server-time`): `get_current_time`, `get_timezone`, `format_time`
+
+**Example Tool Registrations:**
+```
+Built-in Tools:
+- list_files
+- read_file
+
+MCP Tools (with server prefixes):
+- filesystem.read_file
+- filesystem.write_file
+- filesystem.list_directory
+- memory.store
+- memory.retrieve
+- fetch.fetch
+- time.get_current_time
+- sequential-thinking.think
+```
+
+#### Error Handling
+- **Invalid configuration files**: Clear error messages with file path and JSON validation details
+- **MCP server startup failures**: Detailed error output with command, args, and stderr
+- **Tool discovery failures**: Warning messages for servers that don't respond to `tools/list`
+- **Tool execution errors**: MCP server errors propagated to AI model with server context
+- **Server crashes**: Graceful degradation with error reporting and tool deregistration
+- **Tool name conflicts**: Warning when MCP tool names conflict with built-in tools (MCP tools take precedence with prefix)
 
 ## Visual Features
 
@@ -123,7 +242,8 @@ The `--help` command shows:
 
 ### Dependencies
 - `openai` - Unified API client for all providers (OpenAI, Gemini via OpenAI-compatible endpoints, Ollama)
-- Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`
+- `mcp` - Model Context Protocol client library for MCP server communication (optional)
+- Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`, `asyncio`
 
 ### Testing
 Comprehensive test coverage including:
@@ -154,6 +274,31 @@ eunice --model="gemini-2.5-pro" "Read the main.py file and explain its purpose"
 ```bash
 eunice "List all Python files and summarize their contents"
 eunice --tool-output-limit=200 "Analyze the project structure"
+eunice --config=./dev-tools.json "Check git status and run tests"
+```
+
+### MCP-Enhanced Tasks
+```bash
+# With multiple MCP servers (filesystem, memory, time, fetch)
+eunice --config=./config.example.json "What time is it and what files are in this directory?"
+
+# With memory server for persistent context
+eunice --config=./config.example.json "Store this project analysis in memory for later reference"
+
+# With fetch server for web requests
+eunice --config=./config.example.json "Fetch the latest news from the GitHub API and summarize it"
+
+# Combining multiple MCP tools
+eunice --config=./config.example.json "Get the current time, list files, and store a summary in memory"
+```
+
+**Example Tool Calls Generated:**
+```json
+[
+  {"type": "function", "function": {"name": "time.get_current_time"}},
+  {"type": "function", "function": {"name": "list_files", "arguments": {"path": "."}}},
+  {"type": "function", "function": {"name": "memory.store", "arguments": {"key": "project_summary", "value": "..."}}}
+]
 ```
 
 ### Model Management
@@ -172,10 +317,12 @@ Using the OpenAI API specification as the common interface allows:
 - Compatibility with Ollama's OpenAI-compatible endpoint
 
 ### Tool Design Philosophy
-Tools are intentionally minimal and hardcoded to maintain simplicity:
-- Only file operations that are safe and commonly needed
-- Structured JSON responses for consistent parsing
-- Local execution only (no network calls from tools)
+The framework supports both built-in and extensible tool approaches:
+- **Built-in tools**: Minimal, hardcoded file operations for safety and reliability
+- **MCP tools**: Extensible via configuration, enabling rich integrations
+- **Unified interface**: All tools appear identical to AI models
+- **Structured responses**: Consistent JSON/text formatting across tool types
+- **Local + network**: Built-in tools are local-only; MCP tools can access network resources
 
 ### Provider Priority
 The detection logic prioritizes actual model availability over name patterns:
