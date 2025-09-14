@@ -2,6 +2,14 @@
 
 A generalist, minimalist agent framework for natural language interactions with AI models that can execute local file operations.
 
+> **Name Origin**: eunice is named after the AI character Eunice from William Gibson's novel "Agency" - a highly capable artificial intelligence that assists with complex tasks through natural conversation.
+
+## Project Goals
+
+**Minimalism**: Keep the core implementation under 2,000 lines of Python code.
+
+✅ **Current Status**: `eunice.py` is **750/2,000 lines** (37.5% used, **62.5% remaining**)
+
 ## Installation
 
 ```bash
@@ -66,5 +74,9 @@ uv run eunice.py "your prompt"
 # Uninstall
 uv tool uninstall eunice
 ```
+
+## Philosophy
+
+eunice follows the principle of "sophisticated simplicity" - providing powerful agentic capabilities while maintaining a minimal, readable codebase that can be easily understood and modified.
 
 For detailed documentation, see [CLAUDE.md](CLAUDE.md).
