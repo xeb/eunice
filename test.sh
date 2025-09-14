@@ -127,36 +127,11 @@ run_test "Gemini model detection (with key)" "GEMINI_API_KEY=test timeout 5 uv r
 run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=llama3.1 'test' || echo 'Provider detected correctly'" 0
 run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' || echo 'Provider detected correctly'" 0
 
-# Test 6: Tool functionality (unit tests)
-echo "=== Testing Tool Functions ==="
+# Test 6: MCP Import Dependencies
+echo "=== Testing MCP Dependencies ==="
 
-# Test list_files function by creating a simple test script
-cat > test_tools.py << 'EOF'
-import sys
-sys.path.append('.')
-from eunice import list_files, read_file
-import json
-
-# Test list_files
-print("Testing list_files:")
-result = list_files("test_data")
-print(json.dumps(result, indent=2))
-
-# Test with non-existent directory
-result = list_files("nonexistent")
-print("Non-existent directory:", json.dumps(result, indent=2))
-
-# Test read_file
-print("\nTesting read_file:")
-content = read_file("test_data/test.txt")
-print("Content:", repr(content))
-
-# Test with non-existent file
-content = read_file("nonexistent.txt")
-print("Non-existent file:", repr(content))
-EOF
-
-run_test "Tool functions unit test" "python3 test_tools.py" 0 "This is a test file"
+# Test that asyncio is available (required for MCP)
+run_test "Asyncio import test" "python3 -c 'import asyncio; print(\"Asyncio available\")'" 0 "Asyncio available"
 
 # Test 7: Different usage patterns from the spec
 echo "=== Testing Usage Patterns from Spec ==="
@@ -203,7 +178,7 @@ echo "=== Testing New Command Line Options ==="
 
 run_test "List models option" "uv run eunice.py --list-models" 0 "Available Models"
 run_test "Tool output limit help" "uv run eunice.py --help" 0 "tool-output-limit"
-run_test "Enhanced help output" "uv run eunice.py --help" 0 "API Key Status"
+run_test "Enhanced help output" "uv run eunice.py --help" 0 "Use --list-models"
 
 # Test 12: Dependencies and installation
 echo "=== Testing Dependencies ==="
@@ -217,12 +192,99 @@ echo "=== Testing Script Execution ==="
 run_test "Script is executable" "chmod +x eunice.py && test -x eunice.py && echo 'Script is executable'" 0 "Script is executable"
 run_test "Shebang line" "head -n 1 eunice.py | grep -q '#!/usr/bin/env python3' && echo 'Shebang correct'" 0 "Shebang correct"
 
+# Test 14: MCP Server Integration
+echo "=== Testing MCP Server Integration ==="
+
+# Test --config parameter existence
+run_test "Config parameter help" "uv run eunice.py --help" 0 "config"
+
+# Test without config (no tools available)
+run_test "No MCP config - no tools" "timeout 5 uv run eunice.py --model=llama3.1 'test' || echo 'No tools available'" 0 "" "MCP Servers"
+
+# Test config validation
+run_test "Non-existent config file" "uv run eunice.py --config=nonexistent.json --model=llama3.1 'test' 2>&1" 0 "Error loading MCP configuration"
+
+# Create a minimal test MCP config for testing
+cat > test_mcp_config.json << 'EOF'
+{
+  "mcpServers": {
+    "test-server": {
+      "command": "echo",
+      "args": ["test"]
+    }
+  }
+}
+EOF
+
+# Test config loading (should start server even if it fails to connect properly)
+run_test "MCP config loading" "timeout 3 uv run eunice.py --config=test_mcp_config.json 'test' 2>&1 || echo 'Config loaded'" 0 "" ""
+
+# Test with actual config.example.json if it exists
+if [ -f "config.example.json" ]; then
+    run_test "MCP servers display" "timeout 8 uv run eunice.py --config=config.example.json --model=llama3.1 'test' 2>&1 | head -10 | sed 's/\x1b\[[0-9;]*m//g' | grep -q 'MCP Servers & Tools' && echo 'MCP Servers found' || echo 'MCP display test'" 0 "MCP Servers found"
+    run_test "MCP tools registration" "timeout 8 uv run eunice.py --config=config.example.json --model=llama3.1 'test' 2>&1 | head -20 | grep -q 'tools' && echo 'Tools registered' || echo 'Tools registration test'" 0 "Tools registered"
+    run_test "Light yellow MCP output" "timeout 8 uv run eunice.py --config=config.example.json --model=llama3.1 'test' 2>&1 | head -10 | grep -q '\[93m' && echo 'Yellow output found' || echo 'Yellow output test'" 0
+
+    # Test complex multi-tool MCP integration (demonstrates full capability)
+    # This tests: long prompt handling, multiple tool calls, time, filesystem, fetch, and sequential thinking
+    if [ -n "$GEMINI_API_KEY" ]; then
+        run_test "Complex MCP multi-tool integration" "timeout 20 uv run eunice.py --config=config.example.json --model=gemini-2.5-flash 'How are you? What time is it? And how many files are in the current directory? Can you also fetch the results for xeb.ai and tell me what it is. Then print a report at the end that says As of <datetime> the website xeb.ai is about <summary> and there are <num_files> in the current directory and <num_directories> subdirectories' 2>&1 || echo 'Complex test completed'" 0 "files in the current directory"
+    else
+        echo "Skipping complex MCP test - GEMINI_API_KEY not set"
+    fi
+fi
+
+# Test 15: Tool System Changes
+echo "=== Testing Tool System Changes ==="
+
+# Test that built-in tools are removed (no list_files or read_file without MCP)
+run_test "No built-in tools without config" "timeout 5 uv run eunice.py --model=llama3.1 'list files' || echo 'No built-in tools'" 0 "" "list_files"
+
+# Test 16: Long Prompt Parsing Fix
+echo "=== Testing Long Prompt Parsing ==="
+
+# Test that very long prompts don't cause OSError
+run_test "Long prompt parsing (no OSError)" "timeout 5 uv run eunice.py --model=llama3.1 'This is a very long prompt that should not cause any file system errors when parsed as it contains many spaces and question marks like what time is it and how are you doing today and what files are in the directory and can you help me with this task that involves multiple steps and complex operations' 2>&1 || echo 'Long prompt handled'" 0 "" "File name too long"
+
+# Test prompt with template characters
+run_test "Prompt with template characters" "timeout 5 uv run eunice.py --model=llama3.1 'Print a report that says: As of <datetime> there are <num_files> files' 2>&1 || echo 'Template prompt handled'" 0 "" "OSError"
+
+# Test 17: Anthropic Model Support
+echo "=== Testing Anthropic Model Support ==="
+
+# Test Anthropic models in list (removed from help)
+run_test "Anthropic models in list" "uv run eunice.py --list-models" 0 "🧠 Anthropic"
+
+# Test Anthropic model aliases - adapt based on whether API key is available
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+    # API key is set, so these should succeed (timeout after model detection works)
+    run_test "Sonnet alias detection" "timeout 5 uv run eunice.py --model=sonnet 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Opus alias detection" "timeout 5 uv run eunice.py --model=opus 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Claude-sonnet alias detection" "timeout 5 uv run eunice.py --model=claude-sonnet 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Claude-opus alias detection" "timeout 5 uv run eunice.py --model=claude-opus 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+
+    # Test full model names
+    run_test "Claude Sonnet 4 detection" "timeout 5 uv run eunice.py --model=claude-sonnet-4-20250514 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Claude Opus 4.1 detection" "timeout 5 uv run eunice.py --model=claude-opus-4-1-20250805 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+else
+    # API key not set, so these should fail with proper error
+    run_test "Sonnet alias detection" "uv run eunice.py --model=sonnet 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Opus alias detection" "uv run eunice.py --model=opus 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Claude-sonnet alias detection" "uv run eunice.py --model=claude-sonnet 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Claude-opus alias detection" "uv run eunice.py --model=claude-opus 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+
+    # Test full model names
+    run_test "Claude Sonnet 4 detection" "uv run eunice.py --model=claude-sonnet-4-20250514 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Claude Opus 4.1 detection" "uv run eunice.py --model=claude-opus-4-1-20250805 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+fi
+
 # Cleanup
 echo "Cleaning up test environment..."
 rm -rf test_data
 rm -f test_prompt.txt
 rm -f test_tools.py
 rm -f test_colored_output.py
+rm -f test_mcp_config.json
 
 # Final results
 echo

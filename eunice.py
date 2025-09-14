@@ -11,6 +11,7 @@ Usage: eunice [--model=MODEL] [--prompt=PROMPT] [prompt]
 """
 
 import argparse
+import asyncio
 import json
 import os
 import subprocess
@@ -143,30 +144,54 @@ def get_supported_models() -> Dict[str, List[str]]:
             "gemini-1.5-flash",
             "gemini-1.5-pro"
         ],
+        "Anthropic": [
+            "claude-sonnet-4-20250514",
+            "claude-opus-4-1-20250805",
+            "sonnet",
+            "opus",
+            "claude-sonnet",
+            "claude-opus"
+        ],
         "Ollama": get_ollama_models()
     }
     return models
 
 
 def print_models_list():
-    """Print all supported models grouped by provider."""
+    """Print all supported models grouped by provider with API key status."""
     print(f"{Colors.BOLD}eunice - Available Models{Colors.RESET}")
     print("=" * 30)
 
     models = get_supported_models()
+    key_status = check_api_key_status()
 
     for provider, model_list in models.items():
         if provider == "OpenAI":
             icon = "🤖"
             color = Colors.GREEN
+            key_name = "OPENAI_API_KEY"
         elif provider == "Gemini":
             icon = "💎"
             color = Colors.BLUE
+            key_name = "GEMINI_API_KEY"
+        elif provider == "Anthropic":
+            icon = "🧠"
+            color = Colors.CYAN
+            key_name = "ANTHROPIC_API_KEY"
         else:  # Ollama
             icon = "🦙"
             color = Colors.MAGENTA
+            key_name = None
 
-        print(f"\n{color}{Colors.BOLD}{icon} {provider} Models:{Colors.RESET}")
+        # Show API key status for providers that need it
+        if key_name:
+            if key_status.get(key_name):
+                status = f"✅ API key set (...{key_status[key_name]})"
+            else:
+                status = f"❌ API key not set"
+            print(f"\n{color}{Colors.BOLD}{icon} {provider} Models:{Colors.RESET} {status}")
+        else:
+            print(f"\n{color}{Colors.BOLD}{icon} {provider} Models:{Colors.RESET} (local)")
 
         if not model_list:
             if provider == "Ollama":
@@ -194,152 +219,284 @@ def check_api_key_status() -> Dict[str, Optional[str]]:
     else:
         keys["GEMINI_API_KEY"] = None
 
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key and len(anthropic_key) >= 4:
+        keys["ANTHROPIC_API_KEY"] = anthropic_key[-4:]
+    else:
+        keys["ANTHROPIC_API_KEY"] = None
+
     return keys
 
 
 class CustomHelpFormatter(argparse.RawDescriptionHelpFormatter):
-    """Custom help formatter that adds models and API key status."""
+    """Custom help formatter."""
 
     def format_help(self):
         help_text = super().format_help()
 
-        # Add models and API key status
+        # Add a note about model listing
         extra_info = "\n" + "=" * 50 + "\n"
-        extra_info += f"{Colors.BOLD}Available Models:{Colors.RESET}\n"
-
-        models = get_supported_models()
-        for provider, model_list in models.items():
-            if provider == "OpenAI":
-                icon = "🤖"
-                color = Colors.GREEN
-            elif provider == "Gemini":
-                icon = "💎"
-                color = Colors.BLUE
-            else:  # Ollama
-                icon = "🦙"
-                color = Colors.MAGENTA
-
-            extra_info += f"\n{color}{Colors.BOLD}{icon} {provider}:{Colors.RESET}\n"
-
-            if not model_list:
-                if provider == "Ollama":
-                    extra_info += f"  {Colors.DIM}No models installed{Colors.RESET}\n"
-                else:
-                    extra_info += f"  {Colors.DIM}No models available{Colors.RESET}\n"
-            else:
-                for model in model_list[:3]:  # Show first 3 models
-                    extra_info += f"  • {model}\n"
-                if len(model_list) > 3:
-                    extra_info += f"  • ... and {len(model_list) - 3} more\n"
-
-        # Add API key status
-        extra_info += f"\n{Colors.BOLD}API Key Status:{Colors.RESET}\n"
-        key_status = check_api_key_status()
-
-        for key_name, last_chars in key_status.items():
-            if last_chars:
-                extra_info += f"  ✅ {key_name} set (...{last_chars})\n"
-            else:
-                extra_info += f"  ❌ {key_name} not set\n"
-
-        extra_info += f"\n{Colors.DIM}Use --list-models to see all available models{Colors.RESET}\n"
+        extra_info += f"{Colors.DIM}Use --list-models to see all available models and API key status{Colors.RESET}\n"
 
         return help_text + extra_info
 
 
-def list_files(path: str) -> List[Dict[str, str]]:
-    """List files in the given directory path."""
-    try:
-        path_obj = Path(path)
-        if not path_obj.exists():
-            return [{"error": f"Path {path} does not exist"}]
-        if not path_obj.is_dir():
-            return [{"error": f"Path {path} is not a directory"}]
-
-        files = []
-        for item in path_obj.iterdir():
-            if item.is_file():
-                files.append({"name": item.name, "type": "file"})
-            elif item.is_dir():
-                files.append({"name": item.name, "type": "directory"})
-        return files
-    except Exception as e:
-        return [{"error": str(e)}]
 
 
-def read_file(path: str) -> str:
-    """Read and return the contents of a file."""
-    try:
-        path_obj = Path(path)
-        if not path_obj.exists():
-            return f"Error: File {path} does not exist"
-        if not path_obj.is_file():
-            return f"Error: {path} is not a file"
+class MCPServer:
+    """Represents an MCP server with its process and tools."""
+    def __init__(self, name: str, command: str, args: List[str]):
+        self.name = name
+        self.command = command
+        self.args = args
+        self.process = None
+        self.tools = []
 
-        with open(path_obj, 'r', encoding='utf-8') as f:
-            return f.read()
-    except Exception as e:
-        return f"Error reading file: {str(e)}"
+    async def start(self):
+        """Start the MCP server process."""
+        try:
+            self.process = await asyncio.create_subprocess_exec(
+                self.command, *self.args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
 
-
-def get_tools_spec():
-    """Return the OpenAI tools specification for our supported tools."""
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": "list_files",
-                "description": "List files and directories in a given path",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "The directory path to list files from"
-                        }
-                    },
-                    "required": ["path"]
+            # Initialize MCP protocol
+            await self._send_message({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "clientInfo": {"name": "eunice", "version": "1.0.0"}
                 }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "read_file",
-                "description": "Read the contents of a file",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "The file path to read"
-                        }
-                    },
-                    "required": ["path"]
+            })
+
+            init_response = await self._read_message()
+            if init_response and init_response.get("result"):
+                # Send initialized notification
+                await self._send_notification({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/initialized"
+                })
+
+                # Discover tools
+                await self._discover_tools()
+                return True
+
+        except Exception as e:
+            print(f"Error starting MCP server {self.name}: {e}", file=sys.stderr)
+            return False
+
+    async def _send_message(self, message: Dict[str, Any]):
+        """Send a JSON-RPC message to the server."""
+        if self.process and self.process.stdin:
+            message_str = json.dumps(message) + "\n"
+            self.process.stdin.write(message_str.encode())
+            await self.process.stdin.drain()
+
+    async def _send_notification(self, notification: Dict[str, Any]):
+        """Send a JSON-RPC notification to the server."""
+        await self._send_message(notification)
+
+    async def _read_message(self) -> Optional[Dict[str, Any]]:
+        """Read a JSON-RPC message from the server."""
+        if self.process and self.process.stdout:
+            try:
+                line = await asyncio.wait_for(self.process.stdout.readline(), timeout=5.0)
+                if line:
+                    return json.loads(line.decode().strip())
+            except (asyncio.TimeoutError, json.JSONDecodeError, Exception):
+                pass
+        return None
+
+    async def _discover_tools(self):
+        """Discover available tools from the server."""
+        await self._send_message({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list"
+        })
+
+        response = await self._read_message()
+        if response and response.get("result") and "tools" in response["result"]:
+            for tool in response["result"]["tools"]:
+                # Prefix tool name with server name
+                tool_name = f"{self.name}.{tool['name']}"
+                tool_spec = {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("inputSchema", {"type": "object", "properties": {}})
+                    }
                 }
+                self.tools.append(tool_spec)
+
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+        """Call a tool on this server."""
+        # Remove server prefix from tool name
+        actual_tool_name = tool_name.split(".", 1)[1] if "." in tool_name else tool_name
+
+        await self._send_message({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": actual_tool_name,
+                "arguments": arguments
             }
-        }
-    ]
+        })
+
+        response = await self._read_message()
+        if response and response.get("result"):
+            result = response["result"]
+            if "content" in result and isinstance(result["content"], list):
+                # MCP returns content as a list of content blocks
+                content_parts = []
+                for content_block in result["content"]:
+                    if content_block.get("type") == "text":
+                        content_parts.append(content_block.get("text", ""))
+                return "\n".join(content_parts)
+            return str(result)
+        elif response and response.get("error"):
+            return f"Error: {response['error'].get('message', 'Unknown error')}"
+        else:
+            return "Error: No response from MCP server"
+
+    async def stop(self):
+        """Stop the MCP server process."""
+        if self.process:
+            try:
+                # First try graceful shutdown
+                if self.process.stdin:
+                    self.process.stdin.close()
+
+                # Give it a moment to exit gracefully
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    # Force terminate if it doesn't exit gracefully
+                    self.process.terminate()
+                    await self.process.wait()
+            except Exception:
+                # If anything goes wrong, just terminate
+                try:
+                    self.process.terminate()
+                    await self.process.wait()
+                except Exception:
+                    pass  # Process might already be dead
 
 
-def execute_tool(tool_name: str, arguments: Dict[str, Any]) -> str:
-    """Execute a tool function and return the result."""
-    if tool_name == "list_files":
-        path = arguments.get("path", ".")
-        result = list_files(path)
-        return json.dumps(result, indent=2)
-    elif tool_name == "read_file":
-        path = arguments.get("path", "")
-        result = read_file(path)
-        return result
-    else:
-        return f"Error: Unknown tool '{tool_name}'"
+class MCPManager:
+    """Manages multiple MCP servers."""
+    def __init__(self):
+        self.servers = {}
+        self.tools = []
+
+    async def load_config(self, config_path: str):
+        """Load MCP server configuration from file."""
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+
+            if "mcpServers" not in config:
+                print(f"Warning: No 'mcpServers' section found in {config_path}", file=sys.stderr)
+                return
+
+            for server_name, server_config in config["mcpServers"].items():
+                if "command" not in server_config or "args" not in server_config:
+                    print(f"Warning: Invalid configuration for server {server_name}", file=sys.stderr)
+                    continue
+
+                server = MCPServer(server_name, server_config["command"], server_config["args"])
+                if await server.start():
+                    self.servers[server_name] = server
+                    self.tools.extend(server.tools)
+                    print(f"Started MCP server: {server_name}", file=sys.stderr)
+                else:
+                    print(f"Failed to start MCP server: {server_name}", file=sys.stderr)
+
+        except Exception as e:
+            print(f"Error loading MCP configuration: {e}", file=sys.stderr)
+
+    def get_tools_spec(self) -> List[Dict[str, Any]]:
+        """Return the OpenAI tools specification for all MCP tools."""
+        return self.tools
+
+    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+        """Execute a tool call by routing to the appropriate server."""
+        if "." not in tool_name:
+            return f"Error: Invalid tool name '{tool_name}' - MCP tools must be prefixed with server name"
+
+        server_name = tool_name.split(".", 1)[0]
+        if server_name not in self.servers:
+            return f"Error: Unknown MCP server '{server_name}'"
+
+        return await self.servers[server_name].call_tool(tool_name, arguments)
+
+    def print_server_info(self):
+        """Print MCP server and tool information in light yellow frames."""
+        if not self.servers:
+            return
+
+        print(f"\n{Colors.LIGHT_YELLOW}┌{'─' * 48}┐{Colors.RESET}")
+        print(f"{Colors.LIGHT_YELLOW}│ {Colors.BOLD}🔌 MCP Servers & Tools{' ' * 25}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
+        print(f"{Colors.LIGHT_YELLOW}├{'─' * 48}┤{Colors.RESET}")
+
+        for server_name, server in self.servers.items():
+            server_line = f"📡 {server_name}: {len(server.tools)} tools"
+            padding = 48 - 3 - len(server_line)
+            print(f"{Colors.LIGHT_YELLOW}│ {Colors.LIGHT_YELLOW}{server_line}{' ' * padding}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
+
+            for tool in server.tools:
+                tool_name = tool["function"]["name"]
+                tool_line = f"  • {tool_name}"
+                if len(tool_line) > 44:
+                    tool_line = tool_line[:41] + "..."
+                padding = 48 - 3 - len(tool_line)
+                print(f"{Colors.LIGHT_YELLOW}│ {Colors.DIM}{tool_line}{' ' * padding}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
+
+        print(f"{Colors.LIGHT_YELLOW}└{'─' * 48}┘{Colors.RESET}")
+        print()
+
+    async def shutdown(self):
+        """Shutdown all MCP servers."""
+        # Shut down all servers concurrently and suppress errors
+        shutdown_tasks = []
+        for server in self.servers.values():
+            shutdown_tasks.append(server.stop())
+
+        if shutdown_tasks:
+            try:
+                await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+            except Exception:
+                pass  # Suppress any shutdown errors
+
+
 
 
 def validate_ollama_model(model: str) -> bool:
     """Validate that an Ollama model is installed locally."""
     available_models = get_ollama_models()
     return model in available_models
+
+
+def resolve_anthropic_model(model: str) -> str:
+    """Resolve Anthropic model aliases to full model names."""
+    model_lower = model.lower()
+
+    # Alias mappings
+    alias_map = {
+        "sonnet": "claude-sonnet-4-20250514",
+        "claude-sonnet": "claude-sonnet-4-20250514",
+        "opus": "claude-opus-4-1-20250805",
+        "claude-opus": "claude-opus-4-1-20250805"
+    }
+
+    return alias_map.get(model_lower, model)
 
 
 def detect_provider(model: str) -> tuple[str, str, str]:
@@ -355,6 +512,17 @@ def detect_provider(model: str) -> tuple[str, str, str]:
         if not api_key:
             raise ValueError(f"GEMINI_API_KEY environment variable is required for model '{model}'")
         return "gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", api_key
+
+    # Anthropic models (Claude) - check aliases and full names
+    elif (model_lower.startswith("claude") or
+          model_lower in ["sonnet", "opus", "claude-sonnet", "claude-opus"]):
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError(f"ANTHROPIC_API_KEY environment variable is required for model '{model}'")
+        # Resolve model alias to full name
+        resolved_model = resolve_anthropic_model(model)
+        # Anthropic doesn't have OpenAI-compatible endpoints, but the openai library supports Anthropic
+        return "anthropic", "https://api.anthropic.com/v1", api_key
 
     # Check if model is available in Ollama first (to handle cases like gpt-oss)
     elif validate_ollama_model(model):
@@ -390,21 +558,28 @@ def create_client(model: str) -> OpenAI:
     )
 
 
-def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50) -> None:
+async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None) -> None:
     """Run the agent with the given prompt until completion."""
     messages = [
         {"role": "user", "content": prompt}
     ]
 
-    tools = get_tools_spec()
+    # Show MCP server info if available
+    if mcp_manager:
+        mcp_manager.print_server_info()
+
+    tools = mcp_manager.get_tools_spec() if mcp_manager else []
+
+    # Resolve model name for API call (handles Anthropic aliases)
+    resolved_model = resolve_anthropic_model(model)
 
     while True:
         try:
             response = client.chat.completions.create(
-                model=model,
+                model=resolved_model,
                 messages=messages,
-                tools=tools,
-                tool_choice="auto"
+                tools=tools if tools else None,
+                tool_choice="auto" if tools else None
             )
 
             message = response.choices[0].message
@@ -430,8 +605,11 @@ def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 
                 # Print formatted tool invocation
                 print_tool_invocation(tool_name, tool_args)
 
-                # Execute the tool
-                tool_result = execute_tool(tool_name, tool_args)
+                # Execute the tool via MCP manager
+                if mcp_manager:
+                    tool_result = await mcp_manager.execute_tool(tool_name, tool_args)
+                else:
+                    tool_result = f"Error: No tools available (no MCP configuration)"
 
                 # Print formatted tool result
                 print_tool_result(tool_result, tool_output_limit)
@@ -450,19 +628,31 @@ def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 
 
 def parse_prompt_arg(prompt_arg: str) -> str:
     """Parse the prompt argument - could be a file path or a string."""
-    # Check if it's a file path
-    path = Path(prompt_arg)
-    if path.exists() and path.is_file():
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            print(f"Error reading prompt file {prompt_arg}: {str(e)}", file=sys.stderr)
+    # Quick checks to avoid filesystem operations on obviously non-file strings
+    if (len(prompt_arg) > 255 or  # Most filesystems have 255 char limit
+        '\n' in prompt_arg or     # File paths shouldn't have newlines
+        '?' in prompt_arg or      # Question marks are unlikely in file paths
+        prompt_arg.count(' ') > 5):  # File paths with many spaces are unlikely
+        # This is definitely a string prompt, not a file path
+        return prompt_arg
+
+    # Only check filesystem if it could plausibly be a file path
+    try:
+        path = Path(prompt_arg)
+        if path.exists() and path.is_file():
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except Exception as e:
+                print(f"Error reading prompt file {prompt_arg}: {str(e)}", file=sys.stderr)
+                sys.exit(1)
+        elif '.' in prompt_arg and ('/' in prompt_arg or '\\' in prompt_arg or prompt_arg.endswith('.txt') or prompt_arg.endswith('.md')):
+            # This looks like a file path but the file doesn't exist
+            print(f"Error reading prompt file {prompt_arg}: File does not exist", file=sys.stderr)
             sys.exit(1)
-    elif '.' in prompt_arg and ('/' in prompt_arg or '\\' in prompt_arg or prompt_arg.endswith('.txt') or prompt_arg.endswith('.md')):
-        # This looks like a file path but the file doesn't exist
-        print(f"Error reading prompt file {prompt_arg}: File does not exist", file=sys.stderr)
-        sys.exit(1)
+    except (OSError, ValueError):
+        # If we get filesystem errors, just treat it as a string prompt
+        pass
 
     # It's a string prompt
     return prompt_arg
@@ -477,8 +667,8 @@ def main():
 
     parser.add_argument(
         "--model",
-        default="gpt-3.5-turbo",
-        help="Model to use (default: gpt-3.5-turbo)"
+        default="gemini-2.5-flash",
+        help="Model to use (default: gemini-2.5-flash)"
     )
 
     parser.add_argument(
@@ -497,6 +687,11 @@ def main():
         "--list-models",
         action="store_true",
         help="List all supported models grouped by provider"
+    )
+
+    parser.add_argument(
+        "--config",
+        help="Path to MCP server configuration JSON file"
     )
 
     parser.add_argument(
@@ -524,10 +719,32 @@ def main():
     # Create client and run agent
     try:
         client = create_client(args.model)
-        run_agent(client, args.model, prompt, args.tool_output_limit)
+
+        # Run everything in a single asyncio context
+        asyncio.run(main_async(client, args.model, prompt, args.tool_output_limit, args.config))
+
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1)
+
+
+async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit: int, config_path: Optional[str]):
+    """Main async function that handles MCP setup and agent execution."""
+    mcp_manager = None
+
+    try:
+        # Create and configure MCP manager if config provided
+        if config_path:
+            mcp_manager = MCPManager()
+            await mcp_manager.load_config(config_path)
+
+        # Run the agent
+        await run_agent(client, model, prompt, tool_output_limit, mcp_manager)
+
+    finally:
+        # Always cleanup MCP servers if they exist
+        if mcp_manager:
+            await mcp_manager.shutdown()
 
 
 if __name__ == "__main__":

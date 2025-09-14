@@ -18,6 +18,8 @@ eunice "How many files are in the current directory?"
 # Use different models
 eunice --model="gpt-4" "analyze this codebase"
 eunice --model="gemini-2.5-pro" "what does the main file do?"
+eunice --model="sonnet" "explain the code structure"
+eunice --model="opus" "review this implementation"
 eunice --model="llama3.1" "summarize the project structure"
 
 # List available models
@@ -33,6 +35,7 @@ Set API keys as environment variables:
 ```bash
 export OPENAI_API_KEY="your-openai-key"
 export GEMINI_API_KEY="your-gemini-key"
+export ANTHROPIC_API_KEY="your-anthropic-key"
 # Ollama models run locally (no API key needed)
 ```
 
@@ -48,6 +51,7 @@ export GEMINI_API_KEY="your-gemini-key"
 
 - **OpenAI**: gpt-3.5-turbo, gpt-4, gpt-4o, gpt-5, etc.
 - **Gemini**: gemini-2.5-flash, gemini-2.5-pro, etc.
+- **Anthropic**: claude-sonnet-4-20250514, claude-opus-4-1-20250805, or use aliases: `sonnet`, `opus`, `claude-sonnet`, `claude-opus`
 - **Ollama**: Any locally installed model
 
 ## Development

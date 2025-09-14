@@ -17,14 +17,12 @@ eunice implements an agentic workflow where:
 5. The loop continues until the agent determines the task is complete
 
 ### Tool System
-eunice supports two types of tool integration:
-
-#### Built-in Tools (Hardcoded)
-- **`list_files(path: str)`** - Lists files and directories at the specified path
-- **`read_file(path: str)`** - Reads and returns the contents of a file
+eunice supports tool integration exclusively through Model Context Protocol (MCP) servers:
 
 #### MCP Server Integration
-Supports Model Context Protocol (MCP) servers for extended tool capabilities through JSON configuration. MCP servers run as separate processes and communicate via stdio, providing tools like filesystem access, database connections, API integrations, and more.
+All tool capabilities are provided through Model Context Protocol (MCP) servers configured via JSON configuration files. MCP servers run as separate processes and communicate via stdio, providing tools like filesystem access, database connections, API integrations, memory management, time operations, web fetching, and more.
+
+**No Built-in Tools**: eunice has no hardcoded tools. If no `--config` is specified, no tools are available to the AI model.
 
 All tools return structured data that the AI models can process and act upon.
 
@@ -206,13 +204,36 @@ MCP Tools (with server prefixes):
 
 ## Visual Features
 
+### MCP Server Information Display
+When MCP servers are configured, eunice displays server and tool information at the start of agent output using light yellow framed display:
+
+**MCP Servers & Tools** (Light Yellow):
+```
+┌────────────────────────────────────────────────┐
+│ 🔌 MCP Servers & Tools                         │
+├────────────────────────────────────────────────┤
+│ 📡 filesystem: 14 tools                       │
+│   • filesystem.read_file                      │
+│   • filesystem.write_file                     │
+│   • filesystem.list_directory                 │
+│   • ...and 11 more                            │
+│ 📡 memory: 9 tools                            │
+│   • memory.create_entities                    │
+│   • memory.store                              │
+│   • ...and 7 more                             │
+│ 📡 time: 2 tools                              │
+│   • time.get_current_time                     │
+│   • time.convert_time                         │
+└────────────────────────────────────────────────┘
+```
+
 ### Colored Tool Output
 Tool executions are displayed with colored, framed output:
 
 **Tool Invocations** (Light Blue):
 ```
 ┌────────────────────────────────────────────────┐
-│ 🔧 list_files({"path":"."})                     │
+│ 🔧 filesystem.list_directory({"path":"."})     │
 └────────────────────────────────────────────────┘
 ```
 
@@ -296,7 +317,7 @@ eunice --config=./config.example.json "Get the current time, list files, and sto
 ```json
 [
   {"type": "function", "function": {"name": "time.get_current_time"}},
-  {"type": "function", "function": {"name": "list_files", "arguments": {"path": "."}}},
+  {"type": "function", "function": {"name": "filesystem.list_directory", "arguments": {"path": "."}}},
   {"type": "function", "function": {"name": "memory.store", "arguments": {"key": "project_summary", "value": "..."}}}
 ]
 ```
