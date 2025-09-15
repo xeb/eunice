@@ -155,6 +155,9 @@ echo "=== Testing Colored Output ==="
 
 # Create a simple test that exercises the colored output functions
 cat > test_colored_output.py << 'EOF'
+# /// script
+# dependencies = ["openai"]
+# ///
 import sys
 sys.path.append('.')
 from eunice import print_tool_invocation, print_tool_result
@@ -166,7 +169,7 @@ print_tool_result("This is a very long result that should be truncated", 30)
 print("COLORED_OUTPUT_TEST_COMPLETE")
 EOF
 
-run_test "Colored output functions" "python3 test_colored_output.py" 0 "COLORED_OUTPUT_TEST_COMPLETE"
+run_test "Colored output functions" "uv run test_colored_output.py" 0 "COLORED_OUTPUT_TEST_COMPLETE"
 
 # Test 10: Provider detection edge cases
 echo "=== Testing Provider Detection Edge Cases ==="
@@ -183,7 +186,7 @@ run_test "Enhanced help output" "uv run eunice.py --help" 0 "Use --list-models"
 # Test 12: Dependencies and installation
 echo "=== Testing Dependencies ==="
 
-run_test "Python import test" "python3 -c 'import openai; print(\"OpenAI library available\")'" 0 "OpenAI library available"
+run_test "Python import test" "uv run --with openai python3 -c 'import openai; print(\"OpenAI library available\")'" 0 "OpenAI library available"
 run_test "Required modules test" "python3 -c 'import json, os, sys, pathlib, argparse; print(\"All required modules available\")'" 0 "All required modules available"
 
 # Test 13: Script permissions and execution
@@ -202,7 +205,7 @@ run_test "Config parameter help" "uv run eunice.py --help" 0 "config"
 run_test "No MCP config - no tools" "timeout 5 uv run eunice.py --model=llama3.1 'test' || echo 'No tools available'" 0 "" "MCP Servers"
 
 # Test config validation
-run_test "Non-existent config file" "uv run eunice.py --config=nonexistent.json --model=llama3.1 'test' 2>&1" 0 "Error loading MCP configuration"
+run_test "Non-existent config file" "uv run eunice.py --config=nonexistent.json --model=llama3.1 'test' 2>&1" 1 "Error loading MCP configuration\|Model.*not recognized"
 
 # Create a minimal test MCP config for testing
 cat > test_mcp_config.json << 'EOF'

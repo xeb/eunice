@@ -13,6 +13,13 @@ A generalist, minimalist agent framework for natural language interactions with 
 ## Installation
 
 ```bash
+uv tool install git+https://github.com/xeb/eunice
+```
+
+Or if you want to clone this repo & install locally:
+
+```bash
+git clone https://github.com/xeb/eunice.git
 uv tool install .
 ```
 
