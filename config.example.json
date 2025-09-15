@@ -35,6 +35,12 @@
       "args": [
         "mcp-server-time"
       ]
-	}
+	},
+	"shell": {
+	  "command": "uvx",
+      "args": [
+          "git+https://github.com/emsi/mcp-server-shell"
+      ]
+	} 
   }
 }

@@ -306,6 +306,39 @@ run_test "Explicit config precedence over eunice.json" "timeout 3 uv run eunice.
 rm -f eunice.json custom-config.json
 run_test "No automatic loading when eunice.json absent" "timeout 5 uv run eunice.py --model=llama3.1 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
 
+# Test 18a: --no-mcp Flag Functionality
+echo "=== Testing --no-mcp Flag Functionality ==="
+
+# First recreate eunice.json for testing
+cat > eunice.json << 'EOF'
+{
+  "mcpServers": {
+    "test-server": {
+      "command": "echo",
+      "args": ["test-output"]
+    }
+  }
+}
+EOF
+
+# Test that --no-mcp prevents loading even when eunice.json exists
+run_test "--no-mcp prevents automatic eunice.json loading" "timeout 5 uv run eunice.py --no-mcp --model=llama3.1 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
+
+# Test that --no-mcp and --config together produces error
+run_test "--no-mcp and --config together error" "uv run eunice.py --no-mcp --config=eunice.json --model=llama3.1 'test'" 1 "--no-mcp and --config cannot be used together"
+
+# Test that --config='' functions like --no-mcp (no loading message)
+run_test "--config='' functions like --no-mcp" "timeout 5 uv run eunice.py --config='' --model=llama3.1 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
+
+# Test that --no-mcp option appears in help
+run_test "--no-mcp option in help" "uv run eunice.py --help" 0 "no-mcp"
+
+# Test that --no-mcp description appears in help
+run_test "--no-mcp description in help" "uv run eunice.py --help" 0 "Disable MCP server loading even if eunice.json exists"
+
+# Clean up eunice.json for remaining tests
+rm -f eunice.json
+
 # Test 19: Anthropic Model Support
 echo "=== Testing Anthropic Model Support ==="
 

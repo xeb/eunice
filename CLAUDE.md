@@ -90,9 +90,17 @@ eunice --model="gpt-4" "analyze this codebase"
 eunice --model="gemini-2.5-pro" --prompt=./analysis_request.txt
 eunice --config=./mcp-config.json "analyze my project structure"
 eunice --silent "quiet operation without visual elements"
+eunice --verbose "enable debug output to /tmp/eunice_debug.log"
+eunice --no-mcp "analyze code without any MCP tools"
 
 # With eunice.json in current directory (automatically loaded)
 eunice "What time is it and how many files are here?"
+
+# Disable MCP even if eunice.json exists
+eunice --no-mcp "simple analysis without tools"
+
+# Empty config functions like --no-mcp
+eunice --config='' "no MCP tools available"
 ```
 
 ### Options
@@ -100,7 +108,9 @@ eunice "What time is it and how many files are here?"
 - `--prompt=PROMPT` - Prompt as named argument (can be file path or string)
 - `--tool-output-limit=N` - Limit tool output display (default: 50, 0 = no limit)
 - `--silent` - Suppress all output except AI responses (hide tool calls, model info, MCP displays)
+- `--verbose` - Enable verbose debug output to /tmp/eunice_debug.log
 - `--config=CONFIG_FILE` - Path to JSON configuration file for MCP servers
+- `--no-mcp` - Disable MCP server loading even if eunice.json exists
 - `--list-models` - Show all available models grouped by provider
 - `--help` - Enhanced help with model availability and API key status
 
@@ -116,7 +126,10 @@ eunice supports Model Context Protocol (MCP) servers to extend tool capabilities
 #### Automatic Configuration Loading
 - **Default Behavior**: If a file named `eunice.json` exists in the current directory, it will be automatically loaded as the MCP configuration
 - **Manual Override**: Use `--config=path/to/config.json` to specify a different configuration file
+- **Disabling MCP**: Use `--no-mcp` to disable MCP server loading even if `eunice.json` exists
+- **Empty Config**: Using `--config=''` (empty string) functions the same as `--no-mcp`
 - **Priority**: Explicit `--config` parameter takes precedence over automatic `eunice.json` detection
+- **Validation**: `--no-mcp` and `--config` cannot be used together and will result in an error
 
 #### Configuration File Format
 ```json

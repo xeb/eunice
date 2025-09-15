@@ -8,7 +8,7 @@ A generalist, minimalist agent framework for natural language interactions with 
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **799/2,000 lines** (40.0% used, **60.0% remaining**)
+✅ **Current Status**: `eunice.py` is **862/2,000 lines** (43.1% used, **56.9% remaining**)
 
 ## Installation
 
@@ -45,6 +45,12 @@ eunice --prompt=analysis_request.txt
 
 # Use MCP configuration for extended tool capabilities
 eunice --config=mcp-config.json "What time is it and list the files?"
+
+# Enable verbose debugging output
+eunice --verbose "debug tool execution to /tmp/eunice_debug.log"
+
+# Disable MCP even if eunice.json exists
+eunice --no-mcp "analyze code without any MCP tools"
 ```
 
 ### Configuration
@@ -64,6 +70,8 @@ eunice supports Model Context Protocol (MCP) servers for extended tool capabilit
 **Automatic Configuration**: If a file named `eunice.json` exists in the current directory, it will be automatically loaded as the MCP configuration.
 
 **Manual Configuration**: Use `--config=path/to/config.json` to specify a custom configuration file.
+
+**Disabling MCP**: Use `--no-mcp` to disable MCP server loading even if `eunice.json` exists. You can also use `--config=''` (empty string) for the same effect.
 
 **Example Configuration** (`eunice.json`):
 ```json
@@ -102,6 +110,9 @@ eunice --config=custom-config.json "Fetch data from an API"
 
 # No config (basic file operations only)
 eunice "Analyze this codebase structure"
+
+# Explicitly disable MCP servers
+eunice --no-mcp "Simple analysis without any tools"
 ```
 
 ### Options
@@ -110,6 +121,8 @@ eunice "Analyze this codebase structure"
 - `--prompt=PROMPT` - Prompt as file or string
 - `--tool-output-limit=N` - Limit tool output display (default: 50)
 - `--silent` - Suppress all output except AI responses (hide tool calls and model info)
+- `--verbose` - Enable verbose debug output to /tmp/eunice_debug.log
+- `--no-mcp` - Disable MCP server loading even if eunice.json exists
 - `--list-models` - Show available models
 - `--help` - Show help with API key status
 

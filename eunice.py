@@ -282,6 +282,9 @@ class MCPServer:
                 stderr=asyncio.subprocess.PIPE
             )
 
+            # Give FastMCP time to initialize and output any startup messages
+            await asyncio.sleep(2.0)
+
             # Initialize MCP protocol
             await self._send_message({
                 "jsonrpc": "2.0",
@@ -325,11 +328,19 @@ class MCPServer:
         """Read a JSON-RPC message from the server."""
         if self.process and self.process.stdout:
             try:
-                line = await asyncio.wait_for(self.process.stdout.readline(), timeout=5.0)
+                line = await asyncio.wait_for(self.process.stdout.readline(), timeout=600.0)
                 if line:
-                    return json.loads(line.decode().strip())
-            except (asyncio.TimeoutError, json.JSONDecodeError, Exception):
-                pass
+                    line_str = line.decode().strip()
+                    if line_str.startswith('{'):
+                        return json.loads(line_str)
+                    else:
+                        return await self._read_message()  # Try reading next line
+            except asyncio.TimeoutError:
+                return None
+            except json.JSONDecodeError as e:
+                return None
+            except Exception as e:
+                return None
         return None
 
     async def _discover_tools(self):
@@ -354,11 +365,17 @@ class MCPServer:
                     }
                 }
                 self.tools.append(tool_spec)
+        else:
+            pass
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any], verbose: bool = False) -> str:
         """Call a tool on this server."""
+        import time
+        start_time = time.time()
+
         # Remove server prefix from tool name
         actual_tool_name = tool_name.split(".", 1)[1] if "." in tool_name else tool_name
+
 
         await self._send_message({
             "jsonrpc": "2.0",
@@ -370,7 +387,11 @@ class MCPServer:
             }
         })
 
+
         response = await self._read_message()
+
+        end_time = time.time()
+
         if response and response.get("result"):
             result = response["result"]
             if "content" in result and isinstance(result["content"], list):
@@ -454,8 +475,11 @@ class MCPManager:
         """Return the OpenAI tools specification for all MCP tools."""
         return self.tools
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], verbose: bool = False) -> str:
         """Execute a tool call by routing to the appropriate server."""
+        import time
+        start_time = time.time()
+
         if "." not in tool_name:
             return f"Error: Invalid tool name '{tool_name}' - MCP tools must be prefixed with server name"
 
@@ -463,7 +487,14 @@ class MCPManager:
         if server_name not in self.servers:
             return f"Error: Unknown MCP server '{server_name}'"
 
-        return await self.servers[server_name].call_tool(tool_name, arguments)
+
+        try:
+            result = await self.servers[server_name].call_tool(tool_name, arguments, verbose)
+            end_time = time.time()
+            return result
+        except Exception as e:
+            end_time = time.time()
+            return f"Error: {str(e)}"
 
     def print_server_info(self):
         """Print MCP server and tool information in light yellow frames."""
@@ -582,12 +613,14 @@ def create_client(model: str) -> OpenAI:
 
     return OpenAI(
         api_key=api_key,
-        base_url=base_url
+        base_url=base_url,
+        timeout=600.0  # 10 minutes timeout
     )
 
 
-async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False) -> None:
+async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False) -> None:
     """Run the agent with the given prompt until completion."""
+
     messages = [
         {"role": "user", "content": prompt}
     ]
@@ -601,6 +634,7 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
     print_model_info(model, provider, silent)
 
     tools = mcp_manager.get_tools_spec() if mcp_manager else []
+
 
     # Resolve model name for API call (handles Anthropic aliases)
     resolved_model = resolve_anthropic_model(model)
@@ -638,8 +672,12 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
                 print_tool_invocation(tool_name, tool_args, silent)
 
                 # Execute the tool via MCP manager
+
                 if mcp_manager:
-                    tool_result = await mcp_manager.execute_tool(tool_name, tool_args)
+                    import time
+                    start_time = time.time()
+                    tool_result = await mcp_manager.execute_tool(tool_name, tool_args, verbose)
+                    end_time = time.time()
                 else:
                     tool_result = f"Error: No tools available (no MCP configuration)"
 
@@ -739,6 +777,18 @@ def main():
     )
 
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose debug output to /tmp/eunice_debug.log"
+    )
+
+    parser.add_argument(
+        "--no-mcp",
+        action="store_true",
+        help="Disable MCP server loading even if eunice.json exists"
+    )
+
+    parser.add_argument(
         "prompt_positional",
         nargs="?",
         help="Prompt as positional argument (can be a file path or string)"
@@ -750,6 +800,11 @@ def main():
     if args.list_models:
         print_models_list()
         sys.exit(0)
+
+    # Validate --no-mcp and --config arguments
+    if args.no_mcp and args.config is not None:
+        print("Error: --no-mcp and --config cannot be used together", file=sys.stderr)
+        sys.exit(1)
 
     # Determine the prompt
     if args.prompt is not None:
@@ -765,19 +820,27 @@ def main():
         client = create_client(args.model)
 
         # Determine config path: explicit --config takes precedence, then check for eunice.json in current working directory
-        config_path = args.config
-        if config_path is None and Path.cwd().joinpath("eunice.json").exists():
-            config_path = str(Path.cwd().joinpath("eunice.json"))
+        config_path = None
+
+        if not args.no_mcp:
+            if args.config is not None:
+                # Handle empty config parameter (--config='' should function like --no-mcp)
+                if args.config.strip() == '':
+                    config_path = None
+                else:
+                    config_path = args.config
+            elif Path.cwd().joinpath("eunice.json").exists():
+                config_path = str(Path.cwd().joinpath("eunice.json"))
 
         # Run everything in a single asyncio context
-        asyncio.run(main_async(client, args.model, prompt, args.tool_output_limit, config_path, args.silent))
+        asyncio.run(main_async(client, args.model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose))
 
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 
-async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit: int, config_path: Optional[str], silent: bool = False):
+async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit: int, config_path: Optional[str], silent: bool = False, verbose: bool = False):
     """Main async function that handles MCP setup and agent execution."""
     mcp_manager = None
 
@@ -788,7 +851,7 @@ async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit:
             await mcp_manager.load_config(config_path, silent)
 
         # Run the agent
-        await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent)
+        await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose)
 
     finally:
         # Always cleanup MCP servers if they exist
