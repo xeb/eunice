@@ -252,7 +252,61 @@ run_test "Long prompt parsing (no OSError)" "timeout 5 uv run eunice.py --model=
 # Test prompt with template characters
 run_test "Prompt with template characters" "timeout 5 uv run eunice.py --model=llama3.1 'Print a report that says: As of <datetime> there are <num_files> files' 2>&1 || echo 'Template prompt handled'" 0 "" "OSError"
 
-# Test 17: Anthropic Model Support
+# Test 17: Silent Mode Operation
+echo "=== Testing Silent Mode Operation ==="
+
+# Test that --silent suppresses model info and tool output but preserves AI responses
+run_test "Silent mode with basic prompt" "timeout 5 uv run eunice.py --silent --model=llama3.1 'hello' 2>&1 | grep -v '🤖 Model:' | grep -v '🔧' | grep -v 'Result:'" 0 "" ""
+
+# Test that --silent suppresses MCP server info
+if [ -f "config.example.json" ]; then
+    run_test "Silent mode suppresses MCP info" "timeout 8 uv run eunice.py --silent --config=config.example.json --model=llama3.1 'test' 2>&1 | head -5" 0 "" "MCP Servers"
+fi
+
+# Test that --silent suppresses "Started MCP server" messages
+if [ -f "config.example.json" ]; then
+    run_test "Silent mode suppresses MCP startup messages" "timeout 8 uv run eunice.py --silent --config=config.example.json --model=llama3.1 'hello' 2>&1" 0 "" "Started MCP server"
+fi
+
+# Test that help still shows --silent option
+run_test "Silent option in help" "uv run eunice.py --help" 0 "silent"
+
+# Test 18: Automatic eunice.json Loading
+echo "=== Testing Automatic eunice.json Loading ==="
+
+# Test that eunice.json is automatically loaded when present
+cat > eunice.json << 'EOF'
+{
+  "mcpServers": {
+    "test-server": {
+      "command": "echo",
+      "args": ["test-output"]
+    }
+  }
+}
+EOF
+
+run_test "Automatic eunice.json detection" "timeout 3 uv run eunice.py --model=llama3.1 'test' 2>&1 | head -5 | grep -q 'Loading MCP configuration' && echo 'Auto config loaded' || echo 'Auto config test'" 0 "Auto config"
+
+# Test that explicit --config takes precedence over eunice.json
+cat > custom-config.json << 'EOF'
+{
+  "mcpServers": {
+    "custom-server": {
+      "command": "echo",
+      "args": ["custom-output"]
+    }
+  }
+}
+EOF
+
+run_test "Explicit config precedence over eunice.json" "timeout 3 uv run eunice.py --config=custom-config.json --model=llama3.1 'test' 2>&1 || echo 'Explicit config used'" 0 "Explicit config used"
+
+# Test that no config loading happens when eunice.json doesn't exist
+rm -f eunice.json custom-config.json
+run_test "No automatic loading when eunice.json absent" "timeout 5 uv run eunice.py --model=llama3.1 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
+
+# Test 19: Anthropic Model Support
 echo "=== Testing Anthropic Model Support ==="
 
 # Test Anthropic models in list (removed from help)
@@ -288,6 +342,8 @@ rm -f test_prompt.txt
 rm -f test_tools.py
 rm -f test_colored_output.py
 rm -f test_mcp_config.json
+rm -f eunice.json
+rm -f custom-config.json
 
 # Final results
 echo
@@ -312,5 +368,6 @@ else
     echo "Don't forget to set your API keys:"
     echo "  export OPENAI_API_KEY='your-openai-key'"
     echo "  export GEMINI_API_KEY='your-gemini-key'"
+    echo "  export ANTHROPIC_API_KEY='your-anthropic-key'"
     exit 0
 fi

@@ -10,6 +10,8 @@ eunice - Agentic CLI runner
 Usage: eunice [--model=MODEL] [--prompt=PROMPT] [prompt]
 """
 
+__version__ = "1.1.0"
+
 import argparse
 import asyncio
 import json
@@ -46,8 +48,11 @@ class Colors:
     LIGHT_CYAN = '\033[96m'
     LIGHT_WHITE = '\033[97m'
 
-def print_tool_invocation(tool_name: str, tool_args: Dict[str, Any]) -> None:
+def print_tool_invocation(tool_name: str, tool_args: Dict[str, Any], silent: bool = False) -> None:
     """Print a formatted tool invocation with light blue color and framing."""
+    if silent:
+        return
+
     args_str = json.dumps(tool_args, indent=None, separators=(',', ':'))
 
     # Create the frame
@@ -58,8 +63,10 @@ def print_tool_invocation(tool_name: str, tool_args: Dict[str, Any]) -> None:
     print(f"{Colors.LIGHT_BLUE}│ {Colors.BOLD}{content:<{frame_width - 4}} {Colors.RESET}{Colors.LIGHT_BLUE}│{Colors.RESET}")
     print(f"{Colors.LIGHT_BLUE}└{'─' * (frame_width - 2)}┘{Colors.RESET}")
 
-def print_tool_result(result: str, output_limit: int = 50) -> None:
+def print_tool_result(result: str, output_limit: int = 50, silent: bool = False) -> None:
     """Print a formatted tool result with green color and framing."""
+    if silent:
+        return
     original_length = len(result)
     truncated_chars = 0
 
@@ -103,6 +110,19 @@ def print_tool_result(result: str, output_limit: int = 50) -> None:
 
     print(f"{Colors.GREEN}└{'─' * (frame_width - 2)}┘{Colors.RESET}")
     print()  # Add spacing after result
+
+def print_model_info(model: str, provider: str, silent: bool = False) -> None:
+    """Print a formatted model information window with light yellow color and framing."""
+    if silent:
+        return
+
+    # Create the content
+    content = f"🤖 Model: {model} ({provider})"
+    frame_width = max(50, len(content) + 4)
+
+    print(f"\n{Colors.LIGHT_YELLOW}┌{'─' * (frame_width - 2)}┐{Colors.RESET}")
+    print(f"{Colors.LIGHT_YELLOW}│ {Colors.BOLD}{content:<{frame_width - 4}} {Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
+    print(f"{Colors.LIGHT_YELLOW}└{'─' * (frame_width - 2)}┘{Colors.RESET}\n")
 
 
 def get_ollama_models() -> List[str]:
@@ -396,31 +416,39 @@ class MCPManager:
         self.servers = {}
         self.tools = []
 
-    async def load_config(self, config_path: str):
+    async def load_config(self, config_path: str, silent: bool = False):
         """Load MCP server configuration from file."""
+        if not silent:
+            print(f"Loading MCP configuration from: {config_path}", file=sys.stderr)
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
 
             if "mcpServers" not in config:
-                print(f"Warning: No 'mcpServers' section found in {config_path}", file=sys.stderr)
+                if not silent:
+                    print(f"Warning: No 'mcpServers' section found in {config_path}", file=sys.stderr)
                 return
 
             for server_name, server_config in config["mcpServers"].items():
                 if "command" not in server_config or "args" not in server_config:
-                    print(f"Warning: Invalid configuration for server {server_name}", file=sys.stderr)
+                    if not silent:
+                        print(f"Warning: Invalid configuration for server {server_name}", file=sys.stderr)
                     continue
 
                 server = MCPServer(server_name, server_config["command"], server_config["args"])
                 if await server.start():
                     self.servers[server_name] = server
                     self.tools.extend(server.tools)
-                    print(f"Started MCP server: {server_name}", file=sys.stderr)
+                    if not silent:
+                        print(f"Started MCP server: {server_name}", file=sys.stderr)
                 else:
-                    print(f"Failed to start MCP server: {server_name}", file=sys.stderr)
+                    if not silent:
+                        print(f"Failed to start MCP server: {server_name}", file=sys.stderr)
 
         except Exception as e:
-            print(f"Error loading MCP configuration: {e}", file=sys.stderr)
+            if not silent:
+                print(f"Error loading MCP configuration: {e}", file=sys.stderr)
+            raise
 
     def get_tools_spec(self) -> List[Dict[str, Any]]:
         """Return the OpenAI tools specification for all MCP tools."""
@@ -558,15 +586,19 @@ def create_client(model: str) -> OpenAI:
     )
 
 
-async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None) -> None:
+async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False) -> None:
     """Run the agent with the given prompt until completion."""
     messages = [
         {"role": "user", "content": prompt}
     ]
 
     # Show MCP server info if available
-    if mcp_manager:
+    if mcp_manager and not silent:
         mcp_manager.print_server_info()
+
+    # Show model info
+    provider, _, _ = detect_provider(model)
+    print_model_info(model, provider, silent)
 
     tools = mcp_manager.get_tools_spec() if mcp_manager else []
 
@@ -603,7 +635,7 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
                 tool_args = json.loads(tool_call.function.arguments)
 
                 # Print formatted tool invocation
-                print_tool_invocation(tool_name, tool_args)
+                print_tool_invocation(tool_name, tool_args, silent)
 
                 # Execute the tool via MCP manager
                 if mcp_manager:
@@ -612,7 +644,7 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
                     tool_result = f"Error: No tools available (no MCP configuration)"
 
                 # Print formatted tool result
-                print_tool_result(tool_result, tool_output_limit)
+                print_tool_result(tool_result, tool_output_limit, silent)
 
                 # Add tool result to messages
                 messages.append({
@@ -666,6 +698,12 @@ def main():
     )
 
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"eunice {__version__}"
+    )
+
+    parser.add_argument(
         "--model",
         default="gemini-2.5-flash",
         help="Model to use (default: gemini-2.5-flash)"
@@ -695,6 +733,12 @@ def main():
     )
 
     parser.add_argument(
+        "--silent",
+        action="store_true",
+        help="Suppress all output except AI responses (hide tool calls and model info)"
+    )
+
+    parser.add_argument(
         "prompt_positional",
         nargs="?",
         help="Prompt as positional argument (can be a file path or string)"
@@ -720,15 +764,20 @@ def main():
     try:
         client = create_client(args.model)
 
+        # Determine config path: explicit --config takes precedence, then check for eunice.json in current working directory
+        config_path = args.config
+        if config_path is None and Path.cwd().joinpath("eunice.json").exists():
+            config_path = str(Path.cwd().joinpath("eunice.json"))
+
         # Run everything in a single asyncio context
-        asyncio.run(main_async(client, args.model, prompt, args.tool_output_limit, args.config))
+        asyncio.run(main_async(client, args.model, prompt, args.tool_output_limit, config_path, args.silent))
 
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 
-async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit: int, config_path: Optional[str]):
+async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit: int, config_path: Optional[str], silent: bool = False):
     """Main async function that handles MCP setup and agent execution."""
     mcp_manager = None
 
@@ -736,10 +785,10 @@ async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit:
         # Create and configure MCP manager if config provided
         if config_path:
             mcp_manager = MCPManager()
-            await mcp_manager.load_config(config_path)
+            await mcp_manager.load_config(config_path, silent)
 
         # Run the agent
-        await run_agent(client, model, prompt, tool_output_limit, mcp_manager)
+        await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent)
 
     finally:
         # Always cleanup MCP servers if they exist

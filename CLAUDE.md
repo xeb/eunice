@@ -51,6 +51,20 @@ pip install openai
 python eunice.py "your prompt here"
 ```
 
+### Troubleshooting Installation
+
+If the `eunice` command isn't working or you're getting an older version without recent features (like `--silent`), you may need to uninstall and reinstall:
+
+```bash
+# Uninstall the current version
+uv tool uninstall eunice
+
+# Reinstall the latest version
+uv tool install .
+```
+
+This ensures you have the most recent version with all available features.
+
 ## Configuration
 
 ### Environment Variables
@@ -75,12 +89,17 @@ eunice "How many files are in the current directory?"
 eunice --model="gpt-4" "analyze this codebase"
 eunice --model="gemini-2.5-pro" --prompt=./analysis_request.txt
 eunice --config=./mcp-config.json "analyze my project structure"
+eunice --silent "quiet operation without visual elements"
+
+# With eunice.json in current directory (automatically loaded)
+eunice "What time is it and how many files are here?"
 ```
 
 ### Options
 - `--model=MODEL` - Specify AI model (default: gpt-3.5-turbo)
 - `--prompt=PROMPT` - Prompt as named argument (can be file path or string)
 - `--tool-output-limit=N` - Limit tool output display (default: 50, 0 = no limit)
+- `--silent` - Suppress all output except AI responses (hide tool calls, model info, MCP displays)
 - `--config=CONFIG_FILE` - Path to JSON configuration file for MCP servers
 - `--list-models` - Show all available models grouped by provider
 - `--help` - Enhanced help with model availability and API key status
@@ -92,7 +111,12 @@ eunice --config=./mcp-config.json "analyze my project structure"
 
 ### MCP Server Configuration
 
-The `--config` option allows integration with Model Context Protocol (MCP) servers to extend tool capabilities beyond the built-in file operations.
+eunice supports Model Context Protocol (MCP) servers to extend tool capabilities beyond the built-in file operations.
+
+#### Automatic Configuration Loading
+- **Default Behavior**: If a file named `eunice.json` exists in the current directory, it will be automatically loaded as the MCP configuration
+- **Manual Override**: Use `--config=path/to/config.json` to specify a different configuration file
+- **Priority**: Explicit `--config` parameter takes precedence over automatic `eunice.json` detection
 
 #### Configuration File Format
 ```json
@@ -203,6 +227,16 @@ MCP Tools (with server prefixes):
 - **Tool name conflicts**: Warning when MCP tool names conflict with built-in tools (MCP tools take precedence with prefix)
 
 ## Visual Features
+
+### Model Information Display
+eunice displays the active model and provider at the start of each session using light yellow framed display:
+
+**Model Information** (Light Yellow):
+```
+┌─────────────────────────────────────────────────────┐
+│ 🤖 Model: llama3.1 (ollama)                        │
+└─────────────────────────────────────────────────────┘
+```
 
 ### MCP Server Information Display
 When MCP servers are configured, eunice displays server and tool information at the start of agent output using light yellow framed display:
@@ -358,12 +392,39 @@ This prevents issues like `gpt-oss` being misrouted to OpenAI when it's an Ollam
 
 ### Running Tests
 ```bash
-./test.sh  # Full test suite (32 tests)
+./test.sh         # Full test suite (48 tests)
+./test-docker.sh  # Docker test environment
 ```
+
+#### Test Coverage
+- **48 comprehensive tests** covering all functionality
+- Provider detection (OpenAI, Gemini, Anthropic, Ollama)
+- Model validation and routing
+- MCP server integration and tool functionality
+- Colored output and visual display features
+- Silent mode operation
+- Error handling and edge cases
+- Command line argument parsing
+- Long prompt handling and template characters
+
+#### Docker Testing Environment
+The Docker test setup provides:
+- **Clean environment testing** using Alpine Linux
+- **Host Ollama connectivity** via port binding to localhost:11434
+- **API key pass-through** for OpenAI/Gemini testing
+- **Isolated dependency validation** ensuring clean installs work
+- **Comprehensive test execution** with full suite coverage
+
+Docker test configuration:
+- Uses `host.docker.internal:host-gateway` for host connectivity
+- Sets `OLLAMA_HOST="http://host.docker.internal:11434"` for model access
+- Copies only essential files: `eunice.py`, `pyproject.toml`, `test.sh`, `README.md`
+- Validates `uv tool install .` works in clean environment
 
 ### Local Development
 ```bash
 uv run eunice.py --model="llama3.1" "test prompt"
+uv run eunice.py --silent "quiet operation"  # Silent mode
 ```
 
 ### Installation Testing
