@@ -104,7 +104,7 @@ eunice --config='' "no MCP tools available"
 ```
 
 ### Options
-- `--model=MODEL` - Specify AI model (default: gpt-3.5-turbo)
+- `--model=MODEL` - Specify AI model (default: gemini-2.5-flash)
 - `--prompt=PROMPT` - Prompt as named argument (can be file path or string)
 - `--tool-output-limit=N` - Limit tool output display (default: 50, 0 = no limit)
 - `--silent` - Suppress all output except AI responses (hide tool calls, model info, MCP displays)
@@ -112,6 +112,7 @@ eunice --config='' "no MCP tools available"
 - `--config=CONFIG_FILE` - Path to JSON configuration file for MCP servers
 - `--no-mcp` - Disable MCP server loading even if eunice.json exists
 - `--list-models` - Show all available models grouped by provider
+- `--version` - Show program version number
 - `--help` - Enhanced help with model availability and API key status
 
 ### Prompt Handling
@@ -330,6 +331,66 @@ Comprehensive test coverage including:
 - File errors: Distinguishes between file paths and string prompts
 - Ollama integration: Validates model availability via subprocess calls
 
+## Examples
+
+eunice includes practical examples demonstrating various capabilities and use cases:
+
+### Multi-Agent Story Writing (`examples/multi_agent/`)
+
+This sophisticated example demonstrates a multi-agent workflow where eunice orchestrates different "agents" to collaboratively create and refine content:
+
+**Workflow:**
+1. **Writer Agent** - Creates initial cyberpunk stories based on prompts
+2. **Editor Agent** - Improves story pacing, character development, and narrative flow
+3. **Publisher Agent** - Evaluates stories and decides if they meet publication standards
+4. **Memory System** - Tracks iterations, feedback, and progress across multiple rounds
+
+**Key Features:**
+- Complex multi-step agentic workflows
+- File I/O operations via MCP filesystem server
+- Memory persistence for tracking state between iterations
+- Iterative improvement based on structured feedback
+- Automatic retry logic for rejected stories (up to 3 iterations)
+
+**Usage:**
+```bash
+cd examples/multi_agent && ./run.sh
+```
+
+**Files Generated:**
+- `story.txt` - Initial story from writer agent
+- `story_edited.txt` - Improved version from editor agent
+- `story_publisher_result.txt` - Publisher evaluation (TRUE/FALSE/REJECTED)
+
+### Simple Time Operations (`examples/simple_time/`)
+
+Basic time queries demonstrating MCP time server integration:
+
+```bash
+cd examples/simple_time && ./run_default_config.sh  # Uses automatic config discovery
+cd examples/simple_time && ./run_explicit_config.sh  # Uses explicit config
+```
+
+**Demonstrates:**
+- Automatic configuration discovery (`eunice.json`)
+- Manual configuration specification
+- Time/date MCP server integration
+- Simple tool calling workflows
+
+### Shell Command Execution (`examples/shell/`)
+
+Execute shell commands through eunice using MCP shell server:
+
+```bash
+cd examples/shell && ./test.sh
+```
+
+**Shows:**
+- Shell command execution via MCP
+- Script automation capabilities
+- System interaction through eunice
+- Integration with external tools and scripts
+
 ## Usage Patterns
 
 ### File Analysis
@@ -405,12 +466,12 @@ This prevents issues like `gpt-oss` being misrouted to OpenAI when it's an Ollam
 
 ### Running Tests
 ```bash
-./test.sh         # Full test suite (48 tests)
+./test.sh         # Full test suite (20 tests)
 ./test-docker.sh  # Docker test environment
 ```
 
 #### Test Coverage
-- **48 comprehensive tests** covering all functionality
+- **20 comprehensive tests** covering all functionality
 - Provider detection (OpenAI, Gemini, Anthropic, Ollama)
 - Model validation and routing
 - MCP server integration and tool functionality

@@ -93,6 +93,8 @@ eunice supports Model Context Protocol (MCP) servers for extended tool capabilit
 }
 ```
 
+See `config.example.json` for a comprehensive configuration with all available MCP servers.
+
 **Available MCP Servers**:
 - **filesystem**: File operations (read, write, list directories)
 - **time**: Time and date operations
@@ -124,6 +126,7 @@ eunice --no-mcp "Simple analysis without any tools"
 - `--verbose` - Enable verbose debug output to /tmp/eunice_debug.log
 - `--no-mcp` - Disable MCP server loading even if eunice.json exists
 - `--list-models` - Show available models
+- `--version` - Show program version number
 - `--help` - Show help with API key status
 
 ## Supported Models
@@ -146,7 +149,7 @@ eunice includes a comprehensive test suite to validate functionality:
 ```
 
 ### Test Coverage
-- **63 comprehensive tests** covering all features
+- **20 comprehensive tests** covering all features
 - Provider detection (OpenAI, Gemini, Anthropic, Ollama)
 - Model validation and routing
 - MCP server integration
@@ -161,6 +164,55 @@ The Docker test environment:
 - Connects to host Ollama via port binding
 - Validates clean installation process
 - Tests all functionality in isolated environment
+
+## Examples
+
+eunice includes several practical examples demonstrating different use cases:
+
+### 🤖 Multi-Agent Story Writing (`examples/multi_agent/`)
+A sophisticated example showing how eunice can orchestrate multiple "agents" to collaboratively create content:
+- **Writer agent**: Creates initial cyberpunk stories
+- **Editor agent**: Improves story pacing and character development
+- **Publisher agent**: Evaluates if stories meet publication standards
+- **Memory system**: Tracks iterations and feedback across multiple rounds
+
+```bash
+cd examples/multi_agent && ./run.sh
+```
+
+This example demonstrates:
+- Complex multi-step workflows
+- File I/O operations via MCP filesystem server
+- Memory persistence for tracking state
+- Iterative improvement based on feedback
+
+### ⏰ Simple Time Operations (`examples/simple_time/`)
+Basic time queries using MCP time server:
+
+```bash
+cd examples/simple_time && ./run_default_config.sh
+# or
+cd examples/simple_time && ./run_explicit_config.sh
+```
+
+Demonstrates:
+- Automatic config discovery (`eunice.json`)
+- Manual config specification
+- Time/date MCP server integration
+
+### 🖥️ Shell Command Execution (`examples/shell/`)
+Execute shell commands through eunice using MCP shell server:
+
+```bash
+cd examples/shell && ./test.sh
+```
+
+Shows:
+- Shell command execution via MCP
+- Script automation
+- System interaction capabilities
+
+Each example includes its own configuration files and documentation, making them perfect starting points for your own eunice projects.
 
 ## Development
 
@@ -179,5 +231,13 @@ uv tool uninstall eunice
 ## Philosophy
 
 eunice follows the principle of "sophisticated simplicity" - providing powerful agentic capabilities while maintaining a minimal, readable codebase that can be easily understood and modified.
+
+## Getting Started
+
+1. **Install eunice**: `uv tool install git+https://github.com/xeb/eunice`
+2. **Set API keys**: Export your preferred AI service API key (OpenAI, Gemini, or Anthropic)
+3. **Try basic usage**: `eunice "Hello, how are you?"`
+4. **Explore examples**: Check out the `examples/` directory for practical use cases
+5. **Create your config**: Copy `config.example.json` to `eunice.json` and customize
 
 For detailed documentation, see [CLAUDE.md](CLAUDE.md).
