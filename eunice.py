@@ -10,7 +10,7 @@ eunice - Agentic CLI runner
 Usage: eunice [--model=MODEL] [--prompt=PROMPT] [prompt]
 """
 
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 
 import argparse
 import asyncio
@@ -18,8 +18,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, AsyncGenerator
+
 
 import openai
 from openai import OpenAI
@@ -137,9 +139,7 @@ def get_ollama_models() -> List[str]:
             if line.strip():
                 # Model name is the first column, split by whitespace
                 model_name = line.split()[0]
-                # Remove the tag part (everything after :)
-                if ':' in model_name:
-                    model_name = model_name.split(':')[0]
+                # Keep the full model name including tags (e.g., deepseek-r1:8b)
                 models.append(model_name)
 
         return models
@@ -434,41 +434,42 @@ class MCPServer:
 class MCPManager:
     """Manages multiple MCP servers."""
     def __init__(self):
-        self.servers = {}
+        self.servers = {}  # MCP servers
         self.tools = []
 
     async def load_config(self, config_path: str, silent: bool = False):
         """Load MCP server configuration from file."""
         if not silent:
-            print(f"Loading MCP configuration from: {config_path}", file=sys.stderr)
+            print(f"Loading configuration from: {config_path}", file=sys.stderr)
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
 
+            # Load MCP servers
+            if "mcpServers" in config:
+                for server_name, server_config in config["mcpServers"].items():
+                    if "command" not in server_config or "args" not in server_config:
+                        if not silent:
+                            print(f"Warning: Invalid configuration for MCP server {server_name}", file=sys.stderr)
+                        continue
+
+                    server = MCPServer(server_name, server_config["command"], server_config["args"])
+                    if await server.start():
+                        self.servers[server_name] = server
+                        self.tools.extend(server.tools)
+                        if not silent:
+                            print(f"Started MCP server: {server_name}", file=sys.stderr)
+                    else:
+                        if not silent:
+                            print(f"Failed to start MCP server: {server_name}", file=sys.stderr)
+
             if "mcpServers" not in config:
                 if not silent:
                     print(f"Warning: No 'mcpServers' section found in {config_path}", file=sys.stderr)
-                return
-
-            for server_name, server_config in config["mcpServers"].items():
-                if "command" not in server_config or "args" not in server_config:
-                    if not silent:
-                        print(f"Warning: Invalid configuration for server {server_name}", file=sys.stderr)
-                    continue
-
-                server = MCPServer(server_name, server_config["command"], server_config["args"])
-                if await server.start():
-                    self.servers[server_name] = server
-                    self.tools.extend(server.tools)
-                    if not silent:
-                        print(f"Started MCP server: {server_name}", file=sys.stderr)
-                else:
-                    if not silent:
-                        print(f"Failed to start MCP server: {server_name}", file=sys.stderr)
 
         except Exception as e:
             if not silent:
-                print(f"Error loading MCP configuration: {e}", file=sys.stderr)
+                print(f"Error loading configuration: {e}", file=sys.stderr)
             raise
 
     def get_tools_spec(self) -> List[Dict[str, Any]]:
@@ -477,34 +478,38 @@ class MCPManager:
 
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], verbose: bool = False) -> str:
         """Execute a tool call by routing to the appropriate server."""
-        import time
         start_time = time.time()
 
         if "." not in tool_name:
-            return f"Error: Invalid tool name '{tool_name}' - MCP tools must be prefixed with server name"
+            return f"Error: Invalid tool name '{tool_name}' - tools must be prefixed with server name"
 
         server_name = tool_name.split(".", 1)[0]
-        if server_name not in self.servers:
-            return f"Error: Unknown MCP server '{server_name}'"
-
 
         try:
-            result = await self.servers[server_name].call_tool(tool_name, arguments, verbose)
-            end_time = time.time()
-            return result
+            # Check MCP servers first
+            if server_name in self.servers:
+                result = await self.servers[server_name].call_tool(tool_name, arguments, verbose)
+                end_time = time.time()
+                return result
+
+
+            else:
+                return f"Error: Unknown server '{server_name}'"
+
         except Exception as e:
             end_time = time.time()
             return f"Error: {str(e)}"
 
     def print_server_info(self):
-        """Print MCP server and tool information in light yellow frames."""
+        """Print MCP server tool information in light yellow frames."""
         if not self.servers:
             return
 
         print(f"\n{Colors.LIGHT_YELLOW}┌{'─' * 48}┐{Colors.RESET}")
-        print(f"{Colors.LIGHT_YELLOW}│ {Colors.BOLD}🔌 MCP Servers & Tools{' ' * 25}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
+        print(f"{Colors.LIGHT_YELLOW}│ {Colors.BOLD}🔌 Servers & Tools{' ' * 31}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
         print(f"{Colors.LIGHT_YELLOW}├{'─' * 48}┤{Colors.RESET}")
 
+        # Print MCP servers
         for server_name, server in self.servers.items():
             server_line = f"📡 {server_name}: {len(server.tools)} tools"
             padding = 48 - 3 - len(server_line)
@@ -518,15 +523,19 @@ class MCPManager:
                 padding = 48 - 3 - len(tool_line)
                 print(f"{Colors.LIGHT_YELLOW}│ {Colors.DIM}{tool_line}{' ' * padding}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
 
+
         print(f"{Colors.LIGHT_YELLOW}└{'─' * 48}┘{Colors.RESET}")
         print()
 
     async def shutdown(self):
-        """Shutdown all MCP servers."""
+        """Shutdown all MCP and streaming servers."""
         # Shut down all servers concurrently and suppress errors
         shutdown_tasks = []
+
+        # Add MCP server shutdown tasks
         for server in self.servers.values():
             shutdown_tasks.append(server.stop())
+
 
         if shutdown_tasks:
             try:

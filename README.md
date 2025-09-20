@@ -8,7 +8,7 @@ A generalist, minimalist agent framework for natural language interactions with 
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **862/2,000 lines** (43.1% used, **56.9% remaining**)
+✅ **Current Status**: `eunice.py` is **871/2,000 lines** (43.6% used, **56.4% remaining**)
 
 ## Installation
 

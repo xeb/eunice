@@ -152,20 +152,6 @@ eunice supports Model Context Protocol (MCP) servers to extend tool capabilities
         "."
       ]
     },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-sequential-thinking",
-        "."
-      ]
-    },
-    "fetch": {
-      "command": "uvx",
-      "args": [
-        "mcp-server-fetch"
-      ]
-    },
     "time": {
       "command": "uvx",
       "args": [
@@ -390,6 +376,7 @@ cd examples/shell && ./test.sh
 - Script automation capabilities
 - System interaction through eunice
 - Integration with external tools and scripts
+
 
 ## Usage Patterns
 
