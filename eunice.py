@@ -19,6 +19,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, AsyncGenerator
 
@@ -128,22 +130,17 @@ def print_model_info(model: str, provider: str, silent: bool = False) -> None:
 
 
 def get_ollama_models() -> List[str]:
-    """Get list of available Ollama models by running 'ollama list'."""
+    """Get list of available Ollama models via HTTP API."""
     try:
-        result = subprocess.run(['ollama', 'list'], capture_output=True, text=True, check=True)
-        lines = result.stdout.strip().split('\n')
-
-        # Skip header line and extract model names
-        models = []
-        for line in lines[1:]:  # Skip the header
-            if line.strip():
-                # Model name is the first column, split by whitespace
-                model_name = line.split()[0]
-                # Keep the full model name including tags (e.g., deepseek-r1:8b)
-                models.append(model_name)
-
-        return models
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Use the Ollama API endpoint
+        with urllib.request.urlopen('http://localhost:11434/api/tags') as response:
+            data = json.loads(response.read().decode())
+            models = []
+            for model in data.get('models', []):
+                # Extract the model name (which includes tags like :8b, :latest)
+                models.append(model['name'])
+            return models
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError):
         return []
 
 

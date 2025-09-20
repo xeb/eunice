@@ -8,7 +8,7 @@ A generalist, minimalist agent framework for natural language interactions with 
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **871/2,000 lines** (43.6% used, **56.4% remaining**)
+✅ **Current Status**: `eunice.py` is **868/2,000 lines** (43.4% used, **56.6% remaining**)
 
 ## Installation
 
@@ -51,6 +51,20 @@ eunice --verbose "debug tool execution to /tmp/eunice_debug.log"
 
 # Disable MCP even if eunice.json exists
 eunice --no-mcp "analyze code without any MCP tools"
+```
+
+### Docker Usage
+You can also use the official Docker image instead of installing eunice locally:
+
+```bash
+# List available models (uses host Ollama API)
+docker run --rm --network host xebxeb/eunice eunice --list-models
+
+# Run with Ollama models (connects to host Ollama web API)
+docker run --rm --network host xebxeb/eunice eunice --model="gpt-oss:latest" "What is best in life?"
+
+# Run with cloud models (pass API keys as environment variables)
+docker run --rm -e OPENAI_API_KEY="$OPENAI_API_KEY" xebxeb/eunice eunice --model="gpt-4" "Hello world"
 ```
 
 ### Configuration

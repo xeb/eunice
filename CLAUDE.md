@@ -298,7 +298,12 @@ The `--help` command shows:
 ### Dependencies
 - `openai` - Unified API client for all providers (OpenAI, Gemini via OpenAI-compatible endpoints, Ollama)
 - `mcp` - Model Context Protocol client library for MCP server communication (optional)
-- Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`, `asyncio`
+- Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`, `asyncio`, `urllib.request`
+
+### Process Management
+- **MCP Servers**: `subprocess` is used exclusively for starting and managing MCP server processes via `asyncio.create_subprocess_exec()`
+- **Ollama Integration**: Uses HTTP API calls to `localhost:11434/api/tags` instead of CLI subprocess calls
+- **No External CLI Dependencies**: All external service interactions use proper APIs (HTTP) rather than subprocess calls
 
 ### Testing
 Comprehensive test coverage including:
@@ -421,6 +426,22 @@ eunice --config=./config.example.json "Get the current time, list files, and sto
 ```bash
 eunice --list-models                    # See all available models
 eunice --help                          # Check API key status
+```
+
+### Docker Usage
+```bash
+# List available models (connects to host Ollama API)
+docker run --rm --network host xebxeb/eunice eunice --list-models
+
+# Use Ollama models (connects to host Ollama web API at localhost:11434)
+docker run --rm --network host xebxeb/eunice eunice --model="gpt-oss" "What is best in life?"
+
+# Use cloud models with API keys
+docker run --rm -e OPENAI_API_KEY="$OPENAI_API_KEY" xebxeb/eunice eunice --model="gpt-4" "Hello world"
+docker run --rm -e GEMINI_API_KEY="$GEMINI_API_KEY" xebxeb/eunice eunice --model="gemini-2.5-flash" "Hello world"
+
+# Docker with MCP servers (mount config and working directory)
+docker run --rm -v "$(pwd)":/workspace -w /workspace xebxeb/eunice eunice --config=./eunice.json "List files and get current time"
 ```
 
 ## Architecture Decisions
