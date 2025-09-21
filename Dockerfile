@@ -11,17 +11,15 @@ ENV PATH="/root/.local/bin:$PATH"
 # Set working directory
 WORKDIR /root
 
-# Copy only the essential files
-COPY eunice.py pyproject.toml test-host.sh README.md config.example.json ./
+# Copy all essential files at once
+COPY eunice.py pyproject.toml README.md config.example.json ./
+COPY tests/ tests/
 
 # Copy config.example.json as eunice.json for MCP server configuration
 COPY config.example.json /root/eunice.json
 
-# Copy test scripts
-COPY test-container-eunice.sh test-container.sh ./
-
-# Make scripts executable
-RUN chmod +x test-host.sh test-container-eunice.sh test-container.sh
+# Make test scripts executable
+RUN chmod +x tests/host.sh tests/container-eunice.sh tests/container.sh
 
 # Install eunice using uv with explicit path
 RUN /root/.local/bin/uv tool install .
@@ -30,4 +28,4 @@ RUN /root/.local/bin/uv tool install .
 ENV PATH="/root/.local/bin:$PATH"
 
 # Run the container test suite
-CMD ["./test-container.sh"]
+CMD ["./tests/container.sh"]
