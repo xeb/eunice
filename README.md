@@ -8,7 +8,7 @@ An agent tool and framework that runs with different LLM providers (including Ol
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **894/2,000 lines** (44.7% used, **55.3% remaining**)
+✅ **Current Status**: `eunice.py` is **897/2,000 lines** (44.85% used, **55.15% remaining**)
 
 ## Installation
 

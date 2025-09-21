@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "custom-server": {
-      "command": "echo",
-      "args": ["custom-output"]
+      "command": "cat",
+      "args": []
     }
   }
 }

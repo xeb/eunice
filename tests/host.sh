@@ -156,7 +156,7 @@ echo "=== Testing Colored Output ==="
 # Create a simple test that exercises the colored output functions
 cat > test_colored_output.py << 'EOF'
 # /// script
-# dependencies = ["openai"]
+# dependencies = ["openai", "rich"]
 # ///
 import sys
 sys.path.append('.')

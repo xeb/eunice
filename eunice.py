@@ -11,7 +11,7 @@ eunice - Agentic CLI runner
 Usage: eunice [--model=MODEL] [--prompt=PROMPT] [prompt]
 """
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 
 import argparse
 import asyncio
@@ -71,9 +71,10 @@ def print_model_info(model: str, provider: str, silent: bool = False) -> None:
 
 def get_ollama_models() -> List[str]:
     """Get list of available Ollama models via HTTP API."""
+    ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
     try:
         # Use the Ollama API endpoint
-        with urllib.request.urlopen('http://localhost:11434/api/tags') as response:
+        with urllib.request.urlopen(f"{ollama_host.rstrip('/')}/api/tags") as response:
             data = json.loads(response.read().decode())
             models = []
             for model in data.get('models', []):
@@ -559,7 +560,8 @@ def detect_provider(model: str) -> tuple[str, str, str]:
 
     # Check if model is available in Ollama first (to handle cases like gpt-oss)
     elif validate_ollama_model(model):
-        return "ollama", "http://localhost:11434/v1", "ollama"
+        ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama"
 
     # OpenAI models (only if not found in Ollama)
     elif any(prefix in model_lower for prefix in ["gpt", "chatgpt", "davinci", "curie", "babbage", "ada"]):
@@ -578,7 +580,8 @@ def detect_provider(model: str) -> tuple[str, str, str]:
         else:
             raise ValueError(f"Model '{model}' not recognized and no Ollama models found. Try running: ollama pull {model}")
 
-        return "ollama", "http://localhost:11434/v1", "ollama"
+        ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama"
 
 
 def create_client(model: str) -> OpenAI:

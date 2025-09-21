@@ -14,6 +14,26 @@ else
     echo "❌ Host tests failed with exit code $HOST_EXIT_CODE"
 fi
 
+# Create a simple, reliable eunice.json for the container test
+cat > /root/eunice.json << 'EOF'
+{
+  "mcpServers": {
+    "test-server": {
+      "command": "cat",
+      "args": []
+    },
+    "another-server": {
+      "command": "cat",
+      "args": []
+    },
+    "third-server": {
+      "command": "cat",
+      "args": []
+    }
+  }
+}
+EOF
+
 # Then run the eunice MCP server test
 echo ""
 echo "2. Running eunice MCP server test (tests/container-eunice.sh)..."
