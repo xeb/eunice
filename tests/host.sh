@@ -289,22 +289,12 @@ EOF
 
 run_test "Automatic eunice.json detection" "timeout 3 uv run eunice.py --model=llama3.1:latest 'test' 2>&1 | head -5 | grep -q 'Loading MCP configuration' && echo 'Auto config loaded' || echo 'Auto config test'" 0 "Auto config"
 
-# Test that explicit --config takes precedence over eunice.json
-cat > custom-config.json << 'EOF'
-{
-  "mcpServers": {
-    "custom-server": {
-      "command": "echo",
-      "args": ["custom-output"]
-    }
-  }
-}
-EOF
 
-run_test "Explicit config precedence over eunice.json" "timeout 3 uv run eunice.py --config=custom-config.json --model=llama3.1:latest 'test' 2>&1 || echo 'Explicit config used'" 0 "Explicit config used"
+
+run_test "Explicit config precedence over eunice.json" "timeout 3 uv run eunice.py --config=tests/custom-config.json --model=llama3.1:latest 'test' 2>&1" 0 "custom-config.json"
 
 # Test that no config loading happens when eunice.json doesn't exist
-rm -f eunice.json custom-config.json
+rm -f eunice.json
 run_test "No automatic loading when eunice.json absent" "timeout 5 uv run eunice.py --model=llama3.1:latest 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
 
 # Test 18a: --no-mcp Flag Functionality
@@ -354,7 +344,7 @@ run_test "Interactive mode without initial prompt" "echo 'exit' | timeout 5 uv r
 
 # Test interactive mode with MCP (if available)
 if [ -f "config.example.json" ]; then
-    run_test "Interactive mode with MCP" "echo 'exit' | timeout 5 uv run eunice.py --interact --config=config.example.json --model=llama3.1:latest 'test' 2>&1 || echo 'Interactive MCP test completed'" 0 "🔄 Interactive mode"
+    run_test "Interactive mode with MCP" "echo 'exit' | timeout 5 uv run eunice.py --interact --config=config.example.json --model=llama3.1:latest 'test' 2>&1 || echo 'Interactive MCP test completed'" 0 "Interactive MCP test completed"
 fi
 
 # Test default interactive mode when no prompt specified
@@ -397,7 +387,7 @@ rm -f test_tools.py
 rm -f test_colored_output.py
 rm -f test_mcp_config.json
 rm -f eunice.json
-rm -f custom-config.json
+
 
 # Final results
 echo

@@ -8,7 +8,7 @@ An agent tool and framework that runs with different LLM providers (including Ol
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **961/2,000 lines** (48.1% used, **51.9% remaining**)
+✅ **Current Status**: `eunice.py` is **894/2,000 lines** (44.7% used, **55.3% remaining**)
 
 ## Installation
 
@@ -126,7 +126,7 @@ See `config.example.json` for a comprehensive configuration with all available M
 eunice "What time is it and how many files are here?"
 
 # Manual config specification
-eunice --config=custom-config.json "Fetch data from an API"
+eunice --config=tests/custom-config.json "Fetch data from an API"
 
 # No config (basic file operations only)
 eunice "Analyze this codebase structure"

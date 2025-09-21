@@ -3,6 +3,7 @@
 # requires-python = ">=3.13"
 # dependencies = [
 #     "openai",
+#     "rich",
 # ]
 # ///
 """
@@ -28,29 +29,12 @@ from typing import Any, Dict, List, Optional, Union, AsyncGenerator
 import openai
 from openai import OpenAI
 
-# Color constants for terminal output
-class Colors:
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
-    DIM = '\033[2m'
+from rich.console import Console
+from rich.panel import Panel
+from rich import print as rich_print
 
-    # Regular colors
-    RED = '\033[31m'
-    GREEN = '\033[32m'
-    YELLOW = '\033[33m'
-    BLUE = '\033[34m'
-    MAGENTA = '\033[35m'
-    CYAN = '\033[36m'
-    WHITE = '\033[37m'
-
-    # Light colors
-    LIGHT_RED = '\033[91m'
-    LIGHT_GREEN = '\033[92m'
-    LIGHT_YELLOW = '\033[93m'
-    LIGHT_BLUE = '\033[94m'
-    LIGHT_MAGENTA = '\033[95m'
-    LIGHT_CYAN = '\033[96m'
-    LIGHT_WHITE = '\033[97m'
+# Initialize Rich console
+console = Console()
 
 def print_tool_invocation(tool_name: str, tool_args: Dict[str, Any], silent: bool = False) -> None:
     """Print a formatted tool invocation with light blue color and framing."""
@@ -58,75 +42,31 @@ def print_tool_invocation(tool_name: str, tool_args: Dict[str, Any], silent: boo
         return
 
     args_str = json.dumps(tool_args, indent=None, separators=(',', ':'))
-
-    # Create the frame
     content = f"🔧 {tool_name}({args_str})"
-    frame_width = max(50, len(content) + 4)
 
-    print(f"\n{Colors.LIGHT_BLUE}┌{'─' * (frame_width - 2)}┐{Colors.RESET}")
-    print(f"{Colors.LIGHT_BLUE}│ {Colors.BOLD}{content:<{frame_width - 4}} {Colors.RESET}{Colors.LIGHT_BLUE}│{Colors.RESET}")
-    print(f"{Colors.LIGHT_BLUE}└{'─' * (frame_width - 2)}┘{Colors.RESET}")
+    console.print(Panel(content, border_style="bright_blue", title="Tool Call"))
 
 def print_tool_result(result: str, output_limit: int = 50, silent: bool = False) -> None:
     """Print a formatted tool result with green color and framing."""
     if silent:
         return
-    original_length = len(result)
-    truncated_chars = 0
 
+    original_length = len(result)
     # Apply truncation if limit > 0
     if output_limit > 0 and len(result) > output_limit:
         result = result[:output_limit]
         truncated_chars = original_length - output_limit
+        result += f"\n...{truncated_chars} characters truncated"
 
-    lines = result.strip().split('\n')
-
-    # Calculate max width needed for content
-    content_widths = [len(line) for line in lines]
-    if truncated_chars > 0:
-        truncation_notice = f"...{truncated_chars} characters truncated"
-        lines.append(truncation_notice)
-        content_widths.append(len(truncation_notice))
-
-    # Frame width = max content width + 4 (for "│ " and " │")
-    max_content_width = max(content_widths) if content_widths else 0
-    frame_width = max(50, max_content_width + 4)
-
-    # Header width check - "Result:" is 7 chars, so we need at least 11 total width
-    frame_width = max(frame_width, 11)
-
-    print(f"{Colors.GREEN}┌{'─' * (frame_width - 2)}┐{Colors.RESET}")
-
-    # Header: "│ Result:" + padding + " │"
-    header_padding = frame_width - 2 - 7 - 1  # -2 for borders, -7 for "Result:", -1 for space after
-    print(f"{Colors.GREEN}│ {Colors.BOLD}Result:{' ' * header_padding}{Colors.RESET}{Colors.GREEN}│{Colors.RESET}")
-
-    print(f"{Colors.GREEN}├{'─' * (frame_width - 2)}┤{Colors.RESET}")
-
-    for i, line in enumerate(lines):
-        # Content: "│ " + line + padding + "│"
-        content_padding = frame_width - 3 - len(line)  # -3 for "│ " and "│"
-
-        if truncated_chars > 0 and i == len(lines) - 1:
-            print(f"{Colors.GREEN}│ {Colors.DIM}{Colors.LIGHT_GREEN}{line}{' ' * content_padding}{Colors.RESET}{Colors.GREEN}│{Colors.RESET}")
-        else:
-            print(f"{Colors.GREEN}│ {Colors.LIGHT_GREEN}{line}{' ' * content_padding}{Colors.RESET}{Colors.GREEN}│{Colors.RESET}")
-
-    print(f"{Colors.GREEN}└{'─' * (frame_width - 2)}┘{Colors.RESET}")
-    print()  # Add spacing after result
+    console.print(Panel(result, border_style="green", title="Result"))
 
 def print_model_info(model: str, provider: str, silent: bool = False) -> None:
     """Print a formatted model information window with light yellow color and framing."""
     if silent:
         return
 
-    # Create the content
     content = f"🤖 Model: {model} ({provider})"
-    frame_width = max(50, len(content) + 4)
-
-    print(f"\n{Colors.LIGHT_YELLOW}┌{'─' * (frame_width - 2)}┐{Colors.RESET}")
-    print(f"{Colors.LIGHT_YELLOW}│ {Colors.BOLD}{content:<{frame_width - 4}} {Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
-    print(f"{Colors.LIGHT_YELLOW}└{'─' * (frame_width - 2)}┘{Colors.RESET}\n")
+    console.print(Panel(content, border_style="yellow", title="Model Info"))
 
 
 def get_ollama_models() -> List[str]:
@@ -176,8 +116,14 @@ def get_supported_models() -> Dict[str, List[str]]:
 
 def print_models_list():
     """Print all supported models grouped by provider with API key status."""
-    print(f"{Colors.BOLD}eunice - Available Models{Colors.RESET}")
-    print("=" * 30)
+    from rich.table import Table
+
+    console.print("\n[bold]eunice - Available Models[/bold]")
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Provider", style="cyan", no_wrap=True)
+    table.add_column("Status", style="green")
+    table.add_column("Models", style="white")
 
     models = get_supported_models()
     key_status = check_api_key_status()
@@ -185,19 +131,15 @@ def print_models_list():
     for provider, model_list in models.items():
         if provider == "OpenAI":
             icon = "🤖"
-            color = Colors.GREEN
             key_name = "OPENAI_API_KEY"
         elif provider == "Gemini":
             icon = "💎"
-            color = Colors.BLUE
             key_name = "GEMINI_API_KEY"
         elif provider == "Anthropic":
             icon = "🧠"
-            color = Colors.CYAN
             key_name = "ANTHROPIC_API_KEY"
         else:  # Ollama
             icon = "🦙"
-            color = Colors.MAGENTA
             key_name = None
 
         # Show API key status for providers that need it
@@ -206,18 +148,20 @@ def print_models_list():
                 status = f"✅ API key set (...{key_status[key_name]})"
             else:
                 status = f"❌ API key not set"
-            print(f"\n{color}{Colors.BOLD}{icon} {provider} Models:{Colors.RESET} {status}")
         else:
-            print(f"\n{color}{Colors.BOLD}{icon} {provider} Models:{Colors.RESET} (local)")
+            status = "(local)"
 
         if not model_list:
             if provider == "Ollama":
-                print(f"  {Colors.DIM}No Ollama models installed. Use 'ollama pull <model>' to install.{Colors.RESET}")
+                models_str = "[dim]No models installed. Use 'ollama pull <model>'[/dim]"
             else:
-                print(f"  {Colors.DIM}No models available{Colors.RESET}")
+                models_str = "[dim]No models available[/dim]"
         else:
-            for model in model_list:
-                print(f"  • {model}")
+            models_str = "\n".join([f"• {model}" for model in model_list])
+
+        table.add_row(f"{icon} {provider}", status, models_str)
+
+    console.print(table)
 
 
 def check_api_key_status() -> Dict[str, Optional[str]]:
@@ -253,7 +197,7 @@ class CustomHelpFormatter(argparse.RawDescriptionHelpFormatter):
 
         # Add a note about model listing
         extra_info = "\n" + "=" * 50 + "\n"
-        extra_info += f"{Colors.DIM}Use --list-models to see all available models and API key status{Colors.RESET}\n"
+        extra_info += "Use --list-models to see all available models and API key status\n"
 
         return help_text + extra_info
 
@@ -502,27 +446,16 @@ class MCPManager:
         if not self.servers:
             return
 
-        print(f"\n{Colors.LIGHT_YELLOW}┌{'─' * 48}┐{Colors.RESET}")
-        print(f"{Colors.LIGHT_YELLOW}│ {Colors.BOLD}🔌 Servers & Tools{' ' * 31}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
-        print(f"{Colors.LIGHT_YELLOW}├{'─' * 48}┤{Colors.RESET}")
+        content_lines = ["🔌 MCP Servers & Tools", ""]
 
-        # Print MCP servers
         for server_name, server in self.servers.items():
-            server_line = f"📡 {server_name}: {len(server.tools)} tools"
-            padding = 48 - 3 - len(server_line)
-            print(f"{Colors.LIGHT_YELLOW}│ {Colors.LIGHT_YELLOW}{server_line}{' ' * padding}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
-
+            content_lines.append(f"📡 {server_name}: {len(server.tools)} tools")
             for tool in server.tools:
                 tool_name = tool["function"]["name"]
-                tool_line = f"  • {tool_name}"
-                if len(tool_line) > 44:
-                    tool_line = tool_line[:41] + "..."
-                padding = 48 - 3 - len(tool_line)
-                print(f"{Colors.LIGHT_YELLOW}│ {Colors.DIM}{tool_line}{' ' * padding}{Colors.RESET}{Colors.LIGHT_YELLOW}│{Colors.RESET}")
+                content_lines.append(f"  • {tool_name}")
 
-
-        print(f"{Colors.LIGHT_YELLOW}└{'─' * 48}┘{Colors.RESET}")
-        print()
+        content = "\n".join(content_lines)
+        console.print(Panel(content, border_style="yellow", title="MCP Info"))
 
     async def shutdown(self):
         """Shutdown all MCP and streaming servers."""

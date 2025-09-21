@@ -287,26 +287,49 @@ When MCP servers are configured, eunice displays server and tool information at 
 └────────────────────────────────────────────────┘
 ```
 
-### Colored Tool Output
-Tool executions are displayed with colored, framed output:
+### Rich Terminal Output
+Tool executions are displayed using the Rich library for enhanced visual presentation:
 
-**Tool Invocations** (Light Blue):
+**Tool Invocations** (Bright Blue Panels):
 ```
-┌────────────────────────────────────────────────┐
-│ 🔧 filesystem.list_directory({"path":"."})     │
-└────────────────────────────────────────────────┘
+╭───────────────────────────────── Tool Call ──────────────────────────────────╮
+│ 🔧 filesystem.list_directory({"path":"."})                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**Tool Results** (Green):
+**Tool Results** (Green Panels):
 ```
-┌────────────────────────────────────────────────┐
-│ Result:                                         │
-├────────────────────────────────────────────────┤
-│ [                                             │
-│   {"name": "file.txt", "type": "file"},       │
-│   ...245 characters truncated                 │
-└────────────────────────────────────────────────┘
+╭─────────────────────────────────── Result ───────────────────────────────────╮
+│ [                                                                            │
+│   {"name": "file.txt", "type": "file"},                                     │
+│   ...245 characters truncated                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 ```
+
+**Model Information** (Yellow Panels):
+```
+╭───────────────────────────────── Model Info ─────────────────────────────────╮
+│ 🤖 Model: llama3.1 (ollama)                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**MCP Server Information** (Yellow Panels):
+```
+╭────────────────────────────────── MCP Info ──────────────────────────────────╮
+│ 🔌 MCP Servers & Tools                                                      │
+│                                                                              │
+│ 📡 filesystem: 14 tools                                                     │
+│   • filesystem.read_file                                                    │
+│   • filesystem.write_file                                                   │
+│   • filesystem.list_directory                                               │
+│ 📡 memory: 9 tools                                                          │
+│   • memory.create_entities                                                  │
+│   • memory.store                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Model List Display** (Rich Table):
+The `--list-models` command displays available models in a structured table format with provider icons, API key status, and organized model listings for better readability.
 
 ### Enhanced Help Display
 The `--help` command shows:
@@ -332,7 +355,7 @@ eunice --interact
 ## Technical Implementation
 
 ### File Structure
-- `eunice.py` - Main executable script with inline dependencies (961 lines)
+- `eunice.py` - Main executable script with inline dependencies (894 lines, reduced from 961)
 - `pyproject.toml` - Package configuration for `uv tool install`
 - `Makefile` - Comprehensive build system with colored help and commands
 - `Dockerfile` - Optimized container image (6 layers, reduced from 9)
@@ -340,11 +363,12 @@ eunice --interact
 - `tests/container.sh` - Docker environment tests
 - `tests/container-eunice.sh` - Container-specific eunice tests
 - `scripts/reinstall.sh` - Development utility scripts
-- `TERMINAL_IMPROVEMENTS.md` - Research on Rich library alternatives
+- `TERMINAL_IMPROVEMENTS.md` - Research on Rich library alternatives (implemented)
 
 ### Dependencies
 - `openai` - Unified API client for all providers (OpenAI, Gemini via OpenAI-compatible endpoints, Ollama)
 - `anthropic` - Anthropic API client for Claude models
+- `rich` - Modern terminal UI library for beautiful console output and formatting
 - `mcp` - Model Context Protocol client library for MCP server communication (optional)
 - Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`, `asyncio`, `urllib.request`
 
@@ -612,5 +636,7 @@ The framework is designed to be extensible while maintaining simplicity:
 - ✅ Comprehensive build system with Makefile
 - ✅ Anthropic API integration with model aliases
 - ✅ Enhanced error handling and model routing
+- ✅ **Rich library integration** - Professional terminal UI with panels, tables, and enhanced formatting
+- ✅ **Code reduction** - Simplified from 961 to 894 lines (67 lines saved) while improving functionality
 
 The core philosophy remains: provide a simple, reliable interface for agentic AI interactions while continuously improving performance and user experience.

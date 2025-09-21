@@ -28,6 +28,7 @@ classifiers = [
 ]
 dependencies = [
     "openai",
+    "rich",
 ]
 
 [project.scripts]
