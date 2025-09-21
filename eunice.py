@@ -564,6 +564,41 @@ def resolve_anthropic_model(model: str) -> str:
     return alias_map.get(model_lower, model)
 
 
+def get_smart_default_model() -> str:
+    """
+    Get the best available model based on priority order:
+    1. Ollama models: gpt-oss:latest, deepseek-r1:latest, llama3.1:latest
+    2. Gemini: gemini-2.5-flash (if API key exists)
+    3. Anthropic: sonnet (if API key exists)
+    4. OpenAI: gpt-4o (if API key exists)
+    """
+    # Priority order for Ollama models
+    preferred_ollama_models = ["gpt-oss:latest", "deepseek-r1:latest", "llama3.1:latest"]
+
+    # Check Ollama models first
+    available_ollama_models = get_ollama_models()
+    for model in preferred_ollama_models:
+        if model in available_ollama_models:
+            return model
+
+    # Check for API keys and return first available cloud model
+    if os.getenv("GEMINI_API_KEY"):
+        return "gemini-2.5-flash"
+
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return "sonnet"
+
+    if os.getenv("OPENAI_API_KEY"):
+        return "gpt-4o"
+
+    # Fallback to any available Ollama model if no API keys
+    if available_ollama_models:
+        return available_ollama_models[0]
+
+    # Ultimate fallback
+    return "gemini-2.5-flash"
+
+
 def detect_provider(model: str) -> tuple[str, str, str]:
     """
     Detect the provider based on model name.
@@ -749,8 +784,8 @@ def main():
 
     parser.add_argument(
         "--model",
-        default="gemini-2.5-flash",
-        help="Model to use (default: gemini-2.5-flash)"
+        default=None,
+        help="Model to use (default: smart selection based on availability)"
     )
 
     parser.add_argument(
@@ -821,9 +856,12 @@ def main():
         print("Error: No prompt provided", file=sys.stderr)
         sys.exit(1)
 
+    # Determine the model to use (smart default if not specified)
+    model = args.model if args.model is not None else get_smart_default_model()
+
     # Create client and run agent
     try:
-        client = create_client(args.model)
+        client = create_client(model)
 
         # Determine config path: explicit --config takes precedence, then check for eunice.json in current working directory
         config_path = None
@@ -839,7 +877,7 @@ def main():
                 config_path = str(Path.cwd().joinpath("eunice.json"))
 
         # Run everything in a single asyncio context
-        asyncio.run(main_async(client, args.model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose))
+        asyncio.run(main_async(client, model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose))
 
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)

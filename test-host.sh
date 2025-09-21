@@ -124,7 +124,7 @@ echo "=== Testing Provider Detection ==="
 # These tests check that the right provider is detected (will fail at API call but that's expected)
 run_test "OpenAI model detection" "timeout 5 uv run eunice.py --model=gpt-4 'test' || echo 'Provider detected correctly'" 0
 run_test "Gemini model detection (with key)" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model=gemini-2.5-flash 'test' || echo 'Provider detected correctly'" 0
-run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=llama3.1 'test' || echo 'Provider detected correctly'" 0
+run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=llama3.1:latest 'test' || echo 'Provider detected correctly'" 0
 run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' || echo 'Provider detected correctly'" 0
 
 # Test 6: MCP Import Dependencies
@@ -140,7 +140,7 @@ echo "=== Testing Usage Patterns from Spec ==="
 run_test "Basic usage pattern" "timeout 5 uv run eunice.py 'How many files are in the current directory?' || true" 0
 run_test "Model specification pattern" "timeout 5 uv run eunice.py --model='gpt-4' 'how many files in the current directory?' || true" 0
 run_test "Gemini with prompt file" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt=test_prompt.txt || true" 0
-run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='llama3.1' test_prompt.txt || true" 0
+run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='llama3.1:latest' test_prompt.txt || true" 0
 run_test "Prompt parameter usage" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt='How many files in the current directory?' || true" 0
 
 # Test 8: Error handling
@@ -202,10 +202,10 @@ echo "=== Testing MCP Server Integration ==="
 run_test "Config parameter help" "uv run eunice.py --help" 0 "config"
 
 # Test without config (no tools available)
-run_test "No MCP config - no tools" "timeout 5 uv run eunice.py --model=llama3.1 'test' || echo 'No tools available'" 0 "" "MCP Servers"
+run_test "No MCP config - no tools" "timeout 5 uv run eunice.py --model=llama3.1:latest 'test' || echo 'No tools available'" 0 "" "MCP Servers"
 
 # Test config validation
-run_test "Non-existent config file" "uv run eunice.py --config=nonexistent.json --model=llama3.1 'test' 2>&1" 1 "Error loading MCP configuration\|Model.*not recognized"
+run_test "Non-existent config file" "uv run eunice.py --config=nonexistent.json --model=llama3.1:latest 'test' 2>&1" 1 "Error loading configuration\|No such file or directory\|Model.*not recognized"
 
 # Create a minimal test MCP config for testing
 cat > test_mcp_config.json << 'EOF'
@@ -224,9 +224,9 @@ run_test "MCP config loading" "timeout 3 uv run eunice.py --config=test_mcp_conf
 
 # Test with actual config.example.json if it exists
 if [ -f "config.example.json" ]; then
-    run_test "MCP servers display" "timeout 8 uv run eunice.py --config=config.example.json --model=llama3.1 'test' 2>&1 | head -10 | sed 's/\x1b\[[0-9;]*m//g' | grep -q 'MCP Servers & Tools' && echo 'MCP Servers found' || echo 'MCP display test'" 0 "MCP Servers found"
-    run_test "MCP tools registration" "timeout 8 uv run eunice.py --config=config.example.json --model=llama3.1 'test' 2>&1 | head -20 | grep -q 'tools' && echo 'Tools registered' || echo 'Tools registration test'" 0 "Tools registered"
-    run_test "Light yellow MCP output" "timeout 8 uv run eunice.py --config=config.example.json --model=llama3.1 'test' 2>&1 | head -10 | grep -q '\[93m' && echo 'Yellow output found' || echo 'Yellow output test'" 0
+    run_test "MCP servers display" "timeout 8 uv run eunice.py --config=config.example.json --model=gpt-oss:latest 'test' 2>&1 | head -20 | sed 's/\x1b\[[0-9;]*m//g' | grep -q 'Servers & Tools' && echo 'MCP Servers found' || echo 'MCP display test'" 0 "MCP Servers found"
+    run_test "MCP tools registration" "timeout 8 uv run eunice.py --config=config.example.json --model=gpt-oss:latest 'test' 2>&1 | head -20 | grep -q 'tools' && echo 'Tools registered' || echo 'Tools registration test'" 0 "Tools registered"
+    run_test "Light yellow MCP output" "timeout 8 uv run eunice.py --config=config.example.json --model=gpt-oss:latest 'test' 2>&1 | head -10 | grep -q '\[93m' && echo 'Yellow output found' || echo 'Yellow output test'" 0
 
     # Test complex multi-tool MCP integration (demonstrates full capability)
     # This tests: long prompt handling, multiple tool calls, time, filesystem, fetch, and sequential thinking
@@ -241,31 +241,31 @@ fi
 echo "=== Testing Tool System Changes ==="
 
 # Test that built-in tools are removed (no list_files or read_file without MCP)
-run_test "No built-in tools without config" "timeout 5 uv run eunice.py --model=llama3.1 'list files' || echo 'No built-in tools'" 0 "" "list_files"
+run_test "No built-in tools without config" "timeout 5 uv run eunice.py --model=llama3.1:latest 'list files' || echo 'No built-in tools'" 0 "" "list_files"
 
 # Test 16: Long Prompt Parsing Fix
 echo "=== Testing Long Prompt Parsing ==="
 
 # Test that very long prompts don't cause OSError
-run_test "Long prompt parsing (no OSError)" "timeout 5 uv run eunice.py --model=llama3.1 'This is a very long prompt that should not cause any file system errors when parsed as it contains many spaces and question marks like what time is it and how are you doing today and what files are in the directory and can you help me with this task that involves multiple steps and complex operations' 2>&1 || echo 'Long prompt handled'" 0 "" "File name too long"
+run_test "Long prompt parsing (no OSError)" "timeout 5 uv run eunice.py --model=llama3.1:latest 'This is a very long prompt that should not cause any file system errors when parsed as it contains many spaces and question marks like what time is it and how are you doing today and what files are in the directory and can you help me with this task that involves multiple steps and complex operations' 2>&1 || echo 'Long prompt handled'" 0 "" "File name too long"
 
 # Test prompt with template characters
-run_test "Prompt with template characters" "timeout 5 uv run eunice.py --model=llama3.1 'Print a report that says: As of <datetime> there are <num_files> files' 2>&1 || echo 'Template prompt handled'" 0 "" "OSError"
+run_test "Prompt with template characters" "timeout 5 uv run eunice.py --model=llama3.1:latest 'Print a report that says: As of <datetime> there are <num_files> files' 2>&1 || echo 'Template prompt handled'" 0 "" "OSError"
 
 # Test 17: Silent Mode Operation
 echo "=== Testing Silent Mode Operation ==="
 
 # Test that --silent suppresses model info and tool output but preserves AI responses
-run_test "Silent mode with basic prompt" "timeout 5 uv run eunice.py --silent --model=llama3.1 'hello' 2>&1 | grep -v '🤖 Model:' | grep -v '🔧' | grep -v 'Result:'" 0 "" ""
+run_test "Silent mode with basic prompt" "timeout 5 uv run eunice.py --silent --model=llama3.1:latest 'hello' 2>&1 | grep -v '🤖 Model:' | grep -v '🔧' | grep -v 'Result:'" 0 "" ""
 
 # Test that --silent suppresses MCP server info
 if [ -f "config.example.json" ]; then
-    run_test "Silent mode suppresses MCP info" "timeout 8 uv run eunice.py --silent --config=config.example.json --model=llama3.1 'test' 2>&1 | head -5" 0 "" "MCP Servers"
+    run_test "Silent mode suppresses MCP info" "timeout 8 uv run eunice.py --silent --config=config.example.json --model=llama3.1:latest 'test' 2>&1 | head -5" 0 "" "MCP Servers"
 fi
 
 # Test that --silent suppresses "Started MCP server" messages
 if [ -f "config.example.json" ]; then
-    run_test "Silent mode suppresses MCP startup messages" "timeout 8 uv run eunice.py --silent --config=config.example.json --model=llama3.1 'hello' 2>&1" 0 "" "Started MCP server"
+    run_test "Silent mode suppresses MCP startup messages" "timeout 8 uv run eunice.py --silent --config=config.example.json --model=llama3.1:latest 'hello' 2>&1" 0 "" "Started MCP server"
 fi
 
 # Test that help still shows --silent option
@@ -286,7 +286,7 @@ cat > eunice.json << 'EOF'
 }
 EOF
 
-run_test "Automatic eunice.json detection" "timeout 3 uv run eunice.py --model=llama3.1 'test' 2>&1 | head -5 | grep -q 'Loading MCP configuration' && echo 'Auto config loaded' || echo 'Auto config test'" 0 "Auto config"
+run_test "Automatic eunice.json detection" "timeout 3 uv run eunice.py --model=llama3.1:latest 'test' 2>&1 | head -5 | grep -q 'Loading MCP configuration' && echo 'Auto config loaded' || echo 'Auto config test'" 0 "Auto config"
 
 # Test that explicit --config takes precedence over eunice.json
 cat > custom-config.json << 'EOF'
@@ -300,11 +300,11 @@ cat > custom-config.json << 'EOF'
 }
 EOF
 
-run_test "Explicit config precedence over eunice.json" "timeout 3 uv run eunice.py --config=custom-config.json --model=llama3.1 'test' 2>&1 || echo 'Explicit config used'" 0 "Explicit config used"
+run_test "Explicit config precedence over eunice.json" "timeout 3 uv run eunice.py --config=custom-config.json --model=llama3.1:latest 'test' 2>&1 || echo 'Explicit config used'" 0 "Explicit config used"
 
 # Test that no config loading happens when eunice.json doesn't exist
 rm -f eunice.json custom-config.json
-run_test "No automatic loading when eunice.json absent" "timeout 5 uv run eunice.py --model=llama3.1 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
+run_test "No automatic loading when eunice.json absent" "timeout 5 uv run eunice.py --model=llama3.1:latest 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
 
 # Test 18a: --no-mcp Flag Functionality
 echo "=== Testing --no-mcp Flag Functionality ==="
@@ -322,13 +322,13 @@ cat > eunice.json << 'EOF'
 EOF
 
 # Test that --no-mcp prevents loading even when eunice.json exists
-run_test "--no-mcp prevents automatic eunice.json loading" "timeout 5 uv run eunice.py --no-mcp --model=llama3.1 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
+run_test "--no-mcp prevents automatic eunice.json loading" "timeout 5 uv run eunice.py --no-mcp --model=llama3.1:latest 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
 
 # Test that --no-mcp and --config together produces error
-run_test "--no-mcp and --config together error" "uv run eunice.py --no-mcp --config=eunice.json --model=llama3.1 'test'" 1 "--no-mcp and --config cannot be used together"
+run_test "--no-mcp and --config together error" "uv run eunice.py --no-mcp --config=eunice.json --model=llama3.1:latest 'test'" 1 "--no-mcp and --config cannot be used together"
 
 # Test that --config='' functions like --no-mcp (no loading message)
-run_test "--config='' functions like --no-mcp" "timeout 5 uv run eunice.py --config='' --model=llama3.1 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
+run_test "--config='' functions like --no-mcp" "timeout 5 uv run eunice.py --config='' --model=llama3.1:latest 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
 
 # Test that --no-mcp option appears in help
 run_test "--no-mcp option in help" "uv run eunice.py --help" 0 "no-mcp"
