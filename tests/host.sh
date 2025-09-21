@@ -88,19 +88,19 @@ echo
 
 # Test 1: Help/Usage
 echo "=== Testing Help and Usage ==="
-run_test "Help flag" "uv run eunice.py --help" 0 "eunice - Agentic CLI runner"
-run_test "No arguments" "uv run eunice.py" 1 "No prompt provided"
+run_test "Help flag" "uv run eunice.py --help --no-mcp" 0 "eunice - Agentic CLI runner"
+run_test "No arguments defaults to interactive" "echo 'exit' | timeout 3 uv run eunice.py --no-mcp --model=llama3.1:latest 2>&1 || echo 'Interactive test completed'" 0 "🔄 Interactive mode"
 
 # Test 2: Environment variable validation
 echo "=== Testing Environment Variable Validation ==="
 
 # Test OpenAI model without API key
 unset OPENAI_API_KEY
-run_test "OpenAI model without API key" "uv run eunice.py --model=gpt-3.5-turbo 'test'" 1 "OPENAI_API_KEY environment variable is required"
+run_test "OpenAI model without API key" "uv run eunice.py --model=gpt-3.5-turbo 'test' --no-mcp" 1 "OPENAI_API_KEY environment variable is required"
 
 # Test Gemini model without API key
 unset GEMINI_API_KEY
-run_test "Gemini model without API key" "uv run eunice.py --model=gemini-2.5-flash 'test'" 1 "GEMINI_API_KEY environment variable is required"
+run_test "Gemini model without API key" "uv run eunice.py --model=gemini-2.5-flash 'test' --no-mcp" 1 "GEMINI_API_KEY environment variable is required"
 
 # Test 3: Argument parsing
 echo "=== Testing Argument Parsing ==="
@@ -108,24 +108,24 @@ echo "=== Testing Argument Parsing ==="
 # Set a dummy API key for OpenAI tests (these will fail at API call but should pass validation)
 export OPENAI_API_KEY="sk-test123"
 
-run_test "Model parameter" "timeout 5 uv run eunice.py --model=gpt-4 'test prompt' || true" 0 "" "No prompt provided"
-run_test "Prompt parameter" "timeout 5 uv run eunice.py --prompt='test prompt' || true" 0 "" "No prompt provided"
-run_test "Positional prompt" "timeout 5 uv run eunice.py 'test prompt' || true" 0 "" "No prompt provided"
+run_test "Model parameter" "timeout 5 uv run eunice.py --model=gpt-4 'test prompt' --no-mcp || true" 0 "" "No prompt provided"
+run_test "Prompt parameter" "timeout 5 uv run eunice.py --prompt='test prompt' --no-mcp || true" 0 "" "No prompt provided"
+run_test "Positional prompt" "timeout 5 uv run eunice.py 'test prompt' --no-mcp || true" 0 "" "No prompt provided"
 
 # Test 4: File vs string prompt detection
 echo "=== Testing Prompt Parsing ==="
 
-run_test "File prompt" "timeout 5 uv run eunice.py --prompt=test_prompt.txt || true" 0 "" "No prompt provided"
-run_test "Non-existent file prompt" "uv run eunice.py --prompt=nonexistent.txt" 1 "Error reading prompt file"
+run_test "File prompt" "timeout 5 uv run eunice.py --prompt=test_prompt.txt --no-mcp || true" 0 "" "No prompt provided"
+run_test "Non-existent file prompt" "uv run eunice.py --prompt=nonexistent.txt --no-mcp" 1 "Error reading prompt file"
 
 # Test 5: Provider detection
 echo "=== Testing Provider Detection ==="
 
 # These tests check that the right provider is detected (will fail at API call but that's expected)
-run_test "OpenAI model detection" "timeout 5 uv run eunice.py --model=gpt-4 'test' || echo 'Provider detected correctly'" 0
-run_test "Gemini model detection (with key)" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model=gemini-2.5-flash 'test' || echo 'Provider detected correctly'" 0
-run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=llama3.1:latest 'test' || echo 'Provider detected correctly'" 0
-run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' || echo 'Provider detected correctly'" 0
+run_test "OpenAI model detection" "timeout 5 uv run eunice.py --model=gpt-4 'test' --no-mcp || echo 'Provider detected correctly'" 0
+run_test "Gemini model detection (with key)" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model=gemini-2.5-flash 'test' --no-mcp || echo 'Provider detected correctly'" 0
+run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=llama3.1:latest 'test' --no-mcp || echo 'Provider detected correctly'" 0
+run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' --no-mcp || echo 'Provider detected correctly'" 0
 
 # Test 6: MCP Import Dependencies
 echo "=== Testing MCP Dependencies ==="
@@ -146,9 +146,9 @@ run_test "Prompt parameter usage" "GEMINI_API_KEY=test timeout 5 uv run eunice.p
 # Test 8: Error handling
 echo "=== Testing Error Handling ==="
 
-run_test "Invalid model format" "timeout 5 uv run eunice.py --model='' 'test' || true" 0 # Should default to Ollama
-run_test "Empty prompt" "timeout 5 uv run eunice.py '' || true" 0 # Should work, just send empty prompt
-run_test "Very long prompt" "timeout 5 uv run eunice.py 'This is a very long prompt that should still work fine and not cause any issues with the argument parsing or processing mechanisms implemented in the eunice CLI tool' || true" 0 # Should work
+run_test "Invalid model format" "timeout 5 uv run eunice.py --model='' 'test' --no-mcp || true" 0 # Should default to Ollama
+run_test "Empty prompt" "timeout 5 uv run eunice.py '' --no-mcp || true" 0 # Should work, just send empty prompt
+run_test "Very long prompt" "timeout 5 uv run eunice.py 'This is a very long prompt that should still work fine and not cause any issues with the argument parsing or processing mechanisms implemented in the eunice CLI tool' --no-mcp || true" 0 # Should work
 
 # Test 9: Colored output functionality
 echo "=== Testing Colored Output ==="
@@ -174,14 +174,14 @@ run_test "Colored output functions" "uv run test_colored_output.py" 0 "COLORED_O
 # Test 10: Provider detection edge cases
 echo "=== Testing Provider Detection Edge Cases ==="
 
-run_test "gpt-oss should use Ollama not OpenAI" "timeout 3 uv run eunice.py --model=gpt-oss 'test' && echo 'Correctly detected as Ollama' || echo 'Correctly detected as Ollama'" 0 "Correctly detected as Ollama"
+run_test "gpt-oss should use Ollama not OpenAI" "timeout 3 uv run eunice.py --model=gpt-oss 'test' --no-mcp && echo 'Correctly detected as Ollama' || echo 'Correctly detected as Ollama'" 0 "Correctly detected as Ollama"
 
 # Test 11: New command line options
 echo "=== Testing New Command Line Options ==="
 
-run_test "List models option" "uv run eunice.py --list-models" 0 "Available Models"
-run_test "Tool output limit help" "uv run eunice.py --help" 0 "tool-output-limit"
-run_test "Enhanced help output" "uv run eunice.py --help" 0 "Use --list-models"
+run_test "List models option" "uv run eunice.py --list-models --no-mcp" 0 "Available Models"
+run_test "Tool output limit help" "uv run eunice.py --help --no-mcp" 0 "tool-output-limit"
+run_test "Enhanced help output" "uv run eunice.py --help --no-mcp" 0 "Use --list-models"
 
 # Test 12: Dependencies and installation
 echo "=== Testing Dependencies ==="
@@ -199,7 +199,7 @@ run_test "Shebang line" "head -n 1 eunice.py | grep -q '#!/usr/bin/env python3' 
 echo "=== Testing MCP Server Integration ==="
 
 # Test --config parameter existence
-run_test "Config parameter help" "uv run eunice.py --help" 0 "config"
+run_test "Config parameter help" "uv run eunice.py --help --no-mcp" 0 "config"
 
 # Test without config (no tools available)
 run_test "No MCP config - no tools" "timeout 5 uv run eunice.py --model=llama3.1:latest 'test' || echo 'No tools available'" 0 "" "MCP Servers"
@@ -270,7 +270,7 @@ if [ -f "config.example.json" ]; then
 fi
 
 # Test that help still shows --silent option
-run_test "Silent option in help" "uv run eunice.py --help" 0 "silent"
+run_test "Silent option in help" "uv run eunice.py --help --no-mcp" 0 "silent"
 
 # Test 18: Automatic eunice.json Loading
 echo "=== Testing Automatic eunice.json Loading ==="
@@ -326,47 +326,67 @@ EOF
 run_test "--no-mcp prevents automatic eunice.json loading" "timeout 5 uv run eunice.py --no-mcp --model=llama3.1:latest 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
 
 # Test that --no-mcp and --config together produces error
-run_test "--no-mcp and --config together error" "uv run eunice.py --no-mcp --config=eunice.json --model=llama3.1:latest 'test' 2>&1" 1 "--no-mcp and --config cannot be used together"
+run_test "--no-mcp and --config together error" "uv run eunice.py --no-mcp --config=eunice.json --model=llama3.1:latest 'test' 2>&1" 1 "cannot be used together"
 
 # Test that --config='' functions like --no-mcp (no loading message)
 run_test "--config='' functions like --no-mcp" "timeout 5 uv run eunice.py --config='' --model=llama3.1:latest 'test' 2>&1 | head -5" 0 "" "Loading MCP configuration"
 
 # Test that --no-mcp option appears in help
-run_test "--no-mcp option in help" "uv run eunice.py --help" 0 "no-mcp"
+run_test "--no-mcp option in help" "uv run eunice.py --help --no-mcp" 0 "no-mcp"
 
 # Test that --no-mcp description appears in help
-run_test "--no-mcp description in help" "uv run eunice.py --help" 0 "Disable MCP server loading even if eunice.json exists"
+run_test "--no-mcp description in help" "uv run eunice.py --help --no-mcp" 0 "Disable MCP server loading even if eunice.json exists"
 
 # Clean up eunice.json for remaining tests
 rm -f eunice.json
 
-# Test 19: Anthropic Model Support
+# Test 19: Interactive Mode Support
+echo "=== Testing Interactive Mode Support ==="
+
+# Test --interact option exists in help
+run_test "Interactive option in help" "uv run eunice.py --help --no-mcp" 0 "interact"
+
+# Test interactive mode with initial prompt and quick exit
+run_test "Interactive mode with initial prompt" "echo 'exit' | timeout 5 uv run eunice.py --interact --model=llama3.1:latest 'hello' --no-mcp 2>&1 || echo 'Interactive test completed'" 0 "🔄 Interactive mode"
+
+# Test interactive mode without initial prompt and quick exit
+run_test "Interactive mode without initial prompt" "echo 'exit' | timeout 5 uv run eunice.py --interact --model=llama3.1:latest --no-mcp 2>&1 || echo 'Interactive test completed'" 0 "🔄 Interactive mode"
+
+# Test interactive mode with MCP (if available)
+if [ -f "config.example.json" ]; then
+    run_test "Interactive mode with MCP" "echo 'exit' | timeout 5 uv run eunice.py --interact --config=config.example.json --model=llama3.1:latest 'test' 2>&1 || echo 'Interactive MCP test completed'" 0 "🔄 Interactive mode"
+fi
+
+# Test default interactive mode when no prompt specified
+run_test "Default interactive mode (no prompt)" "echo 'exit' | timeout 5 uv run eunice.py --model=llama3.1:latest --no-mcp 2>&1 || echo 'Default interactive test completed'" 0 "🔄 Interactive mode"
+
+# Test 20: Anthropic Model Support
 echo "=== Testing Anthropic Model Support ==="
 
 # Test Anthropic models in list (removed from help)
-run_test "Anthropic models in list" "uv run eunice.py --list-models" 0 "🧠 Anthropic"
+run_test "Anthropic models in list" "uv run eunice.py --list-models --no-mcp" 0 "🧠 Anthropic"
 
 # Test Anthropic model aliases - adapt based on whether API key is available
 if [ -n "$ANTHROPIC_API_KEY" ]; then
     # API key is set, so these should succeed (timeout after model detection works)
-    run_test "Sonnet alias detection" "timeout 5 uv run eunice.py --model=sonnet 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
-    run_test "Opus alias detection" "timeout 5 uv run eunice.py --model=opus 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
-    run_test "Claude-sonnet alias detection" "timeout 5 uv run eunice.py --model=claude-sonnet 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
-    run_test "Claude-opus alias detection" "timeout 5 uv run eunice.py --model=claude-opus 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Sonnet alias detection" "timeout 5 uv run eunice.py --model=sonnet 'test' --no-mcp 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Opus alias detection" "timeout 5 uv run eunice.py --model=opus 'test' --no-mcp 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Claude-sonnet alias detection" "timeout 5 uv run eunice.py --model=claude-sonnet 'test' --no-mcp 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Claude-opus alias detection" "timeout 5 uv run eunice.py --model=claude-opus 'test' --no-mcp 2>&1 || echo 'Provider detected correctly'" 0 ""
 
     # Test full model names
-    run_test "Claude Sonnet 4 detection" "timeout 5 uv run eunice.py --model=claude-sonnet-4-20250514 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
-    run_test "Claude Opus 4.1 detection" "timeout 5 uv run eunice.py --model=claude-opus-4-1-20250805 'test' 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Claude Sonnet 4 detection" "timeout 5 uv run eunice.py --model=claude-sonnet-4-20250514 'test' --no-mcp 2>&1 || echo 'Provider detected correctly'" 0 ""
+    run_test "Claude Opus 4.1 detection" "timeout 5 uv run eunice.py --model=claude-opus-4-1-20250805 'test' --no-mcp 2>&1 || echo 'Provider detected correctly'" 0 ""
 else
     # API key not set, so these should fail with proper error
-    run_test "Sonnet alias detection" "uv run eunice.py --model=sonnet 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
-    run_test "Opus alias detection" "uv run eunice.py --model=opus 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
-    run_test "Claude-sonnet alias detection" "uv run eunice.py --model=claude-sonnet 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
-    run_test "Claude-opus alias detection" "uv run eunice.py --model=claude-opus 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Sonnet alias detection" "uv run eunice.py --model=sonnet 'test' --no-mcp" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Opus alias detection" "uv run eunice.py --model=opus 'test' --no-mcp" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Claude-sonnet alias detection" "uv run eunice.py --model=claude-sonnet 'test' --no-mcp" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Claude-opus alias detection" "uv run eunice.py --model=claude-opus 'test' --no-mcp" 1 "ANTHROPIC_API_KEY environment variable is required"
 
     # Test full model names
-    run_test "Claude Sonnet 4 detection" "uv run eunice.py --model=claude-sonnet-4-20250514 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
-    run_test "Claude Opus 4.1 detection" "uv run eunice.py --model=claude-opus-4-1-20250805 'test'" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Claude Sonnet 4 detection" "uv run eunice.py --model=claude-sonnet-4-20250514 'test' --no-mcp" 1 "ANTHROPIC_API_KEY environment variable is required"
+    run_test "Claude Opus 4.1 detection" "uv run eunice.py --model=claude-opus-4-1-20250805 'test' --no-mcp" 1 "ANTHROPIC_API_KEY environment variable is required"
 fi
 
 # Cleanup

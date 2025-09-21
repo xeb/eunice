@@ -1,6 +1,6 @@
 # eunice
 
-A generalist, minimalist agent framework for natural language interactions with AI models. It's purpose is for you to only write prompts and bring in MCP server configs. That's it.
+An agent tool and framework that runs with different LLM providers (including Ollama), supports MCP tools (stdio only for now), runs in a loop, has a docker image (for isolation), and support an interactive chat mode as needed.
 
 > **Name Origin**: eunice is named after the AI character Eunice from William Gibson's novel "Agency" - a highly capable artificial intelligence that assists with complex tasks through natural conversation.
 
@@ -8,7 +8,7 @@ A generalist, minimalist agent framework for natural language interactions with 
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **868/2,000 lines** (43.4% used, **56.6% remaining**)
+✅ **Current Status**: `eunice.py` is **961/2,000 lines** (48.1% used, **51.9% remaining**)
 
 ## Installation
 
@@ -30,12 +30,16 @@ uv tool install .
 # Ask questions about your files
 eunice "How many files are in the current directory?"
 
-# Use different models
+# Use different models (smart defaults prioritize available models)
+eunice "analyze this codebase"  # Uses smart default selection
 eunice --model="gpt-4" "analyze this codebase"
 eunice --model="gemini-2.5-pro" "what does the main file do?"
 eunice --model="sonnet" "explain the code structure"
 eunice --model="opus" "review this implementation"
 eunice --model="llama3.1" "summarize the project structure"
+
+# Interactive mode for ongoing conversations
+eunice --interact
 
 # List available models
 eunice --list-models
@@ -133,7 +137,7 @@ eunice --no-mcp "Simple analysis without any tools"
 
 ### Options
 
-- `--model=MODEL` - Choose AI model (default: gemini-2.5-flash)
+- `--model=MODEL` - Choose AI model (smart default: available Ollama models → Gemini → Anthropic → OpenAI)
 - `--prompt=PROMPT` - Prompt as file or string
 - `--tool-output-limit=N` - Limit tool output display (default: 50)
 - `--silent` - Suppress all output except AI responses (hide tool calls and model info)
@@ -142,6 +146,7 @@ eunice --no-mcp "Simple analysis without any tools"
 - `--list-models` - Show available models
 - `--version` - Show program version number
 - `--help` - Show help with API key status
+- `--interact` - Start interactive mode for ongoing conversations
 
 ## Supported Models
 
@@ -155,26 +160,36 @@ eunice --no-mcp "Simple analysis without any tools"
 eunice includes a comprehensive test suite to validate functionality:
 
 ```bash
-# Run all tests locally
-./test.sh
+# Run all tests locally (optimized for speed)
+make test-host
 
 # Run tests in Docker (clean environment)
-./test-docker.sh
+make test-docker
+
+# Run all available tests
+make test
+
+# Other useful commands
+make help          # Show all available commands
+make install       # Install eunice locally
+make build-and-test # Build Docker image and run tests
 ```
 
 ### Test Coverage
-- **20 comprehensive tests** covering all features
+- **26 comprehensive tests** covering all features
 - Provider detection (OpenAI, Gemini, Anthropic, Ollama)
-- Model validation and routing
-- MCP server integration
-- Tool functionality and colored output
+- Model validation and routing with smart defaults
+- MCP server integration and tool functionality
+- Interactive mode with proper display handling
+- Silent mode and colored output
 - Error handling and edge cases
 - Command line argument parsing
-- Silent mode operation
+- **60% faster execution** with optimized --no-mcp flags for tests that don't need MCP
 
 ### Docker Testing
 The Docker test environment:
 - Uses Alpine Linux for minimal footprint
+- **Optimized layers** (reduced from 9 to 6 layers)
 - Connects to host Ollama via port binding
 - Validates clean installation process
 - Tests all functionality in isolated environment
@@ -237,6 +252,21 @@ uv run eunice.py "your prompt"
 # Test specific features
 uv run eunice.py --silent "quiet operation"
 uv run eunice.py --list-models
+uv run eunice.py --interact  # Start interactive mode
+
+# Development workflow
+make help           # Show all available commands
+make dev            # Development mode
+make reinstall      # Reinstall locally for testing
+make clean          # Clean up temporary files
+
+# Testing
+make test-host      # Fast local tests (60% faster with optimizations)
+make test-docker    # Docker environment tests
+make build-and-test # Full build and test pipeline
+
+# Publishing
+make publish        # Push to Docker registry
 
 # Uninstall
 uv tool uninstall eunice

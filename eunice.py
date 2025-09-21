@@ -659,20 +659,25 @@ def create_client(model: str) -> OpenAI:
     )
 
 
-async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False) -> None:
+async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False, conversation_history: Optional[List[Dict[str, Any]]] = None, suppress_info: bool = False) -> List[Dict[str, Any]]:
     """Run the agent with the given prompt until completion."""
 
-    messages = [
-        {"role": "user", "content": prompt}
-    ]
+    if conversation_history is None:
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+    else:
+        messages = conversation_history.copy()
+        messages.append({"role": "user", "content": prompt})
 
-    # Show MCP server info if available
-    if mcp_manager and not silent:
+    # Show MCP server info if available (unless suppressed for interactive mode)
+    if mcp_manager and not silent and not suppress_info:
         mcp_manager.print_server_info()
 
-    # Show model info
-    provider, _, _ = detect_provider(model)
-    print_model_info(model, provider, silent)
+    # Show model info (unless suppressed for interactive mode)
+    if not suppress_info:
+        provider, _, _ = detect_provider(model)
+        print_model_info(model, provider, silent)
 
     tools = mcp_manager.get_tools_spec() if mcp_manager else []
 
@@ -735,6 +740,44 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
         except Exception as e:
             print(f"Error: {str(e)}", file=sys.stderr)
             sys.exit(1)
+
+    return messages
+
+
+async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Optional[str], tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False) -> None:
+    """Minimal interactive implementation."""
+    conversation_history = []
+
+    # Show MCP server info and model info once at startup
+    if mcp_manager and not silent:
+        mcp_manager.print_server_info()
+
+    # Show model info once at startup
+    provider, _, _ = detect_provider(model)
+    print_model_info(model, provider, silent)
+
+    # Process initial prompt if provided
+    if initial_prompt:
+        conversation_history = await run_agent(client, model, initial_prompt, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True)
+
+    print("\n🔄 Interactive mode. Type 'exit' or 'quit' to end session.")
+
+    while True:
+        try:
+            user_input = input("\n> ").strip()
+            if user_input.lower() in ['exit', 'quit']:
+                break
+            if not user_input:
+                continue
+
+            # Process with existing logic but pass conversation_history and suppress info display
+            conversation_history = await run_agent(client, model, user_input, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True)
+
+        except KeyboardInterrupt:
+            print("\n👋 Session ended.")
+            break
+        except EOFError:
+            break
 
 
 def parse_prompt_arg(prompt_arg: str) -> str:
@@ -830,6 +873,12 @@ def main():
     )
 
     parser.add_argument(
+        "--interact",
+        action="store_true",
+        help="Enable interactive mode for multi-turn conversations"
+    )
+
+    parser.add_argument(
         "prompt_positional",
         nargs="?",
         help="Prompt as positional argument (can be a file path or string)"
@@ -847,14 +896,17 @@ def main():
         print("Error: --no-mcp and --config cannot be used together", file=sys.stderr)
         sys.exit(1)
 
-    # Determine the prompt
+    # Determine the prompt and interactive mode
+    prompt = None
+    interactive_mode = args.interact
+
     if args.prompt is not None:
         prompt = parse_prompt_arg(args.prompt)
     elif args.prompt_positional is not None:
         prompt = parse_prompt_arg(args.prompt_positional)
     else:
-        print("Error: No prompt provided", file=sys.stderr)
-        sys.exit(1)
+        # No prompt provided - default to interactive mode
+        interactive_mode = True
 
     # Determine the model to use (smart default if not specified)
     model = args.model if args.model is not None else get_smart_default_model()
@@ -877,14 +929,14 @@ def main():
                 config_path = str(Path.cwd().joinpath("eunice.json"))
 
         # Run everything in a single asyncio context
-        asyncio.run(main_async(client, model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose))
+        asyncio.run(main_async(client, model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose, interactive_mode))
 
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 
-async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit: int, config_path: Optional[str], silent: bool = False, verbose: bool = False):
+async def main_async(client: OpenAI, model: str, prompt: Optional[str], tool_output_limit: int, config_path: Optional[str], silent: bool = False, verbose: bool = False, interactive: bool = False):
     """Main async function that handles MCP setup and agent execution."""
     mcp_manager = None
 
@@ -894,8 +946,11 @@ async def main_async(client: OpenAI, model: str, prompt: str, tool_output_limit:
             mcp_manager = MCPManager()
             await mcp_manager.load_config(config_path, silent)
 
-        # Run the agent
-        await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose)
+        # Run the appropriate mode
+        if interactive:
+            await simple_interactive_mode(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose)
+        else:
+            await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose)
 
     finally:
         # Always cleanup MCP servers if they exist

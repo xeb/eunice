@@ -23,10 +23,6 @@ test-host: ## Run host-based tests
 	@echo "Running host tests..."
 	./tests/host.sh
 
-test-container: ## Run container tests interactively
-	@echo "Running container tests..."
-	./tests/container.sh
-
 reinstall: ## Reinstall eunice using the reinstall script
 	@echo "Reinstalling eunice..."
 	./scripts/reinstall.sh
@@ -36,6 +32,10 @@ build-and-test: docker-force test-docker ## Build Docker image (force) and run t
 	@echo "=== Build and Test Results ==="
 	@echo "🎉 Docker image built and tested successfully!"
 	@echo "✅ xebxeb/eunice image is ready for use"
+
+publish: ## Push Docker image to registry
+	@echo "Publishing xebxeb/eunice to Docker registry..."
+	docker push xebxeb/eunice
 
 clean: ## Clean up Docker images and containers
 	@echo "Cleaning up Docker resources..."

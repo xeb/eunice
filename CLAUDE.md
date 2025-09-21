@@ -29,7 +29,20 @@ All tools return structured data that the AI models can process and act upon.
 ### Provider Support
 - **OpenAI**: gpt-3.5-turbo, gpt-4, gpt-4o, gpt-4-turbo, gpt-5, chatgpt-4o-latest
 - **Google Gemini**: gemini-2.5-flash, gemini-2.5-pro, gemini-1.5-flash, gemini-1.5-pro
+- **Anthropic**: claude-sonnet-4-20250514, claude-opus-4-1-20250805, or use aliases: `sonnet`, `opus`, `claude-sonnet`, `claude-opus`
 - **Ollama**: Any locally installed model (validated via `ollama list`)
+
+### Smart Default Model Selection
+eunice now features intelligent model selection that automatically chooses the best available model:
+
+**Priority Order:**
+1. **Ollama models** (if available): `gpt-oss:latest`, `deepseek-r1:latest`, `llama3.1:latest`
+2. **Gemini** (if API key exists): `gemini-2.5-flash`
+3. **Anthropic** (if API key exists): `sonnet`
+4. **OpenAI** (if API key exists): `gpt-4o`
+5. **Fallback**: Error with helpful suggestions for installation/configuration
+
+This eliminates the need to specify a model for most use cases - eunice will automatically select the best available option.
 
 ## Installation Methods
 
@@ -71,27 +84,39 @@ This ensures you have the most recent version with all available features.
 Required API keys must be set as environment variables:
 - `OPENAI_API_KEY` - Required for OpenAI models
 - `GEMINI_API_KEY` - Required for Gemini models
+- `ANTHROPIC_API_KEY` - Required for Anthropic models
 - Ollama models run locally and don't require API keys
 
 ### Provider Detection Logic
-1. **Gemini**: Models starting with "gemini" → Gemini API
-2. **Ollama**: Check local availability via `ollama list` (highest priority for installed models)
-3. **OpenAI**: Models matching patterns (gpt*, chatgpt*, etc.) → OpenAI API
-4. **Fallback**: Unknown models default to Ollama with validation
+1. **Anthropic**: Models starting with "claude" or matching aliases (`sonnet`, `opus`) → Anthropic API
+2. **Gemini**: Models starting with "gemini" → Gemini API
+3. **Ollama**: Check local availability via `ollama list` (highest priority for installed models)
+4. **OpenAI**: Models matching patterns (gpt*, chatgpt*, etc.) → OpenAI API
+5. **Fallback**: Unknown models default to Ollama with validation
 
-This ensures models like `gpt-oss` (an Ollama model) are correctly routed to Ollama instead of OpenAI.
+This ensures models like `gpt-oss` (an Ollama model) are correctly routed to Ollama instead of OpenAI, and that Anthropic models are properly handled.
 
 ## Command Line Interface
 
 ### Basic Usage
 ```bash
+# Smart default model selection (automatically chooses best available)
 eunice "How many files are in the current directory?"
+
+# Explicit model specification
 eunice --model="gpt-4" "analyze this codebase"
 eunice --model="gemini-2.5-pro" --prompt=./analysis_request.txt
+eunice --model="sonnet" "explain the code structure"
+eunice --model="opus" "review this implementation"
+
+# Configuration and output control
 eunice --config=./mcp-config.json "analyze my project structure"
 eunice --silent "quiet operation without visual elements"
 eunice --verbose "enable debug output to /tmp/eunice_debug.log"
 eunice --no-mcp "analyze code without any MCP tools"
+
+# Interactive mode for ongoing conversations
+eunice --interact
 
 # With eunice.json in current directory (automatically loaded)
 eunice "What time is it and how many files are here?"
@@ -104,13 +129,14 @@ eunice --config='' "no MCP tools available"
 ```
 
 ### Options
-- `--model=MODEL` - Specify AI model (default: gemini-2.5-flash)
+- `--model=MODEL` - Specify AI model (smart default: available Ollama → Gemini → Anthropic → OpenAI)
 - `--prompt=PROMPT` - Prompt as named argument (can be file path or string)
 - `--tool-output-limit=N` - Limit tool output display (default: 50, 0 = no limit)
 - `--silent` - Suppress all output except AI responses (hide tool calls, model info, MCP displays)
 - `--verbose` - Enable verbose debug output to /tmp/eunice_debug.log
 - `--config=CONFIG_FILE` - Path to JSON configuration file for MCP servers
 - `--no-mcp` - Disable MCP server loading even if eunice.json exists
+- `--interact` - Start interactive mode for ongoing conversations
 - `--list-models` - Show all available models grouped by provider
 - `--version` - Show program version number
 - `--help` - Enhanced help with model availability and API key status
@@ -284,19 +310,41 @@ Tool executions are displayed with colored, framed output:
 
 ### Enhanced Help Display
 The `--help` command shows:
-- Available models grouped by provider with icons (🤖 OpenAI, 💎 Gemini, 🦙 Ollama)
+- Available models grouped by provider with icons (🤖 OpenAI, 💎 Gemini, 🧠 Anthropic, 🦙 Ollama)
 - API key status with checkmarks (✅/❌) and last 4 characters
 - Locally installed Ollama models
+- Smart default model selection information
+
+### Interactive Mode
+eunice features an interactive mode for ongoing conversations:
+
+```bash
+eunice --interact
+```
+
+**Features:**
+- **Single startup display**: Model and MCP server information shown once at session start
+- **Continuous conversation**: No need to restart for follow-up questions
+- **Context preservation**: Maintains conversation history throughout the session
+- **Tool persistence**: MCP servers remain active for the entire session
+- **Clean interface**: No repeated system information displays between prompts
 
 ## Technical Implementation
 
 ### File Structure
-- `eunice.py` - Main executable script with inline dependencies
+- `eunice.py` - Main executable script with inline dependencies (961 lines)
 - `pyproject.toml` - Package configuration for `uv tool install`
-- `test.sh` - Comprehensive test suite (32 tests)
+- `Makefile` - Comprehensive build system with colored help and commands
+- `Dockerfile` - Optimized container image (6 layers, reduced from 9)
+- `tests/host.sh` - Optimized test suite (26 tests, 60% faster execution)
+- `tests/container.sh` - Docker environment tests
+- `tests/container-eunice.sh` - Container-specific eunice tests
+- `scripts/reinstall.sh` - Development utility scripts
+- `TERMINAL_IMPROVEMENTS.md` - Research on Rich library alternatives
 
 ### Dependencies
 - `openai` - Unified API client for all providers (OpenAI, Gemini via OpenAI-compatible endpoints, Ollama)
+- `anthropic` - Anthropic API client for Claude models
 - `mcp` - Model Context Protocol client library for MCP server communication (optional)
 - Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`, `asyncio`, `urllib.request`
 
@@ -307,14 +355,16 @@ The `--help` command shows:
 
 ### Testing
 Comprehensive test coverage including:
-- Provider detection and validation
-- Tool functionality
-- Colored output rendering
+- Provider detection and validation (OpenAI, Gemini, Anthropic, Ollama)
+- Smart default model selection with priority order
+- Tool functionality and MCP server integration
+- Interactive mode with proper display handling
+- Colored output rendering and silent mode
 - Command line argument parsing
 - File vs string prompt detection
-- API key validation
-- Ollama model validation
-- Edge cases (e.g., gpt-oss routing)
+- API key validation and model routing
+- Ollama model validation and availability checking
+- Edge cases (e.g., gpt-oss routing, provider priority)
 
 ### Error Handling
 - Missing API keys: Clear error messages with required environment variables
@@ -472,56 +522,95 @@ This prevents issues like `gpt-oss` being misrouted to OpenAI when it's an Ollam
 
 ## Development Workflow
 
+### Build System
+eunice includes a comprehensive Makefile for development tasks:
+
+```bash
+make help           # Show all available commands with descriptions
+make test-host      # Fast local tests (60% faster with optimizations)
+make test-docker    # Docker environment tests
+make test           # Run all available tests
+make build-and-test # Build Docker image and run tests
+make install        # Install eunice locally
+make reinstall      # Reinstall for development
+make publish        # Push to Docker registry
+make clean          # Clean up temporary files
+```
+
 ### Running Tests
 ```bash
-./test.sh         # Full test suite (20 tests)
-./test-docker.sh  # Docker test environment
+# Optimized local testing (recommended for development)
+make test-host      # 26 tests with --no-mcp optimizations (60% faster)
+
+# Docker testing for clean environment validation
+make test-docker    # Full Docker environment tests
 ```
 
 #### Test Coverage
-- **20 comprehensive tests** covering all functionality
-- Provider detection (OpenAI, Gemini, Anthropic, Ollama)
-- Model validation and routing
+- **26 comprehensive tests** covering all functionality
+- Provider detection (OpenAI, Gemini, Anthropic, Ollama) with smart defaults
+- Model validation and routing with priority order
 - MCP server integration and tool functionality
+- Interactive mode with proper startup display handling
 - Colored output and visual display features
-- Silent mode operation
+- Silent mode operation and verbose debugging
 - Error handling and edge cases
 - Command line argument parsing
 - Long prompt handling and template characters
+- **Performance optimized**: 60% faster execution with selective --no-mcp flags
 
 #### Docker Testing Environment
 The Docker test setup provides:
 - **Clean environment testing** using Alpine Linux
+- **Optimized layers** (reduced from 9 to 6 layers)
 - **Host Ollama connectivity** via port binding to localhost:11434
-- **API key pass-through** for OpenAI/Gemini testing
+- **API key pass-through** for OpenAI/Gemini/Anthropic testing
 - **Isolated dependency validation** ensuring clean installs work
 - **Comprehensive test execution** with full suite coverage
 
 Docker test configuration:
 - Uses `host.docker.internal:host-gateway` for host connectivity
 - Sets `OLLAMA_HOST="http://host.docker.internal:11434"` for model access
-- Copies only essential files: `eunice.py`, `pyproject.toml`, `test.sh`, `README.md`
+- Copies only essential files: `eunice.py`, `pyproject.toml`, `tests/`, `README.md`
 - Validates `uv tool install .` works in clean environment
 
 ### Local Development
 ```bash
+# Direct execution for testing
+uv run eunice.py "test prompt"  # Uses smart default model
 uv run eunice.py --model="llama3.1" "test prompt"
-uv run eunice.py --silent "quiet operation"  # Silent mode
+uv run eunice.py --silent "quiet operation"
+uv run eunice.py --interact  # Interactive mode testing
+
+# Development workflow
+make dev            # Development mode
+make reinstall      # Quick reinstall for testing changes
 ```
 
 ### Installation Testing
 ```bash
 uv tool install .
 eunice --help
+eunice --list-models  # Verify model detection
 uv tool uninstall eunice
 ```
 
 ## Future Considerations
 
 The framework is designed to be extensible while maintaining simplicity:
-- Additional tools can be added to the hardcoded tool set
-- Provider support can be expanded through the unified OpenAI client
-- Output formatting can be enhanced while preserving the colored display system
-- Model validation can be extended to other local providers
+- **Rich Library Integration**: Research completed on terminal display improvements using Rich library (see `TERMINAL_IMPROVEMENTS.md`)
+- **Additional Provider Support**: Framework designed to easily add new AI providers through unified client approach
+- **Enhanced MCP Integration**: Streamlined MCP server management and tool discovery
+- **Performance Optimizations**: Continued test suite improvements and execution speed enhancements
+- **Interactive Enhancements**: Potential for more advanced conversation management and context handling
 
-The core philosophy remains: provide a simple, reliable interface for agentic AI interactions with local file system access.
+**Recent Improvements:**
+- ✅ Smart default model selection with priority ordering
+- ✅ Interactive mode with clean startup display
+- ✅ Test suite optimization (60% faster execution)
+- ✅ Docker layer optimization (9 → 6 layers)
+- ✅ Comprehensive build system with Makefile
+- ✅ Anthropic API integration with model aliases
+- ✅ Enhanced error handling and model routing
+
+The core philosophy remains: provide a simple, reliable interface for agentic AI interactions while continuously improving performance and user experience.
