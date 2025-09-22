@@ -121,14 +121,14 @@ echo "=== Testing Argument Parsing ==="
 # Set a dummy API key for OpenAI tests (these will fail at API call but should pass validation)
 export OPENAI_API_KEY="sk-test123"
 
-run_test "Model parameter" "timeout 5 uv run eunice.py --model=gpt-4 'test prompt' --no-mcp || true" 0 "" "No prompt provided"
-run_test "Prompt parameter" "timeout 5 uv run eunice.py --prompt='test prompt' --no-mcp || true" 0 "" "No prompt provided"
-run_test "Positional prompt" "timeout 5 uv run eunice.py 'test prompt' --no-mcp || true" 0 "" "No prompt provided"
+run_test "Model parameter" "timeout 5 uv run eunice.py --model=gpt-4 'test prompt' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Prompt parameter" "timeout 5 uv run eunice.py --prompt='test prompt' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Positional prompt" "timeout 5 uv run eunice.py 'test prompt' --no-mcp 2>&1" 1 "Error code: 401"
 
 # Test 4: File vs string prompt detection
 echo "=== Testing Prompt Parsing ==="
 
-run_test "File prompt" "timeout 5 uv run eunice.py --prompt=test_prompt.txt --no-mcp || true" 0 "" "No prompt provided"
+run_test "File prompt" "timeout 5 uv run eunice.py --prompt=test_prompt.txt --no-mcp 2>&1" 1 "Error code: 401"
 run_test "Non-existent file prompt" "uv run eunice.py --prompt=nonexistent.txt --no-mcp" 1 "Error reading prompt file"
 
 # Test 5: Provider detection
@@ -150,18 +150,18 @@ run_test "Asyncio import test" "python3 -c 'import asyncio; print(\"Asyncio avai
 echo "=== Testing Usage Patterns from Spec ==="
 
 # Test the exact patterns from the specification
-run_test "Basic usage pattern" "timeout 5 uv run eunice.py 'How many files are in the current directory?' || true" 0
-run_test "Model specification pattern" "timeout 5 uv run eunice.py --model='gpt-4' 'how many files in the current directory?' || true" 0
-run_test "Gemini with prompt file" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt=test_prompt.txt || true" 0
-run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='$TEST_MODEL' test_prompt.txt || true" 0
-run_test "Prompt parameter usage" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt='How many files in the current directory?' || true" 0
+run_test "Basic usage pattern" "timeout 5 uv run eunice.py 'How many files are in the current directory?' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Model specification pattern" "timeout 5 uv run eunice.py --model='gpt-4' 'how many files in the current directory?' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Gemini with prompt file" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt=test_prompt.txt --no-mcp 2>&1" 1 "400\|401\|403"
+run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='$TEST_MODEL' test_prompt.txt --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Prompt parameter usage" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt='How many files in the current directory?' --no-mcp 2>&1" 1 "400\|401\|403"
 
 # Test 8: Error handling
 echo "=== Testing Error Handling ==="
 
-run_test "Invalid model format" "timeout 5 uv run eunice.py --model='' 'test' --no-mcp || true" 0 # Should default to Ollama
-run_test "Empty prompt" "timeout 5 uv run eunice.py '' --no-mcp || true" 0 # Should work, just send empty prompt
-run_test "Very long prompt" "timeout 5 uv run eunice.py 'This is a very long prompt that should still work fine and not cause any issues with the argument parsing or processing mechanisms implemented in the eunice CLI tool' --no-mcp || true" 0 # Should work
+run_test "Invalid model format" "timeout 5 uv run eunice.py --model='' 'test' --no-mcp 2>&1" 1 "Model.*not recognized"
+run_test "Empty prompt" "timeout 5 uv run eunice.py '' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Very long prompt" "timeout 5 uv run eunice.py 'This is a very long prompt that should still work fine and not cause any issues with the argument parsing or processing mechanisms implemented in the eunice CLI tool' --no-mcp 2>&1" 1 "Error code: 401"
 
 # Test 9: Colored output functionality
 echo "=== Testing Colored Output ==="
