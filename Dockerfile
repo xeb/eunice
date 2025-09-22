@@ -8,6 +8,8 @@ RUN apk add --no-cache git curl bash python3 sqlite nodejs npm && \
 # Set working directory and PATH
 WORKDIR /root
 ENV PATH="/root/.local/bin:$PATH"
+# Configure Ollama host for container access
+ENV OLLAMA_HOST="http://host.docker.internal:11434"
 
 # Copy all files and setup permissions in one layer
 COPY eunice.py pyproject.toml README.md config.example.json ./

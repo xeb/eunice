@@ -15,20 +15,15 @@ else
 fi
 
 # Create a simple, reliable eunice.json for the container test
+# Use working MCP servers that can actually start
 cat > /root/eunice.json << 'EOF'
 {
   "mcpServers": {
-    "test-server": {
-      "command": "cat",
-      "args": []
-    },
-    "another-server": {
-      "command": "cat",
-      "args": []
-    },
-    "third-server": {
-      "command": "cat",
-      "args": []
+    "time": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-time"
+      ]
     }
   }
 }

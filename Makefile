@@ -17,7 +17,7 @@ docker-force: ## Build Docker image without cache (force rebuild)
 
 test-docker: ## Run Docker container tests
 	@echo "Running container tests..."
-	docker run --rm --network host xebxeb/eunice
+	docker run --rm --add-host=host.docker.internal:host-gateway xebxeb/eunice
 
 test-host: ## Run host-based tests
 	@echo "Running host tests..."
