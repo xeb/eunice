@@ -207,10 +207,10 @@ class CustomHelpFormatter(argparse.RawDescriptionHelpFormatter):
 
 class MCPServer:
     """Represents an MCP server with its process and tools."""
-    def __init__(self, name: str, command: str, args: List[str]):
+    def __init__(self, name: str, command: str, args: List[str] = None):
         self.name = name
         self.command = command
-        self.args = args
+        self.args = args if args is not None else []
         self.process = None
         self.tools = []
 
@@ -390,12 +390,14 @@ class MCPManager:
             # Load MCP servers
             if "mcpServers" in config:
                 for server_name, server_config in config["mcpServers"].items():
-                    if "command" not in server_config or "args" not in server_config:
+                    if "command" not in server_config:
                         if not silent:
-                            print(f"Warning: Invalid configuration for MCP server {server_name}", file=sys.stderr)
+                            print(f"Warning: Invalid configuration for MCP server {server_name}: missing 'command' field", file=sys.stderr)
                         continue
 
-                    server = MCPServer(server_name, server_config["command"], server_config["args"])
+                    # args is optional, default to empty list
+                    args = server_config.get("args", [])
+                    server = MCPServer(server_name, server_config["command"], args)
                     if await server.start():
                         self.servers[server_name] = server
                         self.tools.extend(server.tools)
