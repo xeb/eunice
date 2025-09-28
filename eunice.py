@@ -68,6 +68,13 @@ def print_model_info(model: str, provider: str, silent: bool = False) -> None:
     content = f"🤖 Model: {model} ({provider})"
     console.print(Panel(content, border_style="yellow", title="Model Info"))
 
+def print_verbose_llm_info(message: str, verbose: bool = False) -> None:
+    """Print verbose LLM information in light grey color."""
+    if not verbose:
+        return
+
+    console.print(f"[dim]{message}[/dim]")
+
 
 def get_ollama_models() -> List[str]:
     """Get list of available Ollama models via HTTP API."""
@@ -98,9 +105,10 @@ def get_supported_models() -> Dict[str, List[str]]:
         ],
         "Gemini": [
             "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash-lite-latest",
             "gemini-2.5-pro",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro"
+            "gemini-flash-latest"
         ],
         "Anthropic": [
             "claude-sonnet-4-20250514",
@@ -625,12 +633,26 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
 
     while True:
         try:
+            # Extract the current prompt for verbose logging
+            current_prompt = ""
+            if messages:
+                last_message = messages[-1]
+                if last_message.get("role") == "user" and last_message.get("content"):
+                    current_prompt = last_message["content"][:50]
+                    if len(last_message["content"]) > 50:
+                        current_prompt += "..."
+
+            print_verbose_llm_info(f"🔄 Calling LLM with prompt: {current_prompt}", verbose)
+            print_verbose_llm_info("⏳ Waiting for response...", verbose)
+
             response = client.chat.completions.create(
                 model=resolved_model,
                 messages=messages,
                 tools=tools if tools else None,
                 tool_choice="auto" if tools else None
             )
+
+            print_verbose_llm_info("✅ Response received", verbose)
 
             message = response.choices[0].message
             messages.append({
