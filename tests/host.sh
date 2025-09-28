@@ -285,6 +285,18 @@ fi
 # Test that help still shows --silent option
 run_test "Silent option in help" "uv run eunice.py --help --no-mcp" 0 "silent"
 
+# Test 17a: Verbose Mode Operation
+echo "=== Testing Verbose Mode Operation ==="
+
+# Test that --verbose shows prompt in grey logging when calling LLM (short prompt - should show full)
+run_test "Verbose mode shows short prompt fully" "timeout 5 uv run eunice.py --verbose --model=$TEST_MODEL 'test prompt for verbose logging' --no-mcp 2>&1 || echo 'Verbose test completed'" 0 "🔄 Calling LLM with prompt: test prompt for verbose logging"
+
+# Test that --verbose shows truncated prompt for long prompts (50 chars + ...)
+run_test "Verbose mode truncates long prompts to 50 chars" "timeout 5 uv run eunice.py --verbose --model=$TEST_MODEL 'this is a very long prompt that definitely exceeds the fifty character limit and should be truncated' --no-mcp 2>&1 || echo 'Verbose test completed'" 0 "this is a very long prompt that definitely.*exceeds\.\.\."
+
+# Test that --verbose option appears in help
+run_test "Verbose option in help" "uv run eunice.py --help --no-mcp" 0 "verbose"
+
 # Test 18: Automatic eunice.json Loading
 echo "=== Testing Automatic eunice.json Loading ==="
 
