@@ -4,11 +4,63 @@ An agent tool and framework that runs with different LLM providers (including Ol
 
 > **Name Origin**: eunice is named after the AI character Eunice from William Gibson's novel "Agency" - a highly capable artificial intelligence that assists with complex tasks through natural conversation.
 
+## Sample Usage
+
+Here's a comprehensive example showing eunice in action with MCP server configuration:
+
+```bash
+time uvx git+https://github.com/xeb/eunice --verbose --model=gemini-2.5-pro --config=my_mcp_servers.json prompt.txt
+```
+
+**Sample MCP Configuration** (`my_mcp_servers.json`):
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory", "."]
+    }
+  }
+}
+```
+
+**Sample Prompt File** (`prompt.txt`):
+```
+Analyze this project directory and help me understand:
+
+1. What is the current time and date?
+2. What files and directories exist in this project?
+3. Read the main Python file and summarize its purpose
+4. Store a brief project summary in memory for future reference
+5. If there's a README, fetch any external links mentioned and summarize what they contain
+
+Please be thorough and use the available tools to provide a comprehensive analysis.
+```
+
+This example demonstrates:
+- Using `uvx` for one-time execution without installation
+- Verbose mode (`--verbose`) for detailed debugging output to `/tmp/eunice_debug.log`
+- Multiple MCP servers (filesystem, time, fetch, memory) working together
+- File-based prompts for complex multi-step tasks
+- Timing the execution with the `time` command
+
 ## Project Goals
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **897/2,000 lines** (44.85% used, **55.15% remaining**)
+✅ **Current Status**: `eunice.py` is **894/2,000 lines** (44.7% used, **55.3% remaining**)
 
 ## Installation
 
