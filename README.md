@@ -6,6 +6,8 @@ An agent tool and framework that runs with different LLM providers (including Ol
 
 ## Sample Usage
 
+![eunice in action](assets/session.gif)
+
 Here's a comprehensive example showing eunice in action with MCP server configuration:
 
 ```bash

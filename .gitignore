@@ -7,3 +7,6 @@ __pycache__/
 old/
 uv.lock
 eunice.json
+my_mcp_servers.json
+prompt.txt
+*.cast
