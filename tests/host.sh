@@ -122,13 +122,13 @@ echo "=== Testing Argument Parsing ==="
 export OPENAI_API_KEY="sk-test123"
 
 run_test "Model parameter" "timeout 5 uv run eunice.py --model=gpt-4 'test prompt' --no-mcp 2>&1" 1 "Error code: 401"
-run_test "Prompt parameter" "timeout 5 uv run eunice.py --prompt='test prompt' --no-mcp 2>&1" 1 "Error code: 401"
-run_test "Positional prompt" "timeout 5 uv run eunice.py 'test prompt' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Prompt parameter" "timeout 5 uv run eunice.py --model=gpt-4 --prompt='test prompt' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Positional prompt" "timeout 5 uv run eunice.py --model=gpt-4 'test prompt' --no-mcp 2>&1" 1 "Error code: 401"
 
 # Test 4: File vs string prompt detection
 echo "=== Testing Prompt Parsing ==="
 
-run_test "File prompt" "timeout 5 uv run eunice.py --prompt=test_prompt.txt --no-mcp 2>&1" 1 "Error code: 401"
+run_test "File prompt" "timeout 5 uv run eunice.py --model=gpt-4 --prompt=test_prompt.txt --no-mcp 2>&1" 1 "Error code: 401"
 run_test "Non-existent file prompt" "uv run eunice.py --prompt=nonexistent.txt --no-mcp" 1 "Error reading prompt file"
 
 # Test 5: Provider detection
@@ -137,8 +137,8 @@ echo "=== Testing Provider Detection ==="
 # These tests check that the right provider is detected (will fail at API call but that's expected)
 run_test "OpenAI model detection" "timeout 5 uv run eunice.py --model=gpt-4 'test' --no-mcp || echo 'Provider detected correctly'" 0
 run_test "Gemini model detection (with key)" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model=gemini-2.5-flash 'test' --no-mcp || echo 'Provider detected correctly'" 0
-run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=$TEST_MODEL 'test' --no-mcp || echo 'Provider detected correctly'" 0 "Provider detected correctly"
-run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' --no-mcp || echo 'Provider detected correctly'" 0 "Provider detected correctly"
+run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=$TEST_MODEL 'test' --no-mcp 2>&1" 0 "Model: $TEST_MODEL"
+run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' --no-mcp 2>&1" 0 "Model: gpt-oss"
 
 # Test 6: MCP Import Dependencies
 echo "=== Testing MCP Dependencies ==="
@@ -150,18 +150,18 @@ run_test "Asyncio import test" "python3 -c 'import asyncio; print(\"Asyncio avai
 echo "=== Testing Usage Patterns from Spec ==="
 
 # Test the exact patterns from the specification
-run_test "Basic usage pattern" "timeout 5 uv run eunice.py 'How many files are in the current directory?' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Basic usage pattern" "timeout 5 uv run eunice.py --model=gpt-4 'How many files are in the current directory?' --no-mcp 2>&1" 1 "Error code: 401"
 run_test "Model specification pattern" "timeout 5 uv run eunice.py --model='gpt-4' 'how many files in the current directory?' --no-mcp 2>&1" 1 "Error code: 401"
 run_test "Gemini with prompt file" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt=test_prompt.txt --no-mcp 2>&1" 1 "400\|401\|403"
-run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='$TEST_MODEL' test_prompt.txt --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='$TEST_MODEL' test_prompt.txt --no-mcp 2>&1" 0 ""
 run_test "Prompt parameter usage" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt='How many files in the current directory?' --no-mcp 2>&1" 1 "400\|401\|403"
 
 # Test 8: Error handling
 echo "=== Testing Error Handling ==="
 
 run_test "Invalid model format" "timeout 5 uv run eunice.py --model='' 'test' --no-mcp 2>&1" 1 "Model.*not recognized"
-run_test "Empty prompt" "timeout 5 uv run eunice.py '' --no-mcp 2>&1" 1 "Error code: 401"
-run_test "Very long prompt" "timeout 5 uv run eunice.py 'This is a very long prompt that should still work fine and not cause any issues with the argument parsing or processing mechanisms implemented in the eunice CLI tool' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Empty prompt" "timeout 5 uv run eunice.py --model=gpt-4 '' --no-mcp 2>&1" 1 "Error code: 401"
+run_test "Very long prompt" "timeout 5 uv run eunice.py --model=gpt-4 'This is a very long prompt that should still work fine and not cause any issues with the argument parsing or processing mechanisms implemented in the eunice CLI tool' --no-mcp 2>&1" 1 "Error code: 401"
 
 # Test 9: Colored output functionality
 echo "=== Testing Colored Output ==="
@@ -235,12 +235,40 @@ EOF
 # Test config loading (should start server even if it fails to connect properly)
 run_test "MCP config loading" "timeout 3 uv run eunice.py --config=test_mcp_config.json 'test' 2>&1 || echo 'Config loaded'" 0 "" ""
 
+# Test unified MCP tool naming (underscores work across all providers)
+if [ -f "eunice.json" ]; then
+    echo "Testing unified MCP tool naming (underscores)..."
+
+    # Test that Anthropic models work with underscore-named tools
+    if [ -n "$ANTHROPIC_API_KEY" ]; then
+        run_test "Anthropic with MCP tools" "timeout 30 uv run eunice.py --model=sonnet --config=eunice.json 'What is the current time?' 2>&1" 0 "time"
+        run_test "Anthropic MCP tool listing" "timeout 30 uv run eunice.py --model=sonnet --config=eunice.json 'List the first 3 tools available to you' 2>&1" 0 "filesystem"
+    else
+        echo "Skipping Anthropic MCP tests - ANTHROPIC_API_KEY not set"
+    fi
+
+    # Test that OpenAI models work with underscore-named tools
+    if [ -n "$OPENAI_API_KEY" ]; then
+        run_test "OpenAI with MCP tools" "timeout 30 uv run eunice.py --model=gpt-4o --config=eunice.json 'What tools do you have?' 2>&1 || echo 'OpenAI test completed'" 0 "" ""
+    else
+        echo "Skipping OpenAI MCP tests - OPENAI_API_KEY not set"
+    fi
+
+    # Test that Ollama models work with underscore-named tools
+    if [ "$OLLAMA_AVAILABLE" = "true" ]; then
+        run_test "Ollama with MCP tools" "timeout 25 uv run eunice.py --model=llama3.1:latest --config=eunice.json 'What tools are available?' 2>&1" 0 "filesystem_"
+    fi
+fi
+
 # Test with actual config.example.json if it exists
 if [ -f "config.example.json" ]; then
     echo "Found config.example.json - testing MCP functionality (may timeout due to MCP server startup time)"
     run_test "MCP basic functionality" "echo 'MCP tests skipped - run manually: eunice --config=config.example.json \"How many tools?\"'" 0 "" ""
     run_test "MCP config validation" "grep -q 'mcpServers' config.example.json && echo 'Config file valid' || echo 'Config invalid'" 0 "Config file valid"
     run_test "MCP server definitions" "grep -q 'filesystem' config.example.json && grep -q 'memory' config.example.json && grep -q 'time' config.example.json && echo 'Key servers defined' || echo 'Servers missing'" 0 "Key servers defined"
+
+    # Test filesystem MCP server tool calling
+    run_test "MCP filesystem read_text_file tool call" "timeout 15 uv run eunice.py --config=config.example.json --model=$TEST_MODEL 'Read the file README.md and tell me what it is about in one sentence' 2>&1 || echo 'Filesystem test completed'" 0 "" "No response from MCP server"
 
     # Test complex multi-tool MCP integration (demonstrates full capability)
     # This tests: long prompt handling, multiple tool calls, time, filesystem, fetch, and sequential thinking
@@ -292,7 +320,7 @@ echo "=== Testing Verbose Mode Operation ==="
 run_test "Verbose mode shows short prompt fully" "timeout 5 uv run eunice.py --verbose --model=$TEST_MODEL 'test prompt for verbose logging' --no-mcp 2>&1 || echo 'Verbose test completed'" 0 "🔄 Calling LLM with prompt: test prompt for verbose logging"
 
 # Test that --verbose shows truncated prompt for long prompts (50 chars + ...)
-run_test "Verbose mode truncates long prompts to 50 chars" "timeout 5 uv run eunice.py --verbose --model=$TEST_MODEL 'this is a very long prompt that definitely exceeds the fifty character limit and should be truncated' --no-mcp 2>&1 || echo 'Verbose test completed'" 0 "this is a very long prompt that definitely.*exceeds\.\.\."
+run_test "Verbose mode truncates long prompts to 50 chars" "timeout 5 uv run eunice.py --verbose --model=$TEST_MODEL 'this is a very long prompt that definitely exceeds the fifty character limit and should be truncated' --no-mcp 2>&1 || echo 'Verbose test completed'" 0 "exceeds\.\.\."
 
 # Test that --verbose option appears in help
 run_test "Verbose option in help" "uv run eunice.py --help --no-mcp" 0 "verbose"

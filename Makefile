@@ -1,4 +1,4 @@
-.PHONY: help docker docker-force test-docker test-host test-container reinstall clean build-and-test
+.PHONY: help docker docker-force test-docker test-host test-container test-fs test reinstall clean build-and-test
 
 .DEFAULT_GOAL := help
 
@@ -22,6 +22,12 @@ test-docker: ## Run Docker container tests
 test-host: ## Run host-based tests
 	@echo "Running host tests..."
 	./tests/host.sh
+
+test-fs: ## Run filesystem tests
+	@echo "Running filesystem tests..."
+	./tests/test_filesystem.sh
+
+test: test-host test-fs ## Run all tests
 
 reinstall: ## Reinstall eunice using the reinstall script
 	@echo "Reinstalling eunice..."

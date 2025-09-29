@@ -11,8 +11,6 @@ eunice - Agentic CLI runner
 Usage: eunice [--model=MODEL] [--prompt=PROMPT] [prompt]
 """
 
-__version__ = "1.1.3"
-
 import argparse
 import asyncio
 import json
@@ -24,6 +22,12 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, AsyncGenerator
+
+try:
+    from importlib.metadata import version
+    __version__ = version("eunice")
+except Exception:
+    __version__ = "dev"
 
 
 import openai
@@ -112,8 +116,10 @@ def get_supported_models() -> Dict[str, List[str]]:
         ],
         "Anthropic": [
             "claude-sonnet-4-20250514",
+            "claude-sonnet-4-5-20250929",
             "claude-opus-4-1-20250805",
             "sonnet",
+            "sonnet-4.5",
             "opus",
             "claude-sonnet",
             "claude-opus"
@@ -304,8 +310,8 @@ class MCPServer:
         response = await self._read_message()
         if response and response.get("result") and "tools" in response["result"]:
             for tool in response["result"]["tools"]:
-                # Prefix tool name with server name
-                tool_name = f"{self.name}.{tool['name']}"
+                # Prefix tool name with server name using underscore (works across all providers)
+                tool_name = f"{self.name}_{tool['name']}"
                 tool_spec = {
                     "type": "function",
                     "function": {
@@ -323,8 +329,8 @@ class MCPServer:
         import time
         start_time = time.time()
 
-        # Remove server prefix from tool name
-        actual_tool_name = tool_name.split(".", 1)[1] if "." in tool_name else tool_name
+        # Remove server prefix from tool name (now uses underscore separator)
+        actual_tool_name = tool_name.split("_", 1)[1] if "_" in tool_name else tool_name
 
 
         await self._send_message({
@@ -425,17 +431,26 @@ class MCPManager:
             raise
 
     def get_tools_spec(self) -> List[Dict[str, Any]]:
-        """Return the OpenAI tools specification for all MCP tools."""
+        """Return the tools specification for all MCP tools."""
         return self.tools
 
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], verbose: bool = False) -> str:
-        """Execute a tool call by routing to the appropriate server."""
+        """Execute a tool call by routing to the appropriate server.
+
+        Args:
+            tool_name: Tool name in format servername_toolname (e.g., filesystem_read_file)
+            arguments: Tool arguments
+            verbose: Enable verbose logging
+
+        Returns:
+            Tool execution result as string
+        """
         start_time = time.time()
 
-        if "." not in tool_name:
+        if "_" not in tool_name:
             return f"Error: Invalid tool name '{tool_name}' - tools must be prefixed with server name"
 
-        server_name = tool_name.split(".", 1)[0]
+        server_name = tool_name.split("_", 1)[0]
 
         try:
             # Check MCP servers first
@@ -488,24 +503,22 @@ class MCPManager:
 
 
 def validate_ollama_model(model: str) -> bool:
-    """Validate that an Ollama model is installed locally."""
+    """
+    Validate that an Ollama model is installed locally.
+    Handles both exact matches and tag-less model names (e.g., 'gpt-oss' matches 'gpt-oss:latest').
+    """
     available_models = get_ollama_models()
-    return model in available_models
 
+    # Check for exact match first
+    if model in available_models:
+        return True
 
-def resolve_anthropic_model(model: str) -> str:
-    """Resolve Anthropic model aliases to full model names."""
-    model_lower = model.lower()
+    # If no exact match and model doesn't have a tag, check if model:latest exists
+    if ':' not in model:
+        if f"{model}:latest" in available_models:
+            return True
 
-    # Alias mappings
-    alias_map = {
-        "sonnet": "claude-sonnet-4-20250514",
-        "claude-sonnet": "claude-sonnet-4-20250514",
-        "opus": "claude-opus-4-1-20250805",
-        "claude-opus": "claude-opus-4-1-20250805"
-    }
-
-    return alias_map.get(model_lower, model)
+    return False
 
 
 def get_smart_default_model() -> str:
@@ -543,10 +556,10 @@ def get_smart_default_model() -> str:
     return "gemini-2.5-flash"
 
 
-def detect_provider(model: str) -> tuple[str, str, str]:
+def detect_provider(model: str) -> tuple[str, str, str, str]:
     """
     Detect the provider based on model name.
-    Returns (provider, base_url, api_key)
+    Returns (provider, base_url, api_key, resolved_model)
     """
     model_lower = model.lower()
 
@@ -555,30 +568,44 @@ def detect_provider(model: str) -> tuple[str, str, str]:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError(f"GEMINI_API_KEY environment variable is required for model '{model}'")
-        return "gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", api_key
+        return "gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", api_key, model
 
     # Anthropic models (Claude) - check aliases and full names
-    elif (model_lower.startswith("claude") or
-          model_lower in ["sonnet", "opus", "claude-sonnet", "claude-opus"]):
+    # Accept any claude-sonnet* or claude-opus* model
+    elif (model_lower.startswith("claude-sonnet") or
+          model_lower.startswith("claude-opus") or
+          model_lower.startswith("sonnet") or
+          model_lower.startswith("opus")):
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError(f"ANTHROPIC_API_KEY environment variable is required for model '{model}'")
-        # Resolve model alias to full name
-        resolved_model = resolve_anthropic_model(model)
+
+        # Resolve model alias to full name (inline to avoid separate function)
+        alias_map = {
+            "sonnet": "claude-sonnet-4-20250514",
+            "sonnet-4.5": "claude-sonnet-4-5-20250929",
+            "claude-sonnet": "claude-sonnet-4-20250514",
+            "opus": "claude-opus-4-1-20250805",
+            "claude-opus": "claude-opus-4-1-20250805"
+        }
+        resolved_model = alias_map.get(model_lower, model)
+
         # Anthropic doesn't have OpenAI-compatible endpoints, but the openai library supports Anthropic
-        return "anthropic", "https://api.anthropic.com/v1", api_key
+        return "anthropic", "https://api.anthropic.com/v1", api_key, resolved_model
 
     # Check if model is available in Ollama first (to handle cases like gpt-oss)
     elif validate_ollama_model(model):
         ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
-        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama"
+        # Normalize model name - if no tag specified, append :latest
+        resolved_model = model if ':' in model else f"{model}:latest"
+        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama", resolved_model
 
     # OpenAI models (only if not found in Ollama)
     elif any(prefix in model_lower for prefix in ["gpt", "chatgpt", "davinci", "curie", "babbage", "ada"]):
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(f"OPENAI_API_KEY environment variable is required for model '{model}'")
-        return "openai", "https://api.openai.com/v1", api_key
+        return "openai", "https://api.openai.com/v1", api_key, model
 
     # Fallback: try Ollama for any other model
     else:
@@ -591,12 +618,12 @@ def detect_provider(model: str) -> tuple[str, str, str]:
             raise ValueError(f"Model '{model}' not recognized and no Ollama models found. Try running: ollama pull {model}")
 
         ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
-        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama"
+        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama", model
 
 
 def create_client(model: str) -> OpenAI:
     """Create an OpenAI client based on the model."""
-    provider, base_url, api_key = detect_provider(model)
+    provider, base_url, api_key, resolved_model = detect_provider(model)
 
     return OpenAI(
         api_key=api_key,
@@ -622,14 +649,13 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
 
     # Show model info (unless suppressed for interactive mode)
     if not suppress_info:
-        provider, _, _ = detect_provider(model)
+        provider, _, _, _ = detect_provider(model)
         print_model_info(model, provider, silent)
 
     tools = mcp_manager.get_tools_spec() if mcp_manager else []
 
-
-    # Resolve model name for API call (handles Anthropic aliases)
-    resolved_model = resolve_anthropic_model(model)
+    # Get resolved model name from provider detection
+    _, _, _, resolved_model = detect_provider(model)
 
     while True:
         try:
@@ -713,7 +739,7 @@ async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Op
         mcp_manager.print_server_info()
 
     # Show model info once at startup
-    provider, _, _ = detect_provider(model)
+    provider, _, _, _ = detect_provider(model)
     print_model_info(model, provider, silent)
 
     # Process initial prompt if provided
