@@ -467,6 +467,25 @@ else
     echo "Warning: tests/tools.sh not found, skipping"
 fi
 
+# Test 22: All Models Comprehensive Testing
+echo "=== Running All Models Tests ==="
+
+# Run the comprehensive all_models.sh test suite
+if [ -f "tests/all_models.sh" ]; then
+    echo "Running all_models.sh..."
+    bash tests/all_models.sh
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}all_models.sh tests failed${NC}"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    else
+        echo -e "${GREEN}all_models.sh tests passed${NC}"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    fi
+    TESTS_RUN=$((TESTS_RUN + 1))
+else
+    echo "Warning: tests/all_models.sh not found, skipping"
+fi
+
 # Cleanup
 echo "Cleaning up test environment..."
 rm -rf test_data

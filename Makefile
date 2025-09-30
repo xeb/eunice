@@ -1,4 +1,4 @@
-.PHONY: help docker docker-force test-docker test-host test-container test-fs test-tools test reinstall clean build-and-test
+.PHONY: help docker docker-force test-docker test-host test-container test-fs test-tools test-models test reinstall clean build-and-test
 
 .DEFAULT_GOAL := help
 
@@ -30,6 +30,10 @@ test-fs: ## Run filesystem tests
 test-tools: ## Run MCP tool routing tests
 	@echo "Running MCP tool routing tests..."
 	./tests/tools.sh
+
+test-models: ## Run comprehensive model tests for all providers
+	@echo "Running comprehensive model tests..."
+	./tests/all_models.sh
 
 test: test-host test-fs ## Run all tests (host.sh already includes tools.sh)
 
