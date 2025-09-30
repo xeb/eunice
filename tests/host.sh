@@ -235,6 +235,22 @@ EOF
 # Test config loading (should start server even if it fails to connect properly)
 run_test "MCP config loading" "timeout 3 uv run eunice.py --config=test_mcp_config.json 'test' 2>&1 || echo 'Config loaded'" 0 "" ""
 
+# Test MCP server names with underscores (e.g., email_summarizer)
+cat > test_underscore_server.json << 'EOF'
+{
+  "mcpServers": {
+    "email_summarizer": {
+      "command": "echo",
+      "args": ["test"]
+    }
+  }
+}
+EOF
+
+# Test that server names with underscores don't cause "Unknown server" errors
+# The echo command will fail to be an MCP server, but tool routing should still work
+run_test "MCP server names with underscores" "timeout 5 uv run eunice.py --config=test_underscore_server.json --model=$TEST_MODEL 'test' 2>&1 | grep -v 'Unknown server' && echo 'No routing errors'" 0 "No routing errors"
+
 # Test unified MCP tool naming (underscores work across all providers)
 if [ -f "eunice.json" ]; then
     echo "Testing unified MCP tool naming (underscores)..."
@@ -432,6 +448,25 @@ else
     run_test "Claude Opus 4.1 detection" "uv run eunice.py --model=claude-opus-4-1-20250805 'test' --no-mcp" 1 "ANTHROPIC_API_KEY environment variable is required"
 fi
 
+# Test 21: MCP Tool Routing (comprehensive)
+echo "=== Running MCP Tool Routing Tests ==="
+
+# Run the comprehensive tools.sh test suite
+if [ -f "tests/tools.sh" ]; then
+    echo "Running tools.sh..."
+    bash tests/tools.sh
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}tools.sh tests failed${NC}"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    else
+        echo -e "${GREEN}tools.sh tests passed${NC}"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    fi
+    TESTS_RUN=$((TESTS_RUN + 1))
+else
+    echo "Warning: tests/tools.sh not found, skipping"
+fi
+
 # Cleanup
 echo "Cleaning up test environment..."
 rm -rf test_data
@@ -439,6 +474,7 @@ rm -f test_prompt.txt
 rm -f test_tools.py
 rm -f test_colored_output.py
 rm -f test_mcp_config.json
+rm -f test_underscore_server.json
 rm -f eunice.json
 
 

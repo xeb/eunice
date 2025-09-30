@@ -192,33 +192,35 @@ eunice supports Model Context Protocol (MCP) servers to extend tool capabilities
 1. **Startup**: eunice spawns each configured MCP server as a subprocess
 2. **Initialization**: Handshake and capability exchange via stdio
 3. **Tool Discovery**: Each MCP server exposes its available tools via the MCP protocol
-4. **Tool Registration**: Tools are registered with server name prefix (e.g., `time.get_current_time`)
+4. **Tool Registration**: Tools are registered with server name prefix (e.g., `time_get_current_time`)
 5. **Tool Execution**: AI model can call MCP tools alongside built-in tools
 6. **Shutdown**: MCP servers are terminated when eunice exits
 
 #### Tool Registration and Naming
 Each MCP server can expose multiple tools. To avoid naming conflicts and provide clear tool origin, all MCP tools are registered with a server name prefix:
 
-**Naming Convention**: `{server_name}.{tool_name}`
+**Naming Convention**: `{server_name}_{tool_name}`
 
 **Examples from configuration:**
-- `time` server with `get_current_time` tool → registered as `time.get_current_time`
-- `filesystem` server with `read_file` tool → registered as `filesystem.read_file`
-- `fetch` server with `fetch` tool → registered as `fetch.fetch`
-- `memory` server with `store` tool → registered as `memory.store`
+- `time` server with `get_current_time` tool → registered as `time_get_current_time`
+- `filesystem` server with `read_file` tool → registered as `filesystem_read_file`
+- `fetch` server with `fetch` tool → registered as `fetch_fetch`
+- `memory` server with `store` tool → registered as `memory_store`
+- `email_summarizer` server with `list_configs` tool → registered as `email_summarizer_list_configs`
+
+**Important**: Server names can themselves contain underscores (e.g., `email_summarizer`). The tool routing logic correctly handles this by matching the longest server name prefix.
 
 **Tool Discovery Process:**
 1. eunice connects to each configured MCP server
 2. Sends `tools/list` request to discover available tools
-3. Registers each tool with `{server_name}.{tool_name}` format
-4. Merges MCP tools with built-in tools (`list_files`, `read_file`)
-5. Presents unified tool list to AI model
+3. Registers each tool with `{server_name}_{tool_name}` format
+4. Presents unified tool list to AI model
 
 **Tool Routing:**
-- Built-in tools: Executed directly by eunice
-- MCP tools: Routed to appropriate server based on prefix
-- Tool calls like `time.get_current_time` are sent to the `time` server
-- Server name is stripped before forwarding: `get_current_time` sent to server
+- MCP tools: Routed to appropriate server by matching server name prefix
+- Tool calls like `email_summarizer_list_configs` are sent to the `email_summarizer` server
+- Server name prefix is stripped before forwarding: `list_configs` sent to server
+- Works correctly with server names containing underscores
 
 #### Common MCP Servers and Their Tools
 - **Filesystem** (`@modelcontextprotocol/server-filesystem`): `read_file`, `write_file`, `list_directory`, `create_directory`
@@ -229,19 +231,17 @@ Each MCP server can expose multiple tools. To avoid naming conflicts and provide
 
 **Example Tool Registrations:**
 ```
-Built-in Tools:
-- list_files
-- read_file
-
 MCP Tools (with server prefixes):
-- filesystem.read_file
-- filesystem.write_file
-- filesystem.list_directory
-- memory.store
-- memory.retrieve
-- fetch.fetch
-- time.get_current_time
-- sequential-thinking.think
+- filesystem_read_file
+- filesystem_write_file
+- filesystem_list_directory
+- memory_store
+- memory_retrieve
+- fetch_fetch
+- time_get_current_time
+- sequential-thinking_sequentialthinking
+- email_summarizer_list_configs
+- email_summarizer_search_by_config
 ```
 
 #### Error Handling

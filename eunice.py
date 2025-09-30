@@ -450,18 +450,23 @@ class MCPManager:
         if "_" not in tool_name:
             return f"Error: Invalid tool name '{tool_name}' - tools must be prefixed with server name"
 
-        server_name = tool_name.split("_", 1)[0]
+        # Find the matching server by checking if tool_name starts with server_name_
+        server_name = None
+        for sname in self.servers.keys():
+            if tool_name.startswith(f"{sname}_"):
+                server_name = sname
+                break
 
         try:
             # Check MCP servers first
-            if server_name in self.servers:
+            if server_name and server_name in self.servers:
                 result = await self.servers[server_name].call_tool(tool_name, arguments, verbose)
                 end_time = time.time()
                 return result
 
 
             else:
-                return f"Error: Unknown server '{server_name}'"
+                return f"Error: Unknown server for tool '{tool_name}'"
 
         except Exception as e:
             end_time = time.time()
