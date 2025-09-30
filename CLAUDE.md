@@ -518,6 +518,38 @@ docker run --rm -e GEMINI_API_KEY="$GEMINI_API_KEY" xebxeb/eunice eunice --model
 docker run --rm -v "$(pwd)":/workspace -w /workspace xebxeb/eunice eunice --config=./eunice.json "List files and get current time"
 ```
 
+#### Bash Alias for Convenient Docker Usage
+
+The `xebxeb/eunice` Docker image includes a default MCP configuration at `/root/eunice.json` (based on `config.example.json`). You can add this bash alias to `~/.bash_aliases` for convenient dockerized usage:
+
+```bash
+# Eunice Docker
+eud() {
+    local base_cmd="docker run -e OPENAI_API_KEY -e GEMINI_API_KEY -e ANTHROPIC_API_KEY --network host --rm -it"
+    if [[ "$1" == "-p" ]]; then
+        shift
+        $base_cmd -v "$(pwd)":/work -w /work -e OLLAMA_HOST=http://localhost:11434 xebxeb/eunice eunice --config=/root/eunice.json "$@"
+    else
+        $base_cmd -e OLLAMA_HOST=http://localhost:11434 xebxeb/eunice eunice --config=/root/eunice.json "$@"
+    fi
+}
+```
+
+**Usage:**
+```bash
+# Run without mounting current directory
+eud "What time is it?"
+
+# Run with current directory mounted as /work (-p flag)
+eud -p "List files in the current directory"
+```
+
+**Features:**
+- Automatically passes through API keys for OpenAI, Gemini, and Anthropic
+- Uses the default MCP configuration at `/root/eunice.json`
+- `-p` flag mounts current directory as `/work` for file operations
+- Connects to host Ollama instance via `localhost:11434`
+
 ## Architecture Decisions
 
 ### Why OpenAI API Format?

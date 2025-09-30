@@ -12,13 +12,13 @@ ENV PATH="/root/.local/bin:$PATH"
 ENV OLLAMA_HOST="http://host.docker.internal:11434"
 
 # Copy all files and setup permissions in one layer
-COPY eunice.py pyproject.toml README.md config.example.json ./
+COPY eunice.py pyproject.toml README.md ./
 COPY tests/ tests/
-COPY config.example.json /root/eunice.json
+COPY config.example.json ./eunice.json
 RUN chmod +x tests/host.sh tests/container-eunice.sh tests/container.sh
 
 # Install eunice using uv
 RUN /root/.local/bin/uv tool install .
 
 # Run the container test suite
-CMD ["./tests/container.sh"]
+CMD ["eunice"]

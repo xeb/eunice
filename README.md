@@ -115,6 +115,9 @@ eunice --no-mcp "analyze code without any MCP tools"
 You can also use the official Docker image instead of installing eunice locally:
 
 ```bash
+# List all available models (host Ollama + cloud models with API keys)
+docker run -e OPENAI_API_KEY -e GEMINI_API_KEY -e ANTHROPIC_API_KEY --network host --rm -it -e OLLAMA_HOST=http://localhost:11434 xebxeb/eunice eunice --list-models
+
 # List available models (uses host Ollama API)
 docker run --rm --network host xebxeb/eunice eunice --list-models
 
