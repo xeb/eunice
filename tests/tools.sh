@@ -43,9 +43,9 @@ else
     exit 1
 fi
 
-# Check that tool execution doesn't produce "Unknown server" error
-if echo "$OUTPUT" | grep -q "Unknown server"; then
-    echo "✗ FAIL: Got 'Unknown server' error - tool routing broken"
+# Check that tool execution doesn't produce "Unknown server" or "Unknown tool" error
+if echo "$OUTPUT" | grep -qE "Unknown server|Unknown tool"; then
+    echo "✗ FAIL: Got 'Unknown server' or 'Unknown tool' error - tool routing broken"
     echo "$OUTPUT"
     rm -f test_time_underscore.json
     exit 1
@@ -62,4 +62,53 @@ fi
 
 rm -f test_time_underscore.json
 
+# Create a config with MULTI-underscore server name (email_summarizer pattern)
+cat > test_multi_underscore.json << 'EOF'
+{
+  "mcpServers": {
+    "test_multi_server": {
+      "command": "uvx",
+      "args": ["mcp-server-time"]
+    }
+  }
+}
+EOF
+
+echo ""
+echo "Testing test_multi_server with multiple underscores (using model: $TEST_MODEL)..."
+OUTPUT=$(timeout 15 uv run eunice.py --config=test_multi_underscore.json --model=$TEST_MODEL "What time is it?" 2>&1)
+
+# Check that tools are registered with correct multi-underscore prefix
+if echo "$OUTPUT" | grep -q "test_multi_server_get_current_time"; then
+    echo "✓ Multi-underscore tools registered correctly"
+else
+    echo "✗ FAIL: Multi-underscore tools not registered with correct prefix"
+    echo "$OUTPUT"
+    rm -f test_multi_underscore.json
+    exit 1
+fi
+
+# Check that tool execution doesn't produce "Unknown tool" error (the specific bug we're catching)
+if echo "$OUTPUT" | grep -q "Unknown tool"; then
+    echo "✗ FAIL: Got 'Unknown tool' error - this is the bug where split('_', 1) cuts off too early"
+    echo "       Tool name 'test_multi_server_get_current_time' was incorrectly parsed"
+    echo "       Expected: 'get_current_time' sent to server"
+    echo "       Actual: Probably sent 'multi_server_get_current_time' to server"
+    echo "$OUTPUT"
+    rm -f test_multi_underscore.json
+    exit 1
+else
+    echo "✓ Multi-underscore tool routing works correctly"
+fi
+
+# Check that we got a valid time response
+if echo "$OUTPUT" | grep -qE "[0-9]{2}:[0-9]{2}|time"; then
+    echo "✓ Multi-underscore tool executed successfully"
+else
+    echo "⚠ Warning: Multi-underscore tool may not have executed (no time data in output)"
+fi
+
+rm -f test_multi_underscore.json
+
+echo ""
 echo "=== All underscore server name tests passed ==="

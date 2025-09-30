@@ -324,13 +324,26 @@ class MCPServer:
         else:
             pass
 
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any], verbose: bool = False) -> str:
-        """Call a tool on this server."""
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any], verbose: bool = False, server_name: str = None) -> str:
+        """Call a tool on this server.
+
+        Args:
+            tool_name: Full tool name with server prefix (e.g., email_summarizer_list_configs)
+            arguments: Tool arguments
+            verbose: Enable verbose logging
+            server_name: Server name to strip from tool_name (e.g., email_summarizer)
+        """
         import time
         start_time = time.time()
 
-        # Remove server prefix from tool name (now uses underscore separator)
-        actual_tool_name = tool_name.split("_", 1)[1] if "_" in tool_name else tool_name
+        # Remove server prefix from tool name using the known server_name
+        if server_name and tool_name.startswith(f"{server_name}_"):
+            actual_tool_name = tool_name[len(server_name) + 1:]  # +1 for the underscore
+        elif "_" in tool_name:
+            # Fallback to old behavior if server_name not provided
+            actual_tool_name = tool_name.split("_", 1)[1]
+        else:
+            actual_tool_name = tool_name
 
 
         await self._send_message({
@@ -460,7 +473,7 @@ class MCPManager:
         try:
             # Check MCP servers first
             if server_name and server_name in self.servers:
-                result = await self.servers[server_name].call_tool(tool_name, arguments, verbose)
+                result = await self.servers[server_name].call_tool(tool_name, arguments, verbose, server_name)
                 end_time = time.time()
                 return result
 
