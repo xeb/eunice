@@ -17,11 +17,19 @@ docker-force: ## Build Docker image without cache (force rebuild)
 
 test-docker: ## Run Docker container tests
 	@echo "Running container tests..."
-	docker run --rm --add-host=host.docker.internal:host-gateway xebxeb/eunice
+	docker run --rm --add-host=host.docker.internal:host-gateway \
+		-e OPENAI_API_KEY="$(OPENAI_API_KEY)" \
+		-e GEMINI_API_KEY="$(GEMINI_API_KEY)" \
+		-e ANTHROPIC_API_KEY="$(ANTHROPIC_API_KEY)" \
+		xebxeb/eunice
 
 test-host: ## Run host-based tests
 	@echo "Running host tests..."
 	./tests/host.sh
+
+test-events: ## Run event streaming tests
+	@echo "Running filesystem tests..."
+	./tests/events.sh
 
 test-fs: ## Run filesystem tests
 	@echo "Running filesystem tests..."
@@ -35,7 +43,7 @@ test-models: ## Run comprehensive model tests for all providers
 	@echo "Running comprehensive model tests..."
 	./tests/all_models.sh
 
-test: test-host test-fs ## Run all tests (host.sh already includes tools.sh)
+test: test-host test-fs test-models test-events ## Run all tests (host.sh already includes tools.sh)
 
 reinstall: ## Reinstall eunice using the reinstall script
 	@echo "Reinstalling eunice..."
@@ -51,10 +59,16 @@ publish: ## Push Docker image to registry
 	@echo "Publishing xebxeb/eunice to Docker registry..."
 	docker push xebxeb/eunice
 
-clean: ## Clean up Docker images and containers
+clean: ## Clean up Docker images, containers, and test files
 	@echo "Cleaning up Docker resources..."
 	-docker rmi xebxeb/eunice
-	docker system prune -f
+	#docker system prune -f
+	@echo "Cleaning up test artifacts..."
+	-rm -rf test_data
+	-rm -f test_prompt.txt
+	-rm -f test_colored_output.py
+	-rm -f test_mcp_config.json
+	-rm -f test_underscore_server.json
 
 install: ## Install eunice globally using uv
 	@echo "Installing eunice globally..."
@@ -72,3 +86,10 @@ dev: ## Run eunice in development mode (usage: make dev PROMPT="your prompt here
 	fi
 	@echo "Running eunice in development mode..."
 	uv run eunice.py "$(PROMPT)"
+
+line-numbers: ## Update line count in README.md
+	@LINES=$$(wc -l < eunice.py); \
+	PERCENT=$$(echo "scale=1; $$LINES * 100 / 2000" | bc); \
+	REMAINING=$$(echo "scale=1; 100 - $$PERCENT" | bc); \
+	sed -i "s/\*\*Current Status\*\*: \`eunice.py\` is \*\*[0-9]*\/2,000 lines\*\* ([0-9.]*% used, \*\*[0-9.]*% remaining\*\*)/\*\*Current Status\*\*: \`eunice.py\` is \*\*$$LINES\/2,000 lines\*\* ($$PERCENT% used, \*\*$$REMAINING% remaining\*\*)/" README.md; \
+	echo "Updated README.md: eunice.py is $$LINES/2,000 lines ($$PERCENT% used, $$REMAINING% remaining)"

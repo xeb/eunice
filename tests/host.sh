@@ -93,10 +93,25 @@ if curl -s "http://localhost:11434/api/tags" >/dev/null 2>&1; then
     export OLLAMA_AVAILABLE=true
     echo "Using Ollama model for tests: $TEST_MODEL"
 else
-    TEST_MODEL="gpt-4"
-    export OPENAI_API_KEY="sk-test"
-    export OLLAMA_AVAILABLE=false
-    echo "Ollama not available, using OpenAI test model: $TEST_MODEL"
+    # Check if we have a real API key (not a test key)
+    if [ -z "$OPENAI_API_KEY" ] || [[ "$OPENAI_API_KEY" == sk-test* ]]; then
+        TEST_MODEL="gpt-4"
+        export OPENAI_API_KEY="sk-test"
+        export OLLAMA_AVAILABLE=false
+        echo "Ollama not available, using OpenAI test model: $TEST_MODEL"
+    elif [ -n "$GEMINI_API_KEY" ]; then
+        TEST_MODEL="gemini-2.5-flash"
+        export OLLAMA_AVAILABLE=false
+        echo "Ollama not available, using Gemini model for tests: $TEST_MODEL"
+    elif [ -n "$ANTHROPIC_API_KEY" ]; then
+        TEST_MODEL="sonnet"
+        export OLLAMA_AVAILABLE=false
+        echo "Ollama not available, using Anthropic model for tests: $TEST_MODEL"
+    else
+        TEST_MODEL="gpt-4"
+        export OLLAMA_AVAILABLE=false
+        echo "Ollama not available, using OpenAI model for tests: $TEST_MODEL"
+    fi
 fi
 
 # Test 1: Help/Usage
@@ -107,6 +122,11 @@ run_test "No arguments defaults to interactive" "echo 'exit' | timeout 5 uv run 
 # Test 2: Environment variable validation
 echo "=== Testing Environment Variable Validation ==="
 
+# Save current API keys
+SAVED_OPENAI_API_KEY="$OPENAI_API_KEY"
+SAVED_GEMINI_API_KEY="$GEMINI_API_KEY"
+SAVED_ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+
 # Test OpenAI model without API key
 unset OPENAI_API_KEY
 run_test "OpenAI model without API key" "uv run eunice.py --model=gpt-3.5-turbo 'test' --no-mcp" 1 "OPENAI_API_KEY environment variable is required"
@@ -114,6 +134,11 @@ run_test "OpenAI model without API key" "uv run eunice.py --model=gpt-3.5-turbo 
 # Test Gemini model without API key
 unset GEMINI_API_KEY
 run_test "Gemini model without API key" "uv run eunice.py --model=gemini-2.5-flash 'test' --no-mcp" 1 "GEMINI_API_KEY environment variable is required"
+
+# Restore API keys for subsequent tests
+export OPENAI_API_KEY="$SAVED_OPENAI_API_KEY"
+export GEMINI_API_KEY="$SAVED_GEMINI_API_KEY"
+export ANTHROPIC_API_KEY="$SAVED_ANTHROPIC_API_KEY"
 
 # Test 3: Argument parsing
 echo "=== Testing Argument Parsing ==="
@@ -138,7 +163,14 @@ echo "=== Testing Provider Detection ==="
 run_test "OpenAI model detection" "timeout 5 uv run eunice.py --model=gpt-4 'test' --no-mcp || echo 'Provider detected correctly'" 0
 run_test "Gemini model detection (with key)" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model=gemini-2.5-flash 'test' --no-mcp || echo 'Provider detected correctly'" 0
 run_test "Ollama model detection" "timeout 5 uv run eunice.py --model=$TEST_MODEL 'test' --no-mcp 2>&1" 0 "Model: $TEST_MODEL"
-run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' --no-mcp 2>&1" 0 "Model: gpt-oss"
+
+# Only test gpt-oss routing if Ollama is actually available
+if [ "$OLLAMA_AVAILABLE" = "true" ]; then
+    run_test "Ollama gpt-oss model detection" "timeout 5 uv run eunice.py --model=gpt-oss 'test' --no-mcp 2>&1" 0 "Model: gpt-oss"
+else
+    echo -e "${YELLOW}Skipping test: Ollama gpt-oss model detection (Ollama not available)${NC}"
+    echo
+fi
 
 # Test 6: MCP Import Dependencies
 echo "=== Testing MCP Dependencies ==="
@@ -153,7 +185,15 @@ echo "=== Testing Usage Patterns from Spec ==="
 run_test "Basic usage pattern" "timeout 5 uv run eunice.py --model=gpt-4 'How many files are in the current directory?' --no-mcp 2>&1" 1 "Error code: 401"
 run_test "Model specification pattern" "timeout 5 uv run eunice.py --model='gpt-4' 'how many files in the current directory?' --no-mcp 2>&1" 1 "Error code: 401"
 run_test "Gemini with prompt file" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt=test_prompt.txt --no-mcp 2>&1" 1 "400\|401\|403"
-run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='$TEST_MODEL' test_prompt.txt --no-mcp 2>&1" 0 ""
+
+# Only test file argument with actual model execution when Ollama is available
+if [ "$OLLAMA_AVAILABLE" = "true" ]; then
+    run_test "Ollama with file argument" "timeout 5 uv run eunice.py --model='$TEST_MODEL' test_prompt.txt --no-mcp 2>&1" 0 ""
+else
+    echo -e "${YELLOW}Skipping test: Ollama with file argument (Ollama not available - would require real API call)${NC}"
+    echo
+fi
+
 run_test "Prompt parameter usage" "GEMINI_API_KEY=test timeout 5 uv run eunice.py --model='gemini-2.5-pro' --prompt='How many files in the current directory?' --no-mcp 2>&1" 1 "400\|401\|403"
 
 # Test 8: Error handling
@@ -187,7 +227,13 @@ run_test "Colored output functions" "uv run test_colored_output.py" 0 "COLORED_O
 # Test 10: Provider detection edge cases
 echo "=== Testing Provider Detection Edge Cases ==="
 
-run_test "gpt-oss should use Ollama not OpenAI" "timeout 3 uv run eunice.py --model=gpt-oss 'test' --no-mcp && echo 'Correctly detected as Ollama' || echo 'Correctly detected as Ollama'" 0 "Correctly detected as Ollama"
+# Only test gpt-oss routing if Ollama is available
+if [ "$OLLAMA_AVAILABLE" = "true" ]; then
+    run_test "gpt-oss should use Ollama not OpenAI" "timeout 3 uv run eunice.py --model=gpt-oss 'test' --no-mcp && echo 'Correctly detected as Ollama' || echo 'Correctly detected as Ollama'" 0 "Correctly detected as Ollama"
+else
+    echo -e "${YELLOW}Skipping test: gpt-oss should use Ollama not OpenAI (Ollama not available)${NC}"
+    echo
+fi
 
 # Test 11: New command line options
 echo "=== Testing New Command Line Options ==="

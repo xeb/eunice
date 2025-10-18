@@ -21,4 +21,4 @@ RUN chmod +x tests/host.sh tests/container-eunice.sh tests/container.sh
 RUN /root/.local/bin/uv tool install .
 
 # Run the container test suite
-CMD ["eunice"]
+CMD ["./tests/container.sh"]

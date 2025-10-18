@@ -40,6 +40,34 @@ from rich import print as rich_print
 # Initialize Rich console
 console = Console()
 
+# Event ID counter for JSON-RPC events
+_event_id = 0
+
+def serialize_for_json(obj: Any) -> Any:
+    """Convert objects to JSON-serializable format."""
+    if hasattr(obj, '__dict__'):
+        return {k: serialize_for_json(v) for k, v in obj.__dict__.items() if not k.startswith('_')}
+    elif isinstance(obj, list):
+        return [serialize_for_json(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {k: serialize_for_json(v) for k, v in obj.items()}
+    else:
+        return obj
+
+def emit_event(method: str, params: Dict[str, Any], events_mode: bool = False) -> None:
+    """Emit a JSON-RPC event to stdout if events mode is enabled."""
+    if not events_mode:
+        return
+    global _event_id
+    _event_id += 1
+    event = {
+        "jsonrpc": "2.0",
+        "id": _event_id,
+        "method": method,
+        "params": serialize_for_json(params)
+    }
+    print(json.dumps(event), flush=True)
+
 def print_tool_invocation(tool_name: str, tool_args: Dict[str, Any], silent: bool = False) -> None:
     """Print a formatted tool invocation with light blue color and framing."""
     if silent:
@@ -333,7 +361,6 @@ class MCPServer:
             verbose: Enable verbose logging
             server_name: Server name to strip from tool_name (e.g., email_summarizer)
         """
-        import time
         start_time = time.time()
 
         # Remove server prefix from tool name using the known server_name
@@ -402,9 +429,10 @@ class MCPServer:
 
 class MCPManager:
     """Manages multiple MCP servers."""
-    def __init__(self):
+    def __init__(self, events_mode: bool = False):
         self.servers = {}  # MCP servers
         self.tools = []
+        self.events_mode = events_mode
 
     async def load_config(self, config_path: str, silent: bool = False):
         """Load MCP server configuration from file."""
@@ -428,6 +456,14 @@ class MCPManager:
                     if await server.start():
                         self.servers[server_name] = server
                         self.tools.extend(server.tools)
+                        # Emit MCP server started event
+                        emit_event("mcp.server_started", {
+                            "server_name": server_name,
+                            "command": server_config["command"],
+                            "args": args,
+                            "tools": [t["function"]["name"] for t in server.tools],
+                            "timestamp": time.time()
+                        }, self.events_mode)
                         if not silent:
                             print(f"Started MCP server: {server_name}", file=sys.stderr)
                     else:
@@ -460,6 +496,13 @@ class MCPManager:
         """
         start_time = time.time()
 
+        # Emit tool call event
+        emit_event("tool.call", {
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "timestamp": start_time
+        }, self.events_mode)
+
         if "_" not in tool_name:
             return f"Error: Invalid tool name '{tool_name}' - tools must be prefixed with server name"
 
@@ -475,15 +518,35 @@ class MCPManager:
             if server_name and server_name in self.servers:
                 result = await self.servers[server_name].call_tool(tool_name, arguments, verbose, server_name)
                 end_time = time.time()
+                # Emit tool result event
+                emit_event("tool.result", {
+                    "tool_name": tool_name,
+                    "result": result,
+                    "duration": end_time - start_time,
+                    "timestamp": end_time
+                }, self.events_mode)
                 return result
 
 
             else:
-                return f"Error: Unknown server for tool '{tool_name}'"
+                error_msg = f"Error: Unknown server for tool '{tool_name}'"
+                emit_event("tool.error", {
+                    "tool_name": tool_name,
+                    "error": error_msg,
+                    "timestamp": time.time()
+                }, self.events_mode)
+                return error_msg
 
         except Exception as e:
             end_time = time.time()
-            return f"Error: {str(e)}"
+            error_msg = f"Error: {str(e)}"
+            emit_event("tool.error", {
+                "tool_name": tool_name,
+                "error": error_msg,
+                "duration": end_time - start_time,
+                "timestamp": end_time
+            }, self.events_mode)
+            return error_msg
 
     def print_server_info(self):
         """Print MCP server tool information in light yellow frames."""
@@ -650,7 +713,7 @@ def create_client(model: str) -> OpenAI:
     )
 
 
-async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False, conversation_history: Optional[List[Dict[str, Any]]] = None, suppress_info: bool = False) -> List[Dict[str, Any]]:
+async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False, conversation_history: Optional[List[Dict[str, Any]]] = None, suppress_info: bool = False, events_mode: bool = False) -> List[Dict[str, Any]]:
     """Run the agent with the given prompt until completion."""
 
     if conversation_history is None:
@@ -661,12 +724,22 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
         messages = conversation_history.copy()
         messages.append({"role": "user", "content": prompt})
 
+    # Emit model selection event
+    if not suppress_info:
+        provider, _, _, resolved_model = detect_provider(model)
+        emit_event("model.selected", {
+            "model": model,
+            "resolved_model": resolved_model,
+            "provider": provider,
+            "timestamp": time.time()
+        }, events_mode)
+
     # Show MCP server info if available (unless suppressed for interactive mode)
-    if mcp_manager and not silent and not suppress_info:
+    if mcp_manager and not silent and not suppress_info and not events_mode:
         mcp_manager.print_server_info()
 
     # Show model info (unless suppressed for interactive mode)
-    if not suppress_info:
+    if not suppress_info and not events_mode:
         provider, _, _, _ = detect_provider(model)
         print_model_info(model, provider, silent)
 
@@ -686,8 +759,17 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
                     if len(last_message["content"]) > 50:
                         current_prompt += "..."
 
-            print_verbose_llm_info(f"🔄 Calling LLM with prompt: {current_prompt}", verbose)
-            print_verbose_llm_info("⏳ Waiting for response...", verbose)
+            print_verbose_llm_info(f"🔄 Calling LLM with prompt: {current_prompt}", verbose and not events_mode)
+            print_verbose_llm_info("⏳ Waiting for response...", verbose and not events_mode)
+
+            # Emit LLM request event
+            request_time = time.time()
+            emit_event("llm.request", {
+                "model": resolved_model,
+                "messages": messages,
+                "tools": tools if tools else [],
+                "timestamp": request_time
+            }, events_mode)
 
             response = client.chat.completions.create(
                 model=resolved_model,
@@ -696,7 +778,23 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
                 tool_choice="auto" if tools else None
             )
 
-            print_verbose_llm_info("✅ Response received", verbose)
+            # Emit LLM response event
+            response_time = time.time()
+            emit_event("llm.response", {
+                "model": resolved_model,
+                "content": response.choices[0].message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    } for tc in response.choices[0].message.tool_calls
+                ] if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls else [],
+                "duration": response_time - request_time,
+                "timestamp": response_time
+            }, events_mode)
+
+            print_verbose_llm_info("✅ Response received", verbose and not events_mode)
 
             message = response.choices[0].message
             messages.append({
@@ -706,7 +804,7 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
             })
 
             # Print assistant's response if there is content
-            if message.content:
+            if message.content and not events_mode:
                 print(message.content)
 
             # If there are no tool calls, we're done
@@ -718,21 +816,18 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
                 tool_name = tool_call.function.name
                 tool_args = json.loads(tool_call.function.arguments)
 
-                # Print formatted tool invocation
-                print_tool_invocation(tool_name, tool_args, silent)
+                # Print formatted tool invocation (not in events mode)
+                print_tool_invocation(tool_name, tool_args, silent or events_mode)
 
                 # Execute the tool via MCP manager
 
                 if mcp_manager:
-                    import time
-                    start_time = time.time()
                     tool_result = await mcp_manager.execute_tool(tool_name, tool_args, verbose)
-                    end_time = time.time()
                 else:
                     tool_result = f"Error: No tools available (no MCP configuration)"
 
-                # Print formatted tool result
-                print_tool_result(tool_result, tool_output_limit, silent)
+                # Print formatted tool result (not in events mode)
+                print_tool_result(tool_result, tool_output_limit, silent or events_mode)
 
                 # Add tool result to messages
                 messages.append({
@@ -748,21 +843,22 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
     return messages
 
 
-async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Optional[str], tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False) -> None:
+async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Optional[str], tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False, events_mode: bool = False) -> None:
     """Minimal interactive implementation."""
     conversation_history = []
 
-    # Show MCP server info and model info once at startup
-    if mcp_manager and not silent:
+    # Show MCP server info and model info once at startup (not in events mode)
+    if mcp_manager and not silent and not events_mode:
         mcp_manager.print_server_info()
 
-    # Show model info once at startup
-    provider, _, _, _ = detect_provider(model)
-    print_model_info(model, provider, silent)
+    # Show model info once at startup (not in events mode)
+    if not events_mode:
+        provider, _, _, _ = detect_provider(model)
+        print_model_info(model, provider, silent)
 
     # Process initial prompt if provided
     if initial_prompt:
-        conversation_history = await run_agent(client, model, initial_prompt, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True)
+        conversation_history = await run_agent(client, model, initial_prompt, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True, events_mode=events_mode)
 
     print("\n🔄 Interactive mode. Type 'exit' or 'quit' to end session.")
 
@@ -775,7 +871,7 @@ async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Op
                 continue
 
             # Process with existing logic but pass conversation_history and suppress info display
-            conversation_history = await run_agent(client, model, user_input, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True)
+            conversation_history = await run_agent(client, model, user_input, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True, events_mode=events_mode)
 
         except KeyboardInterrupt:
             print("\n👋 Session ended.")
@@ -883,6 +979,12 @@ def main():
     )
 
     parser.add_argument(
+        "--events",
+        action="store_true",
+        help="Output JSON-RPC events to stdout (overrides --silent and --verbose)"
+    )
+
+    parser.add_argument(
         "prompt_positional",
         nargs="?",
         help="Prompt as positional argument (can be a file path or string)"
@@ -933,28 +1035,28 @@ def main():
                 config_path = str(Path.cwd().joinpath("eunice.json"))
 
         # Run everything in a single asyncio context
-        asyncio.run(main_async(client, model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose, interactive_mode))
+        asyncio.run(main_async(client, model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose, interactive_mode, args.events))
 
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 
-async def main_async(client: OpenAI, model: str, prompt: Optional[str], tool_output_limit: int, config_path: Optional[str], silent: bool = False, verbose: bool = False, interactive: bool = False):
+async def main_async(client: OpenAI, model: str, prompt: Optional[str], tool_output_limit: int, config_path: Optional[str], silent: bool = False, verbose: bool = False, interactive: bool = False, events_mode: bool = False):
     """Main async function that handles MCP setup and agent execution."""
     mcp_manager = None
 
     try:
         # Create and configure MCP manager if config provided
         if config_path:
-            mcp_manager = MCPManager()
-            await mcp_manager.load_config(config_path, silent)
+            mcp_manager = MCPManager(events_mode=events_mode)
+            await mcp_manager.load_config(config_path, silent or events_mode)
 
         # Run the appropriate mode
         if interactive:
-            await simple_interactive_mode(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose)
+            await simple_interactive_mode(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose, events_mode)
         else:
-            await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose)
+            await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose, events_mode=events_mode)
 
     finally:
         # Always cleanup MCP servers if they exist
