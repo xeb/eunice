@@ -681,8 +681,10 @@ def detect_provider(model: str) -> tuple[str, str, str, str]:
         resolved_model = model if ':' in model else f"{model}:latest"
         return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama", resolved_model
 
-    # OpenAI models (only if not found in Ollama)
-    elif any(prefix in model_lower for prefix in ["gpt", "chatgpt", "davinci", "curie", "babbage", "ada"]):
+    # OpenAI models - check for specific known OpenAI model names (not broad patterns)
+    elif model_lower in ["gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4-turbo", "gpt-5", "chatgpt-4o-latest"] or \
+         model_lower.startswith("gpt-3.5-") or model_lower.startswith("gpt-4-") or model_lower.startswith("gpt-4o-") or \
+         model_lower.startswith("davinci-") or model_lower.startswith("curie-") or model_lower.startswith("babbage-") or model_lower.startswith("ada-"):
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError(f"OPENAI_API_KEY environment variable is required for model '{model}'")
@@ -690,16 +692,17 @@ def detect_provider(model: str) -> tuple[str, str, str, str]:
 
     # Fallback: try Ollama for any other model
     else:
-        # Model not found in Ollama and doesn't match known patterns
-        available_models = get_ollama_models()
-        if available_models:
-            models_list = ", ".join(available_models)
-            raise ValueError(f"Model '{model}' not recognized. Available Ollama models: {models_list}. For other providers, try: gpt-* (OpenAI), gemini-* (Gemini). Try running: ollama pull {model}")
-        else:
-            raise ValueError(f"Model '{model}' not recognized and no Ollama models found. Try running: ollama pull {model}")
-
+        # For any model not matching above patterns, assume it's an Ollama model
         ollama_host = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
-        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama", model
+        # Normalize model name - if no tag specified, append :latest
+        resolved_model = model if ':' in model else f"{model}:latest"
+
+        # Verify Ollama is accessible and give helpful error if not
+        available_models = get_ollama_models()
+        if not available_models:
+            raise ValueError(f"Model '{model}' not recognized and Ollama is not accessible. Please ensure Ollama is running (http://localhost:11434) or use a known model format: gemini-* (Gemini), claude-* (Anthropic), gpt-3.5-turbo/gpt-4* (OpenAI)")
+
+        return "ollama", f"{ollama_host.rstrip('/')}/v1", "ollama", resolved_model
 
 
 def create_client(model: str) -> OpenAI:
