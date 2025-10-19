@@ -146,11 +146,15 @@ def get_supported_models() -> Dict[str, List[str]]:
             "claude-sonnet-4-20250514",
             "claude-sonnet-4-5-20250929",
             "claude-opus-4-1-20250805",
+            "claude-haiku-4-5-20251001",
             "sonnet",
             "sonnet-4.5",
             "opus",
+            "haiku",
+            "haiku-4.5",
             "claude-sonnet",
-            "claude-opus"
+            "claude-opus",
+            "claude-haiku"
         ],
         "Ollama": get_ollama_models()
     }
@@ -652,11 +656,13 @@ def detect_provider(model: str) -> tuple[str, str, str, str]:
         return "gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", api_key, model
 
     # Anthropic models (Claude) - check aliases and full names
-    # Accept any claude-sonnet* or claude-opus* model
+    # Accept any claude-sonnet*, claude-opus*, or claude-haiku* model
     elif (model_lower.startswith("claude-sonnet") or
           model_lower.startswith("claude-opus") or
+          model_lower.startswith("claude-haiku") or
           model_lower.startswith("sonnet") or
-          model_lower.startswith("opus")):
+          model_lower.startswith("opus") or
+          model_lower.startswith("haiku")):
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError(f"ANTHROPIC_API_KEY environment variable is required for model '{model}'")
@@ -667,7 +673,10 @@ def detect_provider(model: str) -> tuple[str, str, str, str]:
             "sonnet-4.5": "claude-sonnet-4-5-20250929",
             "claude-sonnet": "claude-sonnet-4-20250514",
             "opus": "claude-opus-4-1-20250805",
-            "claude-opus": "claude-opus-4-1-20250805"
+            "claude-opus": "claude-opus-4-1-20250805",
+            "haiku": "claude-haiku-4-5-20251001",
+            "haiku-4.5": "claude-haiku-4-5-20251001",
+            "claude-haiku": "claude-haiku-4-5-20251001"
         }
         resolved_model = alias_map.get(model_lower, model)
 
