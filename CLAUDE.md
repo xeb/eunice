@@ -136,6 +136,7 @@ eunice --config='' "no MCP tools available"
 - `--verbose` - Enable verbose debug output to /tmp/eunice_debug.log
 - `--config=CONFIG_FILE` - Path to JSON configuration file for MCP servers
 - `--no-mcp` - Disable MCP server loading even if eunice.json exists
+- `--sysadmin` - Enable sysadmin mode with auto-loaded MCP tools and system instructions for software engineering tasks
 - `--interact` - Start interactive mode for ongoing conversations
 - `--list-models` - Show all available models grouped by provider
 - `--version` - Show program version number
@@ -352,10 +353,244 @@ eunice --interact
 - **Tool persistence**: MCP servers remain active for the entire session
 - **Clean interface**: No repeated system information displays between prompts
 
+## Sysadmin Mode
+
+eunice includes a specialized **sysadmin mode** (`--sysadmin`) designed for agentic software engineering tasks. This mode automatically loads a comprehensive set of MCP tools and system instructions to enable the AI to perform complex development workflows including code analysis, file editing, testing, git operations, web research, and more.
+
+### Overview
+
+Sysadmin mode transforms eunice into a full-featured AI coding assistant by:
+1. **Auto-loading** a curated set of 7 MCP servers with development-focused tools
+2. **Injecting** detailed system instructions that guide the AI to follow best practices
+3. **Enabling** agentic workflows like bug fixing, feature implementation, refactoring, and testing
+
+This mode is ideal for developers who want an AI assistant that can autonomously handle complex, multi-step software engineering tasks while adhering to project conventions and best practices.
+
+### Usage
+
+```bash
+# Enable sysadmin mode with auto-configured MCP servers
+eunice --sysadmin "Fix the bug in main.py where users can't log in"
+
+# Sysadmin mode with interactive conversations
+eunice --sysadmin --interact
+
+# Sysadmin mode with specific model
+eunice --sysadmin --model="sonnet" "Refactor the authentication system to use JWT tokens"
+
+# Combine with other options
+eunice --sysadmin --verbose "Add comprehensive tests for the API endpoints"
+```
+
+**Important**: `--sysadmin` cannot be used with `--no-mcp` or `--config` flags, as it provides its own embedded MCP configuration.
+
+### Embedded MCP Configuration
+
+When `--sysadmin` is enabled, eunice automatically loads the following MCP servers (embedded in `eunice.py`):
+
+#### 1. Shell Server (`shell`)
+- **Package**: `git+https://github.com/emsi/mcp-server-shell`
+- **Tools**: Execute shell commands, run tests, build projects, git operations
+- **Use Cases**: Running test suites, executing linters, git workflows, system commands
+
+#### 2. Filesystem Server (`filesystem`)
+- **Package**: `@modelcontextprotocol/server-filesystem`
+- **Tools**: `read_file`, `write_file`, `list_directory`, `create_directory`, `move_file`, `search_files`
+- **Use Cases**: Basic file operations, creating new files, directory navigation
+
+#### 3. Text Editor Server (`text-editor`)
+- **Package**: `mcp-text-editor`
+- **Tools**: `get_text_file_contents`, `patch_text_file_contents`
+- **Features**:
+  - **Hash-based conflict detection**: Prevents concurrent modification issues
+  - **Line-range reading**: Read specific portions of large files efficiently
+  - **Patch operations**: Apply targeted edits to specific line ranges
+  - **Bottom-up patching**: Apply multiple patches without line number shifts
+- **Use Cases**: **Preferred for editing existing files** - provides safe, efficient modifications with conflict detection
+
+#### 4. Grep Server (`grep`)
+- **Package**: `mcp-ripgrep@latest`
+- **Tools**: `ripgrep` - Fast code search with regex patterns
+- **Features**: Context lines, file filtering, case-insensitive search
+- **Use Cases**: Finding code patterns, TODO comments, function definitions across codebase
+
+#### 5. Memory Server (`memory`)
+- **Package**: `@modelcontextprotocol/server-memory`
+- **Tools**: `create_entities`, `add_observations`, `search_nodes`
+- **Storage**: `~/.eunice/` directory
+- **Use Cases**: Store user preferences, project facts, remember important context across sessions
+
+#### 6. Web Search Server (`web`)
+- **Package**: `@brave/brave-search-mcp-server`
+- **Tools**: `web_search` or `brave_web_search`
+- **Requirements**: **BRAVE_API_KEY** environment variable ([Get free API key](https://brave.com/search/api/) - 2,000 queries/month free)
+- **Use Cases**: Find documentation, research libraries, look up error messages, discover solutions
+
+#### 7. Fetch Server (`fetch`)
+- **Package**: `mcp-server-fetch`
+- **Tools**: `fetch` - Make HTTP GET/POST requests
+- **Use Cases**: Fetch web content, API calls, download resources, read online documentation
+
+### System Instructions
+
+Sysadmin mode loads comprehensive system instructions from `sysadmin_instructions.yml`, which guide the AI to:
+
+#### Core Mandates
+- **Conventions**: Rigorously adhere to existing project conventions
+- **Libraries/Frameworks**: Never assume availability - verify usage in project first
+- **Style & Structure**: Mimic existing code style, formatting, naming, and architectural patterns
+- **Idiomatic Changes**: Ensure modifications integrate naturally with local context
+- **Comments**: Add sparingly, focus on "why" not "what"
+- **Proactiveness**: Fulfill requests thoroughly, including adding tests
+- **Confirm Ambiguity**: Don't take significant actions beyond scope without confirmation
+- **No Summaries**: Skip summaries after completing tasks unless asked
+- **No Reverts**: Don't revert changes unless explicitly requested
+
+#### Primary Workflows
+
+**Software Engineering Tasks:**
+1. **Understand & Strategize**: Use filesystem and grep tools to build comprehensive understanding
+2. **Plan**: Break complex tasks into subtasks, create coherent plans
+3. **Implement**: Use MCP tools to execute plan while following project conventions
+4. **Verify (Tests)**: Run project's test suite to validate changes
+5. **Verify (Standards)**: Execute linting, type-checking, build commands
+6. **Finalize**: Complete task, await next instruction
+
+**New Applications:**
+1. Understand requirements and identify core features
+2. Propose clear plan with technology stack
+3. Obtain user approval
+4. Implement features using shell scaffolding tools
+5. Verify against requirements, fix bugs
+6. Provide startup instructions and request feedback
+
+#### Tool Usage Guidance
+
+**File Operations:**
+- Always read files before editing to understand current content
+- **For editing existing files**: Use `text-editor_get_text_file_contents` (with hash), then `text-editor_patch_text_file_contents`
+- **For creating new files**: Use `filesystem_write_file`
+- **For complete rewrites**: Use `filesystem_write_file`
+- **For large files**: Use text-editor to read specific line ranges and apply targeted patches
+- Text-editor provides conflict detection via hashes - prevents concurrent modification issues
+
+**Code Search:**
+- Use `grep_ripgrep` for finding code patterns across multiple files
+- Use `filesystem_search_files` for finding files by name/path patterns
+- Combine searches in parallel when exploring codebase
+
+**Shell Commands:**
+- Explain critical commands before execution
+- Use background processes (&) for long-running servers
+- Combine related commands with && to save round trips
+- Verify changes with appropriate commands (tests, linters, type checkers)
+
+**Git Workflows:**
+- Use `git status`, `git diff HEAD`, `git log -n 3` before commits
+- Propose draft commit messages focused on "why" not "what"
+- Confirm successful commits with `git status`
+- Never push changes without explicit user request
+
+### Environment Requirements
+
+To use all sysadmin mode features, ensure you have:
+
+1. **Node.js** (for npx-based MCP servers: filesystem, grep, memory, web)
+2. **uv** (for uvx-based MCP servers: shell, text-editor, fetch)
+3. **BRAVE_API_KEY** environment variable (optional, for web search)
+   - Get free API key at https://brave.com/search/api/
+   - 2,000 queries/month on free tier
+   - Set via: `export BRAVE_API_KEY="your-key-here"`
+
+### Implementation Details
+
+**Architecture:**
+- MCP configuration embedded as Python constant `SYSADMIN_MCP_CONFIG` in `eunice.py`
+- System instructions loaded from `sysadmin_instructions.yml` (packaged with eunice)
+- Instructions formatted from YAML into markdown at runtime
+- Instructions prepended to first user message only (in both single-shot and interactive modes)
+
+**Instruction Injection:**
+```python
+if sysadmin and prompt:
+    system_instructions = load_sysadmin_instructions()
+    prompt = f"""{system_instructions}
+
+---
+
+# USER REQUEST
+
+{prompt}
+
+---
+
+You are now in sysadmin mode. Execute the user request above using your available MCP tools.
+"""
+```
+
+**Interactive Mode:**
+In interactive mode, sysadmin instructions are shown once at session start with a visual indicator:
+```
+┌─────────────────────────────────────────────┐
+│ 🔧 Sysadmin Mode: Active                   │
+└─────────────────────────────────────────────┘
+```
+
+### Example Workflows
+
+```bash
+# Bug fixing with automatic test verification
+eunice --sysadmin "Fix the authentication bug where passwords aren't validated"
+
+# Feature implementation with comprehensive approach
+eunice --sysadmin "Add a new REST API endpoint for user profile updates with tests"
+
+# Code refactoring following project conventions
+eunice --sysadmin "Refactor the database layer to use async/await patterns"
+
+# Research and implementation
+eunice --sysadmin "Research best practices for JWT tokens and implement them in our auth system"
+
+# Multi-step development workflow
+eunice --sysadmin --interact
+> "Analyze the codebase structure"
+> "Find all TODO comments and prioritize them"
+> "Implement the highest priority TODO with tests"
+> "Run the test suite and fix any failures"
+```
+
+### Tool Workflow Example
+
+Here's how sysadmin mode typically handles a task like "Fix bug in login.py":
+
+1. **Search**: Use `grep_ripgrep` to find login-related code
+2. **Read**: Use `text-editor_get_text_file_contents` to read `login.py` with hash
+3. **Understand**: Analyze code to identify bug
+4. **Edit**: Use `text-editor_patch_text_file_contents` to apply fix with hash validation
+5. **Test**: Use `shell` to run `pytest tests/test_login.py`
+6. **Verify**: Use `shell` to run linters/type checkers
+7. **Git**: (if requested) Use `shell` for `git add`, `git commit` with meaningful message
+
+### Comparison: Standard vs Sysadmin Mode
+
+| Feature | Standard Mode | Sysadmin Mode |
+|---------|---------------|---------------|
+| MCP Tools | Manual config required | 7 servers auto-loaded |
+| System Instructions | None | Comprehensive coding guidelines |
+| File Editing | Via filesystem only | Text-editor with conflict detection |
+| Code Search | Manual setup | grep/ripgrep included |
+| Shell Access | Manual setup | Shell server included |
+| Web Research | Manual setup | Brave search included (with API key) |
+| Memory | Manual setup | Persistent memory included |
+| Best Practices | Model-dependent | Enforced via instructions |
+| Use Case | General queries | Software engineering tasks |
+
 ## Technical Implementation
 
 ### File Structure
-- `eunice.py` - Main executable script with inline dependencies (894 lines, reduced from 961)
+- `eunice.py` - Main executable script with inline dependencies (1,343 lines)
+- `sysadmin_instructions.yml` - System instructions for --sysadmin mode (packaged with eunice)
+- `sysadmin_config.example.json` - Example MCP configuration for sysadmin mode
 - `pyproject.toml` - Package configuration for `uv tool install`
 - `Makefile` - Comprehensive build system with colored help and commands
 - `Dockerfile` - Optimized container image (6 layers, reduced from 9)
@@ -369,6 +604,7 @@ eunice --interact
 - `openai` - Unified API client for all providers (OpenAI, Gemini via OpenAI-compatible endpoints, Ollama)
 - `anthropic` - Anthropic API client for Claude models
 - `rich` - Modern terminal UI library for beautiful console output and formatting
+- `pyyaml` - YAML parser for loading sysadmin mode instructions
 - `mcp` - Model Context Protocol client library for MCP server communication (optional)
 - Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`, `asyncio`, `urllib.request`
 
@@ -669,6 +905,6 @@ The framework is designed to be extensible while maintaining simplicity:
 - ✅ Anthropic API integration with model aliases
 - ✅ Enhanced error handling and model routing
 - ✅ **Rich library integration** - Professional terminal UI with panels, tables, and enhanced formatting
-- ✅ **Code reduction** - Simplified from 961 to 894 lines (67 lines saved) while improving functionality
+- ✅ **Sysadmin mode** - Full-featured AI coding assistant with 7 auto-loaded MCP servers, comprehensive system instructions, and specialized tools for software engineering tasks (1,343 lines total)
 
 The core philosophy remains: provide a simple, reliable interface for agentic AI interactions while continuously improving performance and user experience.

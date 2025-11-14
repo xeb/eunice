@@ -4,6 +4,8 @@
 # dependencies = [
 #     "openai",
 #     "rich",
+#     "argcomplete",
+#     "pyyaml",
 # ]
 # ///
 """
@@ -23,12 +25,52 @@ import urllib.error
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, AsyncGenerator
 
+import argcomplete
+import yaml
+
 try:
     from importlib.metadata import version
     __version__ = version("eunice")
 except Exception:
     __version__ = "dev"
 
+# Embedded MCP server configuration for sysadmin mode
+# All servers tested and working - web server requires BRAVE_API_KEY env var
+SYSADMIN_MCP_CONFIG = {
+    "mcpServers": {
+        "shell": {
+            "command": "uvx",
+            "args": ["git+https://github.com/emsi/mcp-server-shell"]
+        },
+        "filesystem": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+        },
+        "text-editor": {
+            # Line-oriented text file editing with patch operations and conflict detection
+            "command": "uvx",
+            "args": ["mcp-text-editor"]
+        },
+        "grep": {
+            "command": "npx",
+            "args": ["-y", "mcp-ripgrep@latest"]
+        },
+        "memory": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-memory", "~/.eunice"]
+        },
+        "web": {
+            # Requires BRAVE_API_KEY environment variable
+            # Get free API key at: https://brave.com/search/api/ (2,000 queries/month free)
+            "command": "npx",
+            "args": ["-y", "@brave/brave-search-mcp-server"]
+        },
+        "fetch": {
+            "command": "uvx",
+            "args": ["mcp-server-fetch"]
+        }
+    }
+}
 
 import openai
 from openai import OpenAI
@@ -106,6 +148,105 @@ def print_verbose_llm_info(message: str, verbose: bool = False) -> None:
         return
 
     console.print(f"[dim]{message}[/dim]")
+
+
+def load_sysadmin_instructions() -> str:
+    """Load and format sysadmin instructions from YAML file."""
+    # Try to find sysadmin_instructions.yml in same directory as script
+    script_dir = Path(__file__).parent
+    yaml_path = script_dir / "sysadmin_instructions.yml"
+
+    # If not found in script dir, try current working directory
+    if not yaml_path.exists():
+        yaml_path = Path.cwd() / "sysadmin_instructions.yml"
+
+    if not yaml_path.exists():
+        raise FileNotFoundError(
+            "sysadmin_instructions.yml not found. "
+            "This file is required for --sysadmin mode."
+        )
+
+    try:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            instructions = yaml.safe_load(f)
+
+        # Format the instructions into a readable text format
+        formatted = []
+
+        # Preamble
+        if 'preamble' in instructions:
+            formatted.append("# SYSTEM INSTRUCTIONS - SYSADMIN MODE")
+            formatted.append("")
+            formatted.append(instructions['preamble'].strip())
+            formatted.append("")
+
+        # Core Mandates
+        if 'core_mandates' in instructions:
+            formatted.append("## Core Mandates")
+            formatted.append("")
+            for mandate in instructions['core_mandates']:
+                formatted.append(f"**{mandate['name']}**: {mandate['description']}")
+                formatted.append("")
+
+        # Primary Workflows
+        if 'primary_workflows' in instructions:
+            formatted.append("## Primary Workflows")
+            formatted.append("")
+            for workflow_name, workflow in instructions['primary_workflows'].items():
+                if isinstance(workflow, dict):
+                    formatted.append(f"### {workflow_name.replace('_', ' ').title()}")
+                    if 'description' in workflow:
+                        formatted.append(workflow['description'])
+                        formatted.append("")
+                    if 'steps' in workflow:
+                        for step in workflow['steps']:
+                            if isinstance(step, dict):
+                                formatted.append(f"**{step.get('step', '')}**: {step.get('details', '')}")
+                            elif isinstance(step, str):
+                                formatted.append(f"- {step}")
+                        formatted.append("")
+
+        # Operational Guidelines
+        if 'operational_guidelines' in instructions:
+            formatted.append("## Operational Guidelines")
+            formatted.append("")
+            for guideline_name, guidelines in instructions['operational_guidelines'].items():
+                if isinstance(guidelines, list):
+                    formatted.append(f"### {guideline_name.replace('_', ' ').title()}")
+                    for item in guidelines:
+                        formatted.append(f"- {item}")
+                    formatted.append("")
+
+        # Add critical sections
+        for section in ['sandbox_information', 'git_repository_guidelines', 'final_reminder']:
+            if section in instructions:
+                formatted.append(f"## {section.replace('_', ' ').title()}")
+                formatted.append("")
+                formatted.append(instructions[section].strip())
+                formatted.append("")
+
+        # Tool workflow guidance
+        if 'tool_workflow_guidance' in instructions:
+            formatted.append("## Tool Usage Guidance")
+            formatted.append("")
+            for category, items in instructions['tool_workflow_guidance'].items():
+                formatted.append(f"### {category.replace('_', ' ').title()}")
+                for item in items:
+                    formatted.append(f"- {item}")
+                formatted.append("")
+
+        # Expected behavior
+        if 'expected_behavior' in instructions:
+            formatted.append("## Expected Behavior")
+            formatted.append("")
+            for behavior in instructions['expected_behavior']:
+                formatted.append(f"- {behavior}")
+            formatted.append("")
+
+        return "\n".join(formatted)
+
+    except Exception as e:
+        raise RuntimeError(f"Error loading sysadmin instructions: {e}")
 
 
 def get_ollama_models() -> List[str]:
@@ -438,50 +579,63 @@ class MCPManager:
         self.tools = []
         self.events_mode = events_mode
 
-    async def load_config(self, config_path: str, silent: bool = False):
-        """Load MCP server configuration from file."""
-        if not silent:
-            print(f"Loading configuration from: {config_path}", file=sys.stderr)
-        try:
-            with open(config_path, 'r') as f:
-                config = json.load(f)
+    async def load_config(self, config_path: Optional[str] = None, config_dict: Optional[Dict[str, Any]] = None, silent: bool = False):
+        """Load MCP server configuration from file or dict.
 
-            # Load MCP servers
-            if "mcpServers" in config:
-                for server_name, server_config in config["mcpServers"].items():
-                    if "command" not in server_config:
-                        if not silent:
-                            print(f"Warning: Invalid configuration for MCP server {server_name}: missing 'command' field", file=sys.stderr)
-                        continue
-
-                    # args is optional, default to empty list
-                    args = server_config.get("args", [])
-                    server = MCPServer(server_name, server_config["command"], args)
-                    if await server.start():
-                        self.servers[server_name] = server
-                        self.tools.extend(server.tools)
-                        # Emit MCP server started event
-                        emit_event("mcp.server_started", {
-                            "server_name": server_name,
-                            "command": server_config["command"],
-                            "args": args,
-                            "tools": [t["function"]["name"] for t in server.tools],
-                            "timestamp": time.time()
-                        }, self.events_mode)
-                        if not silent:
-                            print(f"Started MCP server: {server_name}", file=sys.stderr)
-                    else:
-                        if not silent:
-                            print(f"Failed to start MCP server: {server_name}", file=sys.stderr)
-
-            if "mcpServers" not in config:
-                if not silent:
-                    print(f"Warning: No 'mcpServers' section found in {config_path}", file=sys.stderr)
-
-        except Exception as e:
+        Args:
+            config_path: Path to JSON configuration file
+            config_dict: Configuration dictionary (alternative to config_path)
+            silent: Suppress output messages
+        """
+        if config_dict:
             if not silent:
-                print(f"Error loading configuration: {e}", file=sys.stderr)
-            raise
+                print(f"Loading embedded configuration for sysadmin mode", file=sys.stderr)
+            config = config_dict
+        elif config_path:
+            if not silent:
+                print(f"Loading configuration from: {config_path}", file=sys.stderr)
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            except Exception as e:
+                if not silent:
+                    print(f"Error loading configuration: {e}", file=sys.stderr)
+                raise
+        else:
+            raise ValueError("Either config_path or config_dict must be provided")
+
+        # Load MCP servers
+        if "mcpServers" in config:
+            for server_name, server_config in config["mcpServers"].items():
+                if "command" not in server_config:
+                    if not silent:
+                        print(f"Warning: Invalid configuration for MCP server {server_name}: missing 'command' field", file=sys.stderr)
+                    continue
+
+                # args is optional, default to empty list
+                args = server_config.get("args", [])
+                server = MCPServer(server_name, server_config["command"], args)
+                if await server.start():
+                    self.servers[server_name] = server
+                    self.tools.extend(server.tools)
+                    # Emit MCP server started event
+                    emit_event("mcp.server_started", {
+                        "server_name": server_name,
+                        "command": server_config["command"],
+                        "args": args,
+                        "tools": [t["function"]["name"] for t in server.tools],
+                        "timestamp": time.time()
+                    }, self.events_mode)
+                    if not silent:
+                        print(f"Started MCP server: {server_name}", file=sys.stderr)
+                else:
+                    if not silent:
+                        print(f"Failed to start MCP server: {server_name}", file=sys.stderr)
+
+        if "mcpServers" not in config:
+            if not silent:
+                source = "embedded configuration" if config_dict else config_path
+                print(f"Warning: No 'mcpServers' section found in {source}", file=sys.stderr)
 
     def get_tools_spec(self) -> List[Dict[str, Any]]:
         """Return the tools specification for all MCP tools."""
@@ -855,9 +1009,10 @@ async def run_agent(client: OpenAI, model: str, prompt: str, tool_output_limit: 
     return messages
 
 
-async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Optional[str], tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False, events_mode: bool = False) -> None:
+async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Optional[str], tool_output_limit: int = 50, mcp_manager: Optional[MCPManager] = None, silent: bool = False, verbose: bool = False, events_mode: bool = False, sysadmin: bool = False) -> None:
     """Minimal interactive implementation."""
     conversation_history = []
+    sysadmin_instructions_injected = False
 
     # Show MCP server info and model info once at startup (not in events mode)
     if mcp_manager and not silent and not events_mode:
@@ -868,9 +1023,20 @@ async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Op
         provider, _, _, _ = detect_provider(model)
         print_model_info(model, provider, silent)
 
+    # If sysadmin mode, show indicator
+    if sysadmin and not silent and not events_mode:
+        console.print(Panel(
+            "[bold cyan]System Administrator Mode Active[/bold cyan]\n"
+            "Agentic coding assistant with full MCP tool access",
+            title="🔧 Sysadmin Mode",
+            border_style="cyan"
+        ))
+
     # Process initial prompt if provided
     if initial_prompt:
         conversation_history = await run_agent(client, model, initial_prompt, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True, events_mode=events_mode)
+        if sysadmin:
+            sysadmin_instructions_injected = True
 
     print("\n🔄 Interactive mode. Type 'exit' or 'quit' to end session.")
 
@@ -881,6 +1047,26 @@ async def simple_interactive_mode(client: OpenAI, model: str, initial_prompt: Op
                 break
             if not user_input:
                 continue
+
+            # If sysadmin mode and instructions not yet injected, prepend them to first user input
+            if sysadmin and not sysadmin_instructions_injected:
+                try:
+                    system_instructions = load_sysadmin_instructions()
+                    user_input = f"""{system_instructions}
+
+---
+
+# USER REQUEST
+
+{user_input}
+
+---
+
+You are now in sysadmin mode. Execute the user request above using your available MCP tools.
+"""
+                    sysadmin_instructions_injected = True
+                except Exception as e:
+                    print(f"Warning: Could not load sysadmin instructions: {e}", file=sys.stderr)
 
             # Process with existing logic but pass conversation_history and suppress info display
             conversation_history = await run_agent(client, model, user_input, tool_output_limit, mcp_manager, silent, verbose, conversation_history, suppress_info=True, events_mode=events_mode)
@@ -924,6 +1110,32 @@ def parse_prompt_arg(prompt_arg: str) -> str:
     return prompt_arg
 
 
+def json_file_completer(prefix, **kwargs):
+    """Custom completer for JSON configuration files."""
+    import glob
+    # Return all JSON files in the current directory and subdirectories
+    json_files = glob.glob(f"{prefix}*.json")
+    # Also support completion in subdirectories
+    if '/' in prefix:
+        json_files.extend(glob.glob(f"{prefix}*.json"))
+    return json_files
+
+
+def model_completer(prefix, **kwargs):
+    """Custom completer for model names."""
+    # Get all available models from all providers
+    try:
+        all_models = []
+        models_by_provider = get_supported_models()
+        for provider, model_list in models_by_provider.items():
+            all_models.extend(model_list)
+        # Filter models that start with the prefix
+        return [model for model in all_models if model.startswith(prefix)]
+    except Exception:
+        # If we can't get models, return empty list
+        return []
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -937,11 +1149,12 @@ def main():
         version=f"eunice {__version__}"
     )
 
-    parser.add_argument(
+    model_arg = parser.add_argument(
         "--model",
         default=None,
         help="Model to use (default: smart selection based on availability)"
     )
+    model_arg.completer = model_completer
 
     parser.add_argument(
         "--prompt",
@@ -961,10 +1174,11 @@ def main():
         help="List all supported models grouped by provider"
     )
 
-    parser.add_argument(
+    config_arg = parser.add_argument(
         "--config",
         help="Path to MCP server configuration JSON file"
     )
+    config_arg.completer = json_file_completer
 
     parser.add_argument(
         "--silent",
@@ -997,10 +1211,19 @@ def main():
     )
 
     parser.add_argument(
+        "--sysadmin",
+        action="store_true",
+        help="Enable system administrator mode with agentic coding capabilities"
+    )
+
+    parser.add_argument(
         "prompt_positional",
         nargs="?",
         help="Prompt as positional argument (can be a file path or string)"
     )
+
+    # Enable argcomplete tab completion
+    argcomplete.autocomplete(parser)
 
     args = parser.parse_args()
 
@@ -1009,9 +1232,13 @@ def main():
         print_models_list()
         sys.exit(0)
 
-    # Validate --no-mcp and --config arguments
+    # Validate --no-mcp, --config, and --sysadmin arguments
     if args.no_mcp and args.config is not None:
         print("Error: --no-mcp and --config cannot be used together", file=sys.stderr)
+        sys.exit(1)
+
+    if args.sysadmin and args.no_mcp:
+        print("Error: --sysadmin requires MCP tools (cannot use with --no-mcp)", file=sys.stderr)
         sys.exit(1)
 
     # Determine the prompt and interactive mode
@@ -1035,9 +1262,16 @@ def main():
 
         # Determine config path: explicit --config takes precedence, then check for eunice.json in current working directory
         config_path = None
+        use_sysadmin_config = False
 
         if not args.no_mcp:
-            if args.config is not None:
+            if args.sysadmin:
+                # Sysadmin mode: use embedded config unless explicit --config provided
+                if args.config is not None and args.config.strip() != '':
+                    config_path = args.config
+                else:
+                    use_sysadmin_config = True
+            elif args.config is not None:
                 # Handle empty config parameter (--config='' should function like --no-mcp)
                 if args.config.strip() == '':
                     config_path = None
@@ -1047,26 +1281,56 @@ def main():
                 config_path = str(Path.cwd().joinpath("eunice.json"))
 
         # Run everything in a single asyncio context
-        asyncio.run(main_async(client, model, prompt, args.tool_output_limit, config_path, args.silent, args.verbose, interactive_mode, args.events))
+        asyncio.run(main_async(
+            client, model, prompt, args.tool_output_limit, config_path,
+            args.silent, args.verbose, interactive_mode, args.events,
+            args.sysadmin, use_sysadmin_config
+        ))
 
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 
-async def main_async(client: OpenAI, model: str, prompt: Optional[str], tool_output_limit: int, config_path: Optional[str], silent: bool = False, verbose: bool = False, interactive: bool = False, events_mode: bool = False):
+async def main_async(client: OpenAI, model: str, prompt: Optional[str], tool_output_limit: int, config_path: Optional[str], silent: bool = False, verbose: bool = False, interactive: bool = False, events_mode: bool = False, sysadmin: bool = False, use_sysadmin_config: bool = False):
     """Main async function that handles MCP setup and agent execution."""
     mcp_manager = None
 
     try:
-        # Create and configure MCP manager if config provided
-        if config_path:
+        # Create and configure MCP manager if config provided or sysadmin mode
+        if config_path or use_sysadmin_config:
             mcp_manager = MCPManager(events_mode=events_mode)
-            await mcp_manager.load_config(config_path, silent or events_mode)
+            if use_sysadmin_config:
+                # Load embedded sysadmin config
+                await mcp_manager.load_config(config_dict=SYSADMIN_MCP_CONFIG, silent=silent or events_mode)
+            else:
+                # Load from file
+                await mcp_manager.load_config(config_path=config_path, silent=silent or events_mode)
+
+        # If sysadmin mode and we have a prompt, prepend system instructions
+        if sysadmin and prompt:
+            try:
+                system_instructions = load_sysadmin_instructions()
+                prompt = f"""{system_instructions}
+
+---
+
+# USER REQUEST
+
+{prompt}
+
+---
+
+You are now in sysadmin mode. Execute the user request above using your available MCP tools.
+"""
+            except Exception as e:
+                print(f"Warning: Could not load sysadmin instructions: {e}", file=sys.stderr)
+                print("Continuing without system instructions...", file=sys.stderr)
 
         # Run the appropriate mode
         if interactive:
-            await simple_interactive_mode(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose, events_mode)
+            # For interactive mode, we'll handle sysadmin instructions differently
+            await simple_interactive_mode(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose, events_mode, sysadmin)
         else:
             await run_agent(client, model, prompt, tool_output_limit, mcp_manager, silent, verbose, events_mode=events_mode)
 
