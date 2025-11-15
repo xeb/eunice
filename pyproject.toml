@@ -30,7 +30,6 @@ dependencies = [
     "openai",
     "rich",
     "argcomplete",
-    "pyyaml",
 ]
 
 [project.scripts]
@@ -45,7 +44,7 @@ Issues = "https://github.com/xeb/eunice/issues"
 packages = ["."]
 
 [tool.hatch.build.targets.wheel.force-include]
-"sysadmin_instructions.yml" = "sysadmin_instructions.yml"
+"sysadmin_instructions.md" = "sysadmin_instructions.md"
 
 [tool.hatch.build.targets.wheel.shared-data]
 "eunice-completion.bash" = "share/eunice/eunice-completion.bash"

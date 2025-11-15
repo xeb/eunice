@@ -1,21 +1,21 @@
 # eunice
 
-An agent tool and framework that runs with different LLM providers (including Ollama), supports MCP tools (stdio only for now), runs in a loop, has a docker image (for isolation), and support an interactive chat mode as needed.
+An agent tool and framework that runs with different LLM providers (including Ollama), supports MCP tools (stdio only for now), runs in a loop, has a docker image (for isolation), optional interactive chat mode, and optional "sysadmin" mode with sample versatile system level instructions.
 
 > **Name Origin**: eunice is named after the AI character Eunice from William Gibson's novel "Agency" - a highly capable artificial intelligence that assists with complex tasks through natural conversation.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
-│   📝 Prompt    +    🔧 MCP Config    +    🤖 eunice                        │
+│   📝 Prompt    +    🔧 MCP Config    +    🤖 eunice                         │
 │                                                                             │
 │                            ║                                                │
 │                            ║                                                │
 │                            ▼                                                │
 │                                                                             │
-│              ✨ Model-Agnostic Agentic Runtime ✨                          │
+│              ✨ Model-Agnostic Agentic Runtime ✨                           │
 │                                                                             │
-│        (OpenAI • Gemini • Anthropic • Ollama)                              │
+│        (OpenAI • Gemini • Anthropic • Ollama)                               │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -78,7 +78,7 @@ This example demonstrates:
 
 **Minimalism**: Keep the core implementation under 2,000 lines of Python code.
 
-✅ **Current Status**: `eunice.py` is **1,343/2,000 lines** (67.2% used, **32.8% remaining**)
+✅ **Current Status**: `eunice.py` is **1,263/2,000 lines** (63.2% used, **36.8% remaining**)
 
 ## Installation
 

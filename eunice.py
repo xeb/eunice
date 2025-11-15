@@ -5,7 +5,6 @@
 #     "openai",
 #     "rich",
 #     "argcomplete",
-#     "pyyaml",
 # ]
 # ///
 """
@@ -26,7 +25,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, AsyncGenerator
 
 import argcomplete
-import yaml
 
 try:
     from importlib.metadata import version
@@ -151,102 +149,21 @@ def print_verbose_llm_info(message: str, verbose: bool = False) -> None:
 
 
 def load_sysadmin_instructions() -> str:
-    """Load and format sysadmin instructions from YAML file."""
-    # Try to find sysadmin_instructions.yml in same directory as script
+    """Load sysadmin instructions from markdown file."""
     script_dir = Path(__file__).parent
-    yaml_path = script_dir / "sysadmin_instructions.yml"
+    md_path = script_dir / "sysadmin_instructions.md"
 
-    # If not found in script dir, try current working directory
-    if not yaml_path.exists():
-        yaml_path = Path.cwd() / "sysadmin_instructions.yml"
+    if not md_path.exists():
+        md_path = Path.cwd() / "sysadmin_instructions.md"
 
-    if not yaml_path.exists():
+    if not md_path.exists():
         raise FileNotFoundError(
-            "sysadmin_instructions.yml not found. "
+            "sysadmin_instructions.md not found. "
             "This file is required for --sysadmin mode."
         )
 
-    try:
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            instructions = yaml.safe_load(f)
-
-        # Format the instructions into a readable text format
-        formatted = []
-
-        # Preamble
-        if 'preamble' in instructions:
-            formatted.append("# SYSTEM INSTRUCTIONS - SYSADMIN MODE")
-            formatted.append("")
-            formatted.append(instructions['preamble'].strip())
-            formatted.append("")
-
-        # Core Mandates
-        if 'core_mandates' in instructions:
-            formatted.append("## Core Mandates")
-            formatted.append("")
-            for mandate in instructions['core_mandates']:
-                formatted.append(f"**{mandate['name']}**: {mandate['description']}")
-                formatted.append("")
-
-        # Primary Workflows
-        if 'primary_workflows' in instructions:
-            formatted.append("## Primary Workflows")
-            formatted.append("")
-            for workflow_name, workflow in instructions['primary_workflows'].items():
-                if isinstance(workflow, dict):
-                    formatted.append(f"### {workflow_name.replace('_', ' ').title()}")
-                    if 'description' in workflow:
-                        formatted.append(workflow['description'])
-                        formatted.append("")
-                    if 'steps' in workflow:
-                        for step in workflow['steps']:
-                            if isinstance(step, dict):
-                                formatted.append(f"**{step.get('step', '')}**: {step.get('details', '')}")
-                            elif isinstance(step, str):
-                                formatted.append(f"- {step}")
-                        formatted.append("")
-
-        # Operational Guidelines
-        if 'operational_guidelines' in instructions:
-            formatted.append("## Operational Guidelines")
-            formatted.append("")
-            for guideline_name, guidelines in instructions['operational_guidelines'].items():
-                if isinstance(guidelines, list):
-                    formatted.append(f"### {guideline_name.replace('_', ' ').title()}")
-                    for item in guidelines:
-                        formatted.append(f"- {item}")
-                    formatted.append("")
-
-        # Add critical sections
-        for section in ['sandbox_information', 'git_repository_guidelines', 'final_reminder']:
-            if section in instructions:
-                formatted.append(f"## {section.replace('_', ' ').title()}")
-                formatted.append("")
-                formatted.append(instructions[section].strip())
-                formatted.append("")
-
-        # Tool workflow guidance
-        if 'tool_workflow_guidance' in instructions:
-            formatted.append("## Tool Usage Guidance")
-            formatted.append("")
-            for category, items in instructions['tool_workflow_guidance'].items():
-                formatted.append(f"### {category.replace('_', ' ').title()}")
-                for item in items:
-                    formatted.append(f"- {item}")
-                formatted.append("")
-
-        # Expected behavior
-        if 'expected_behavior' in instructions:
-            formatted.append("## Expected Behavior")
-            formatted.append("")
-            for behavior in instructions['expected_behavior']:
-                formatted.append(f"- {behavior}")
-            formatted.append("")
-
-        return "\n".join(formatted)
-
-    except Exception as e:
-        raise RuntimeError(f"Error loading sysadmin instructions: {e}")
+    with open(md_path, 'r', encoding='utf-8') as f:
+        return f.read()
 
 
 def get_ollama_models() -> List[str]:
@@ -800,6 +717,9 @@ def detect_provider(model: str) -> tuple[str, str, str, str]:
     Detect the provider based on model name.
     Returns (provider, base_url, api_key, resolved_model)
     """
+    if not model or not model.strip():
+        raise ValueError("Model '' not recognized. Please specify a valid model name.")
+
     model_lower = model.lower()
 
     # Gemini models (highest priority, explicit check)

@@ -506,8 +506,8 @@ To use all sysadmin mode features, ensure you have:
 
 **Architecture:**
 - MCP configuration embedded as Python constant `SYSADMIN_MCP_CONFIG` in `eunice.py`
-- System instructions loaded from `sysadmin_instructions.yml` (packaged with eunice)
-- Instructions formatted from YAML into markdown at runtime
+- System instructions loaded from `sysadmin_instructions.md` (packaged with eunice)
+- Instructions read directly as markdown (no parsing/formatting overhead)
 - Instructions prepended to first user message only (in both single-shot and interactive modes)
 
 **Instruction Injection:**
@@ -588,8 +588,8 @@ Here's how sysadmin mode typically handles a task like "Fix bug in login.py":
 ## Technical Implementation
 
 ### File Structure
-- `eunice.py` - Main executable script with inline dependencies (1,343 lines)
-- `sysadmin_instructions.yml` - System instructions for --sysadmin mode (packaged with eunice)
+- `eunice.py` - Main executable script with inline dependencies (1,263 lines)
+- `sysadmin_instructions.md` - System instructions for --sysadmin mode (packaged with eunice)
 - `sysadmin_config.example.json` - Example MCP configuration for sysadmin mode
 - `pyproject.toml` - Package configuration for `uv tool install`
 - `Makefile` - Comprehensive build system with colored help and commands
@@ -604,7 +604,6 @@ Here's how sysadmin mode typically handles a task like "Fix bug in login.py":
 - `openai` - Unified API client for all providers (OpenAI, Gemini via OpenAI-compatible endpoints, Ollama)
 - `anthropic` - Anthropic API client for Claude models
 - `rich` - Modern terminal UI library for beautiful console output and formatting
-- `pyyaml` - YAML parser for loading sysadmin mode instructions
 - `mcp` - Model Context Protocol client library for MCP server communication (optional)
 - Standard library modules: `argparse`, `json`, `os`, `subprocess`, `sys`, `pathlib`, `asyncio`, `urllib.request`
 
@@ -905,6 +904,6 @@ The framework is designed to be extensible while maintaining simplicity:
 - ✅ Anthropic API integration with model aliases
 - ✅ Enhanced error handling and model routing
 - ✅ **Rich library integration** - Professional terminal UI with panels, tables, and enhanced formatting
-- ✅ **Sysadmin mode** - Full-featured AI coding assistant with 7 auto-loaded MCP servers, comprehensive system instructions, and specialized tools for software engineering tasks (1,343 lines total)
+- ✅ **Sysadmin mode** - Full-featured AI coding assistant with 7 auto-loaded MCP servers, comprehensive system instructions, and specialized tools for software engineering tasks (1,263 lines total)
 
 The core philosophy remains: provide a simple, reliable interface for agentic AI interactions while continuously improving performance and user experience.

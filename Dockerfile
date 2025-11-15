@@ -12,7 +12,7 @@ ENV PATH="/root/.local/bin:$PATH"
 ENV OLLAMA_HOST="http://host.docker.internal:11434"
 
 # Copy all files and setup permissions in one layer
-COPY eunice.py pyproject.toml README.md ./
+COPY eunice.py pyproject.toml README.md sysadmin_instructions.md sysadmin_config.example.json ./
 COPY tests/ tests/
 COPY config.example.json ./eunice.json
 RUN chmod +x tests/host.sh tests/container-eunice.sh tests/container.sh
