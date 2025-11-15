@@ -4,6 +4,22 @@ An agent tool and framework that runs with different LLM providers (including Ol
 
 > **Name Origin**: eunice is named after the AI character Eunice from William Gibson's novel "Agency" - a highly capable artificial intelligence that assists with complex tasks through natural conversation.
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│   📝 Prompt    +    🔧 MCP Config    +    🤖 eunice                        │
+│                                                                             │
+│                            ║                                                │
+│                            ║                                                │
+│                            ▼                                                │
+│                                                                             │
+│              ✨ Model-Agnostic Agentic Runtime ✨                          │
+│                                                                             │
+│        (OpenAI • Gemini • Anthropic • Ollama)                              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ## Sample Usage
 
 ![eunice in action](assets/session.gif)
