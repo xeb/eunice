@@ -65,7 +65,7 @@ make test
 When updating the codebase, **ALWAYS** update both metrics in README.md:
 
 ### Current Metrics
-- **Implementation lines**: 2,433 lines (excluding tests)
+- **Implementation lines**: 2,468 lines (excluding tests)
 - **Binary size**: 3.6MB (release build)
 
 ### Count Implementation Lines

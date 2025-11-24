@@ -59,7 +59,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         "web".to_string(),
         McpServerConfig {
             command: "npx".to_string(),
-            args: vec!["-y".to_string(), "@anthropic-ai/claude-code-mcp-server".to_string()],
+            args: vec!["-y".to_string(), "@brave/brave-search-mcp-server".to_string()],
         },
     );
 

@@ -459,6 +459,11 @@ impl Client {
             "default",
             "examples",
             "title",
+            // JSON Schema combinators not supported by Gemini native API
+            "anyOf",
+            "oneOf",
+            "allOf",
+            "not",
         ];
 
         // If schema is too deeply nested, simplify it
@@ -473,11 +478,32 @@ impl Client {
         match schema {
             serde_json::Value::Object(obj) => {
                 let mut cleaned = serde_json::Map::new();
+
+                // First pass: collect all keys except unsupported ones
                 for (key, value) in obj {
                     if !UNSUPPORTED.contains(&key.as_str()) {
                         cleaned.insert(key.clone(), Self::clean_schema_recursive(value, depth + 1));
                     }
                 }
+
+                // Second pass: clean up "required" array to only reference existing properties
+                if let Some(serde_json::Value::Object(props)) = cleaned.get("properties") {
+                    if let Some(serde_json::Value::Array(required)) = cleaned.get("required") {
+                        let valid_required: Vec<serde_json::Value> = required
+                            .iter()
+                            .filter(|r| {
+                                if let serde_json::Value::String(s) = r {
+                                    props.contains_key(s)
+                                } else {
+                                    false
+                                }
+                            })
+                            .cloned()
+                            .collect();
+                        cleaned.insert("required".to_string(), serde_json::Value::Array(valid_required));
+                    }
+                }
+
                 serde_json::Value::Object(cleaned)
             }
             serde_json::Value::Array(arr) => {
