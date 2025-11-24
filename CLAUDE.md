@@ -2,7 +2,7 @@
 
 ## About
 
-Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" with **2,206 lines of implementation code** (excluding tests).
+Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" with **1,957 lines of implementation code** (excluding tests) and a **3.5MB release binary**.
 
 ## Architecture
 
@@ -60,14 +60,15 @@ cargo test
 make test
 ```
 
-## Line Count Guidelines
+## Line Count and Binary Size Guidelines
 
-When counting lines of code:
-- **Count implementation only** (exclude test modules)
-- Test modules start with `#[cfg(test)]`
-- Current implementation: **2,206 lines**
+When updating the codebase, **ALWAYS** update both metrics in README.md:
 
-Count implementation lines:
+### Current Metrics
+- **Implementation lines**: 1,957 lines (excluding tests)
+- **Binary size**: 3.5MB (release build)
+
+### Count Implementation Lines
 ```bash
 for file in src/*.rs src/mcp/*.rs; do
   test_start=$(grep -n "^#\[cfg(test)\]" "$file" | cut -d: -f1)
@@ -78,6 +79,15 @@ for file in src/*.rs src/mcp/*.rs; do
   fi
 done
 ```
+
+### Check Binary Size
+```bash
+make binary-size
+# or
+cargo build --release && ls -lh target/release/eunice
+```
+
+**Important**: Update both values in README.md after any code changes.
 
 ## Development Workflow
 
@@ -142,20 +152,22 @@ The `gemini-3-pro-preview` model uses a different API format:
 ```
 src/
 ├── main.rs (257)          - CLI entry, arg parsing
-├── agent.rs (121)         - Agent loop with tool execution
-├── client.rs (262)        - HTTP client, format conversions
+├── models.rs (278)        - Data structures + Gemini response types
+├── client.rs (263)        - HTTP client, format conversions
+├── mcp/
+│   ├── server.rs (251)    - MCP subprocess management
+│   └── manager.rs (139)   - Tool routing
 ├── provider.rs (236)      - Provider detection
-├── models.rs (272)        - Data structures
-├── config.rs (276)        - DMN config and instructions
-├── display.rs (258)       - Terminal UI, spinners
+├── display.rs (189)       - Terminal UI with indicatif spinners
 ├── interactive.rs (122)   - Interactive REPL mode
-├── lib.rs (8)             - Library exports
-└── mcp/
-    ├── server.rs (251)    - MCP subprocess management
-    ├── manager.rs (139)   - Tool routing
-    └── mod.rs (4)         - Module exports
+├── agent.rs (121)         - Agent loop with tool execution
+├── config.rs (89)         - Configuration loading
+└── lib.rs (8)             - Library exports
 
-Total: 2,206 lines (implementation)
+dmn_instructions.md (188)  - DMN system instructions (embedded via include_str!)
+
+Total: 1,957 lines (implementation) + 188 lines (embedded instructions)
+Binary: 3.5MB (release build)
 ```
 
 ## Dependencies
@@ -165,7 +177,8 @@ Total: 2,206 lines (implementation)
 - **serde/serde_json**: Serialization
 - **clap**: CLI with aliases and env var support
 - **colored**: Terminal colors
-- **crossterm**: Terminal control for spinners
+- **indicatif**: Progress spinners with braille characters
+- **crossterm**: Terminal control
 - **anyhow/thiserror**: Error handling
 
 ## Contributing
@@ -173,8 +186,11 @@ Total: 2,206 lines (implementation)
 When adding features:
 1. Write implementation code first
 2. Add unit tests
-3. Update line counts (implementation only)
-4. Update README.md
+3. Update line counts and binary size:
+   - Count implementation lines (see "Line Count Guidelines")
+   - Run `make binary-size` to get release binary size
+   - Update both values in README.md
+4. Update this CLAUDE.md file if structure changed
 5. Run `make test` to verify
 6. Run `cargo build --release` to check for warnings
 

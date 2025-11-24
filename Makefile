@@ -1,4 +1,4 @@
-.PHONY: help build release install interact clean test list-models bump-version publish
+.PHONY: help build release install interact clean test list-models bump-version publish binary-size
 
 # Colors
 CYAN := \033[36m
@@ -54,3 +54,7 @@ bump-version: ## Bump patch version (0.1.0 -> 0.1.1)
 publish: bump-version ## Bump version and publish to crates.io
 	cargo publish --allow-dirty
 	@echo "$(GREEN)Published to crates.io!$(RESET)"
+
+binary-size: release ## Show release binary size
+	@size=$$(ls -lh target/release/eunice | awk '{print $$5}'); \
+	echo "$(GREEN)Binary size: $$size$(RESET)"

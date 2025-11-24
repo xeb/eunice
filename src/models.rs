@@ -261,13 +261,19 @@ pub struct GeminiCandidate {
 /// Gemini content response structure
 #[derive(Debug, Deserialize)]
 pub struct GeminiContentResponse {
+    #[serde(default)]
     pub parts: Vec<GeminiPartResponse>,
+    #[serde(rename = "functionCall")]
+    pub function_call: Option<serde_json::Value>,
 }
 
 /// Gemini part response structure
 #[derive(Debug, Deserialize)]
 pub struct GeminiPartResponse {
-    pub text: String,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(rename = "functionCall")]
+    pub function_call: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -305,7 +311,7 @@ mod tests {
         let response: GeminiResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.candidates.len(), 1);
         assert_eq!(response.candidates[0].content.parts.len(), 1);
-        assert_eq!(response.candidates[0].content.parts[0].text, "Response text");
+        assert_eq!(response.candidates[0].content.parts[0].text, Some("Response text".to_string()));
     }
 
     #[test]

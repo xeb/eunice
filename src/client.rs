@@ -239,7 +239,8 @@ impl Client {
             .content
             .parts
             .iter()
-            .map(|p| p.text.as_str())
+            .filter_map(|p| p.text.as_ref())
+            .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -375,8 +376,10 @@ mod tests {
             candidates: vec![GeminiCandidate {
                 content: GeminiContentResponse {
                     parts: vec![GeminiPartResponse {
-                        text: "This is a test response".to_string(),
+                        text: Some("This is a test response".to_string()),
+                        function_call: None,
                     }],
+                    function_call: None,
                 },
             }],
         };
@@ -401,12 +404,15 @@ mod tests {
                 content: GeminiContentResponse {
                     parts: vec![
                         GeminiPartResponse {
-                            text: "First part".to_string(),
+                            text: Some("First part".to_string()),
+                            function_call: None,
                         },
                         GeminiPartResponse {
-                            text: "Second part".to_string(),
+                            text: Some("Second part".to_string()),
+                            function_call: None,
                         },
                     ],
+                    function_call: None,
                 },
             }],
         };
