@@ -8,7 +8,7 @@ mod models;
 mod provider;
 
 use crate::client::Client;
-use crate::config::{get_sysadmin_mcp_config, load_mcp_config, SYSADMIN_INSTRUCTIONS};
+use crate::config::{get_dmn_mcp_config, load_mcp_config, DMN_INSTRUCTIONS};
 use crate::mcp::McpManager;
 use crate::models::{McpConfig, Message};
 use crate::provider::{detect_provider, get_smart_default_model};
@@ -45,9 +45,9 @@ struct Args {
     #[arg(long)]
     no_mcp: bool,
 
-    /// Enable sysadmin mode with auto-loaded MCP tools
-    #[arg(long)]
-    sysadmin: bool,
+    /// Enable DMN (Default Mode Network) with auto-loaded MCP tools
+    #[arg(long = "default-mode-network", visible_alias = "dmn")]
+    dmn: bool,
 
     /// Interactive mode for multi-turn conversations
     #[arg(long, short = 'i')]
@@ -115,12 +115,12 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
         return Ok(None);
     }
 
-    // --sysadmin uses embedded config
-    if args.sysadmin {
+    // --dmn uses embedded config
+    if args.dmn {
         if args.config.is_some() {
-            return Err(anyhow!("--sysadmin cannot be used with --config"));
+            return Err(anyhow!("--dmn cannot be used with --config"));
         }
-        return Ok(Some(get_sysadmin_mcp_config()));
+        return Ok(Some(get_dmn_mcp_config()));
     }
 
     // --config specified
@@ -158,8 +158,8 @@ async fn main() -> Result<()> {
         return Err(anyhow!("--no-mcp and --config cannot be used together"));
     }
 
-    if args.sysadmin && args.no_mcp {
-        return Err(anyhow!("--sysadmin requires MCP tools and cannot be used with --no-mcp"));
+    if args.dmn && args.no_mcp {
+        return Err(anyhow!("--dmn requires MCP tools and cannot be used with --no-mcp"));
     }
 
     // Resolve prompt
@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
             args.silent,
             args.verbose,
             args.events,
-            args.sysadmin,
+            args.dmn,
         )
         .await?;
     } else {
@@ -215,16 +215,16 @@ async fn main() -> Result<()> {
                 display::print_mcp_info(&server_info);
             }
 
-            if args.sysadmin {
-                display::print_sysadmin_mode();
+            if args.dmn {
+                display::print_dmn_mode();
             }
         }
 
-        // Inject sysadmin instructions if needed
-        let final_prompt = if args.sysadmin {
+        // Inject DMN instructions if needed
+        let final_prompt = if args.dmn {
             format!(
-                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in sysadmin mode. Execute the user request above using your available MCP tools.",
-                SYSADMIN_INSTRUCTIONS, prompt
+                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
+                DMN_INSTRUCTIONS, prompt
             )
         } else {
             prompt

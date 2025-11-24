@@ -1,5 +1,6 @@
 use crate::client::Client;
 use crate::display;
+use crate::display::Spinner;
 use crate::mcp::McpManager;
 use crate::models::Message;
 use anyhow::Result;
@@ -80,6 +81,13 @@ pub async fn run_agent(
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
 
+            // Start spinner for tool execution
+            let spinner = if !silent {
+                Some(Spinner::start(&format!("Running {}", tool_name)))
+            } else {
+                None
+            };
+
             // Execute tool via MCP manager
             let result = if let Some(ref mut manager) = mcp_manager.as_deref_mut() {
                 match manager.execute_tool(tool_name, args).await {
@@ -89,6 +97,11 @@ pub async fn run_agent(
             } else {
                 "Error: No MCP manager available".to_string()
             };
+
+            // Stop spinner
+            if let Some(spinner) = spinner {
+                spinner.stop().await;
+            }
 
             // Display result
             if !silent {

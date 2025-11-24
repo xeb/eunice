@@ -1,6 +1,6 @@
 use crate::agent::run_agent;
 use crate::client::Client;
-use crate::config::SYSADMIN_INSTRUCTIONS;
+use crate::config::DMN_INSTRUCTIONS;
 use crate::display;
 use crate::mcp::McpManager;
 use crate::models::Message;
@@ -17,10 +17,10 @@ pub async fn interactive_mode(
     silent: bool,
     verbose: bool,
     events_mode: bool,
-    sysadmin: bool,
+    dmn: bool,
 ) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
-    let mut sysadmin_injected = false;
+    let mut dmn_injected = false;
 
     // Show model/MCP info once at startup
     if !silent {
@@ -31,18 +31,18 @@ pub async fn interactive_mode(
             display::print_mcp_info(&server_info);
         }
 
-        if sysadmin {
-            display::print_sysadmin_mode();
+        if dmn {
+            display::print_dmn_mode();
         }
     }
 
     // Process initial prompt if provided
     if let Some(prompt) = initial_prompt {
-        let prompt_with_instructions = if sysadmin {
-            sysadmin_injected = true;
+        let prompt_with_instructions = if dmn {
+            dmn_injected = true;
             format!(
-                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in sysadmin mode. Execute the user request above using your available MCP tools.",
-                SYSADMIN_INSTRUCTIONS, prompt
+                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
+                DMN_INSTRUCTIONS, prompt
             )
         } else {
             prompt.to_string()
@@ -87,12 +87,12 @@ pub async fn interactive_mode(
             break;
         }
 
-        // Inject sysadmin instructions on first interactive input
-        let prompt = if sysadmin && !sysadmin_injected {
-            sysadmin_injected = true;
+        // Inject DMN instructions on first interactive input
+        let prompt = if dmn && !dmn_injected {
+            dmn_injected = true;
             format!(
-                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in sysadmin mode. Execute the user request above using your available MCP tools.",
-                SYSADMIN_INSTRUCTIONS, input
+                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
+                DMN_INSTRUCTIONS, input
             )
         } else {
             input.to_string()

@@ -15,7 +15,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Unified API**: Uses OpenAI-compatible endpoints for all providers
 - **MCP Integration**: Model Context Protocol servers for extensible tool capabilities
 - **Smart Defaults**: Automatically selects the best available model
-- **Sysadmin Mode**: Pre-configured MCP tools and system instructions for software engineering tasks
+- **DMN Mode**: Default Mode Network - autonomous batch execution with pre-configured MCP tools for software engineering
 - **Interactive Mode**: Multi-turn conversations with context preservation
 
 ## Installation
@@ -57,8 +57,8 @@ eunice --interact
 # With MCP tools
 eunice --config ./mcp-config.json "What time is it?"
 
-# Sysadmin mode (auto-loads 7 MCP servers)
-eunice --sysadmin "Fix the bug in main.rs"
+# DMN mode - autonomous batch execution (auto-loads 7 MCP servers)
+eunice --dmn "Fix the bug in main.rs"
 ```
 
 ## Command Line Options
@@ -76,7 +76,7 @@ Options:
       --list-models             Show all available models
       --config <FILE>           Path to MCP configuration JSON
       --no-mcp                  Disable MCP even if eunice.json exists
-      --sysadmin                Enable sysadmin mode with auto-loaded MCP tools
+      --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
   -i, --interact                Interactive mode for multi-turn conversations
       --silent                  Suppress all output except AI responses
       --verbose                 Enable verbose debug output
@@ -134,9 +134,9 @@ Create a `eunice.json` in your working directory for automatic MCP server loadin
 
 Tools are registered with server name prefixes (e.g., `filesystem_read_file`, `time_get_current_time`).
 
-## Sysadmin Mode
+## DMN Mode (Default Mode Network)
 
-Enable with `--sysadmin` to automatically load 7 MCP servers:
+Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution with 7 pre-configured MCP servers:
 
 - **shell**: Execute shell commands
 - **filesystem**: File operations
@@ -146,7 +146,7 @@ Enable with `--sysadmin` to automatically load 7 MCP servers:
 - **web**: Web search (requires `BRAVE_API_KEY`)
 - **fetch**: HTTP requests
 
-Plus comprehensive system instructions for software engineering best practices.
+DMN mode executes tasks autonomously without stopping for confirmation. It makes reasonable decisions and proceeds through all steps automatically, following comprehensive system instructions for software engineering best practices.
 
 ## Project Structure
 
@@ -155,7 +155,7 @@ Plus comprehensive system instructions for software engineering best practices.
 ├── Makefile             # Build commands
 ├── src/
 │   ├── main.rs          # Entry point, CLI parsing (256 lines)
-│   ├── config.rs        # Configuration + sysadmin instructions (274 lines)
+│   ├── config.rs        # Configuration + DMN instructions (274 lines)
 │   ├── models.rs        # Data structures (223 lines)
 │   ├── provider.rs      # Provider detection & routing (221 lines)
 │   ├── display.rs       # Terminal UI (196 lines)
@@ -220,13 +220,14 @@ $ eunice --interact --model sonnet
 > exit
 ```
 
-### Sysadmin Mode
+### DMN Mode
 
 ```bash
-# Complex software engineering task
-eunice --sysadmin "Find all TODO comments and create issues for them"
+# Complex software engineering task - runs autonomously
+eunice --dmn "Find all TODO comments and create issues for them"
 
 # The AI has access to shell, filesystem, grep, and more
+# Executes all steps without stopping for confirmation
 ```
 
 ## Environment Variables
@@ -236,7 +237,7 @@ eunice --sysadmin "Find all TODO comments and create issues for them"
 export OPENAI_API_KEY="sk-..."
 export GEMINI_API_KEY="..."
 export ANTHROPIC_API_KEY="..."
-export BRAVE_API_KEY="..."  # For web search in sysadmin mode
+export BRAVE_API_KEY="..."  # For web search in DMN mode
 
 # Ollama host (optional)
 export OLLAMA_HOST="http://localhost:11434"
