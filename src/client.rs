@@ -13,7 +13,6 @@ pub struct Client {
     api_key: String,
     provider: Provider,
     use_native_gemini_api: bool,
-    resolved_model: String,
 }
 
 impl Client {
@@ -62,7 +61,6 @@ impl Client {
             api_key: provider_info.api_key.clone(),
             provider: provider_info.provider.clone(),
             use_native_gemini_api: provider_info.use_native_gemini_api,
-            resolved_model: provider_info.resolved_model.clone(),
         })
     }
 
@@ -613,7 +611,6 @@ mod tests {
                         function_call: None,
                         thought_signature: None,
                     }],
-                    function_call: None,
                 },
                 finish_reason: Some("STOP".to_string()),
                 finish_message: None,
@@ -651,7 +648,6 @@ mod tests {
                             thought_signature: None,
                         },
                     ],
-                    function_call: None,
                 },
                 finish_reason: Some("STOP".to_string()),
                 finish_message: None,

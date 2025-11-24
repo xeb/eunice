@@ -1,11 +1,24 @@
-use crate::mcp::server::McpServer;
+use crate::mcp::server::{McpServer, SpawnedServer};
 use crate::models::{McpConfig, Tool};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
+use tokio::task::JoinHandle;
 
-/// Manages multiple MCP servers and routes tool calls
+/// State of an MCP server during lazy initialization
+pub enum ServerState {
+    /// Server is starting up in background
+    Initializing(JoinHandle<Result<McpServer>>),
+    /// Server is ready to use
+    Ready(McpServer),
+    /// Server failed to start
+    Failed(String),
+}
+
+/// Manages multiple MCP servers and routes tool calls with lazy loading
 pub struct McpManager {
-    servers: HashMap<String, McpServer>,
+    servers: HashMap<String, ServerState>,
+    /// Whether to print status messages
+    silent: bool,
 }
 
 impl McpManager {
@@ -13,92 +26,195 @@ impl McpManager {
     pub fn new() -> Self {
         Self {
             servers: HashMap::new(),
+            silent: false,
         }
     }
 
-    /// Load and start all MCP servers from configuration
-    pub async fn load_config(&mut self, config: &McpConfig, silent: bool) -> Result<()> {
+    /// Start all MCP servers from configuration in the background (non-blocking)
+    /// Returns immediately - servers initialize in parallel background tasks
+    pub fn start_servers_background(&mut self, config: &McpConfig, silent: bool) {
+        self.silent = silent;
+
         for (name, server_config) in &config.mcp_servers {
             if !silent {
-                eprintln!("Starting MCP server: {}", name);
+                eprintln!("Starting MCP server: {} (background)", name);
             }
 
-            match McpServer::start(name, &server_config.command, &server_config.args).await {
-                Ok(server) => {
-                    if !silent {
-                        eprintln!(
-                            "  {} tools discovered: {}",
-                            server.tools.len(),
-                            server
-                                .tools
-                                .iter()
-                                .map(|t| t.function.name.clone())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        );
-                    }
-                    self.servers.insert(name.clone(), server);
+            // Spawn the process synchronously (fast, doesn't block)
+            match SpawnedServer::spawn(name, &server_config.command, &server_config.args) {
+                Ok(spawned) => {
+                    let server_name = name.clone();
+                    let is_silent = silent;
+
+                    // Spawn async initialization in background
+                    let handle = tokio::spawn(async move {
+                        let result = spawned.initialize().await;
+                        if !is_silent {
+                            match &result {
+                                Ok(server) => {
+                                    eprintln!(
+                                        "  {} ready: {} tools ({})",
+                                        server_name,
+                                        server.tools.len(),
+                                        server
+                                            .tools
+                                            .iter()
+                                            .map(|t| t.function.name.clone())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("  {} failed: {}", server_name, e);
+                                }
+                            }
+                        }
+                        result
+                    });
+
+                    self.servers
+                        .insert(name.clone(), ServerState::Initializing(handle));
                 }
                 Err(e) => {
-                    eprintln!("Failed to start MCP server '{}': {}", name, e);
+                    if !silent {
+                        eprintln!("Failed to spawn MCP server '{}': {}", name, e);
+                    }
+                    self.servers
+                        .insert(name.clone(), ServerState::Failed(e.to_string()));
                 }
             }
         }
-
-        Ok(())
     }
 
-    /// Get all available tools from all servers
+    /// Wait for all pending servers to finish initializing
+    pub async fn await_all_servers(&mut self) {
+        let pending_names: Vec<String> = self
+            .servers
+            .iter()
+            .filter_map(|(name, state)| {
+                if matches!(state, ServerState::Initializing(_)) {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for name in pending_names {
+            self.await_server(&name).await;
+        }
+    }
+
+    /// Await a specific server if it's still initializing
+    async fn await_server(&mut self, name: &str) {
+        if let Some(state) = self.servers.remove(name) {
+            match state {
+                ServerState::Initializing(handle) => {
+                    match handle.await {
+                        Ok(Ok(server)) => {
+                            self.servers
+                                .insert(name.to_string(), ServerState::Ready(server));
+                        }
+                        Ok(Err(e)) => {
+                            self.servers
+                                .insert(name.to_string(), ServerState::Failed(e.to_string()));
+                        }
+                        Err(e) => {
+                            self.servers.insert(
+                                name.to_string(),
+                                ServerState::Failed(format!("Task panic: {}", e)),
+                            );
+                        }
+                    }
+                }
+                // Put back if already in final state
+                other => {
+                    self.servers.insert(name.to_string(), other);
+                }
+            }
+        }
+    }
+
+    /// Get all available tools from ready servers
+    /// Note: This only returns tools from servers that have finished initializing
     pub fn get_tools(&self) -> Vec<Tool> {
         let mut tools = Vec::new();
-        for server in self.servers.values() {
-            tools.extend(server.tools.clone());
+        for state in self.servers.values() {
+            if let ServerState::Ready(server) = state {
+                tools.extend(server.tools.clone());
+            }
         }
         tools
     }
 
     /// Execute a tool call by routing to the appropriate server
+    /// Will await the server if it's still initializing
     pub async fn execute_tool(
         &mut self,
         tool_name: &str,
         arguments: serde_json::Value,
     ) -> Result<String> {
-        // Find the server that owns this tool
-        // Use longest prefix match to handle server names with underscores
+        // Find the server that owns this tool using longest prefix match
         let mut best_match: Option<(String, String)> = None;
 
         for server_name in self.servers.keys() {
             let prefix = format!("{}_", server_name);
             if tool_name.starts_with(&prefix) {
-                if best_match.is_none() || server_name.len() > best_match.as_ref().unwrap().0.len() {
+                if best_match.is_none() || server_name.len() > best_match.as_ref().unwrap().0.len()
+                {
                     let actual_tool_name = tool_name[prefix.len()..].to_string();
                     best_match = Some((server_name.clone(), actual_tool_name));
                 }
             }
         }
 
-        if let Some((server_name, actual_tool_name)) = best_match {
-            let server = self
-                .servers
-                .get_mut(&server_name)
-                .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+        let Some((server_name, actual_tool_name)) = best_match else {
+            return Err(anyhow!("No server found for tool '{}'", tool_name));
+        };
 
-            server.call_tool(&actual_tool_name, arguments).await
-        } else {
-            Err(anyhow!("No server found for tool '{}'", tool_name))
+        // Await the server if it's still initializing
+        self.await_server(&server_name).await;
+
+        // Now get the server and execute
+        let state = self
+            .servers
+            .get_mut(&server_name)
+            .ok_or_else(|| anyhow!("Server '{}' not found", server_name))?;
+
+        match state {
+            ServerState::Ready(server) => server.call_tool(&actual_tool_name, arguments).await,
+            ServerState::Failed(err) => Err(anyhow!(
+                "Server '{}' failed to start: {}",
+                server_name,
+                err
+            )),
+            ServerState::Initializing(_) => {
+                // Should not happen after await_server
+                Err(anyhow!("Server '{}' still initializing (unexpected)", server_name))
+            }
         }
     }
 
     /// Get server information for display
     pub fn get_server_info(&self) -> Vec<(String, usize, Vec<String>)> {
         let mut info = Vec::new();
-        for (name, server) in &self.servers {
-            let tool_names: Vec<String> = server
-                .tools
-                .iter()
-                .map(|t| t.function.name.clone())
-                .collect();
-            info.push((name.clone(), server.tools.len(), tool_names));
+        for (name, state) in &self.servers {
+            match state {
+                ServerState::Ready(server) => {
+                    let tool_names: Vec<String> = server
+                        .tools
+                        .iter()
+                        .map(|t| t.function.name.clone())
+                        .collect();
+                    info.push((name.clone(), server.tools.len(), tool_names));
+                }
+                ServerState::Initializing(_) => {
+                    info.push((name.clone(), 0, vec!["(starting...)".to_string()]));
+                }
+                ServerState::Failed(err) => {
+                    info.push((name.clone(), 0, vec![format!("(failed: {})", err)]));
+                }
+            }
         }
         info.sort_by(|a, b| a.0.cmp(&b.0));
         info
@@ -106,10 +222,13 @@ impl McpManager {
 
     /// Shutdown all MCP servers
     pub async fn shutdown(&mut self) -> Result<()> {
+        // First, wait for any initializing servers
+        self.await_all_servers().await;
+
         let server_names: Vec<String> = self.servers.keys().cloned().collect();
 
         for name in server_names {
-            if let Some(mut server) = self.servers.remove(&name) {
+            if let Some(ServerState::Ready(mut server)) = self.servers.remove(&name) {
                 if let Err(e) = server.stop().await {
                     eprintln!("Error stopping MCP server '{}': {}", name, e);
                 }
@@ -119,7 +238,7 @@ impl McpManager {
         Ok(())
     }
 
-    /// Check if any servers are loaded
+    /// Check if any servers are loaded (in any state)
     #[allow(dead_code)]
     pub fn has_servers(&self) -> bool {
         !self.servers.is_empty()
@@ -130,10 +249,90 @@ impl McpManager {
     pub fn server_count(&self) -> usize {
         self.servers.len()
     }
+
+    /// Get number of ready servers
+    #[allow(dead_code)]
+    pub fn ready_count(&self) -> usize {
+        self.servers
+            .values()
+            .filter(|s| matches!(s, ServerState::Ready(_)))
+            .count()
+    }
+
+    /// Get number of servers still initializing
+    #[allow(dead_code)]
+    pub fn pending_count(&self) -> usize {
+        self.servers
+            .values()
+            .filter(|s| matches!(s, ServerState::Initializing(_)))
+            .count()
+    }
 }
 
 impl Default for McpManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_manager() {
+        let manager = McpManager::new();
+        assert!(!manager.has_servers());
+        assert_eq!(manager.server_count(), 0);
+        assert_eq!(manager.ready_count(), 0);
+        assert_eq!(manager.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_get_tools_empty() {
+        let manager = McpManager::new();
+        let tools = manager.get_tools();
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn test_get_server_info_empty() {
+        let manager = McpManager::new();
+        let info = manager.get_server_info();
+        assert!(info.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_failed_server_state() {
+        let mut manager = McpManager::new();
+        manager.servers.insert(
+            "test_server".to_string(),
+            ServerState::Failed("spawn error".to_string()),
+        );
+
+        assert_eq!(manager.server_count(), 1);
+        assert_eq!(manager.ready_count(), 0);
+
+        // Tool execution should fail with descriptive error
+        let result = manager
+            .execute_tool("test_server_sometool", serde_json::json!({}))
+            .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("failed to start"));
+    }
+
+    #[test]
+    fn test_get_server_info_with_failed() {
+        let mut manager = McpManager::new();
+        manager.servers.insert(
+            "failed_server".to_string(),
+            ServerState::Failed("connection refused".to_string()),
+        );
+
+        let info = manager.get_server_info();
+        assert_eq!(info.len(), 1);
+        assert_eq!(info[0].0, "failed_server");
+        assert_eq!(info[0].1, 0);
+        assert!(info[0].2[0].contains("failed"));
     }
 }

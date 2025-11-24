@@ -328,8 +328,6 @@ pub struct GeminiSafetyRating {
 pub struct GeminiContentResponse {
     #[serde(default)]
     pub parts: Vec<GeminiPartResponse>,
-    #[serde(rename = "functionCall")]
-    pub function_call: Option<serde_json::Value>,
 }
 
 /// Gemini part response structure

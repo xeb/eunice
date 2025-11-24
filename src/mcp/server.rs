@@ -8,19 +8,18 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::time::{timeout, Duration};
 
-/// Represents a single MCP server process
-pub struct McpServer {
-    pub name: String,
+/// Represents a spawned but not yet initialized MCP server
+pub struct SpawnedServer {
+    name: String,
     process: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
-    pub tools: Vec<Tool>,
-    request_id: AtomicI64,
 }
 
-impl McpServer {
-    /// Start a new MCP server process
-    pub async fn start(name: &str, command: &str, args: &[String]) -> Result<Self> {
+impl SpawnedServer {
+    /// Spawn a server process without initializing it
+    /// Note: This is synchronous but fast - it just spawns the process
+    pub fn spawn(name: &str, command: &str, args: &[String]) -> Result<Self> {
         let mut process = tokio::process::Command::new(command)
             .args(args)
             .stdin(std::process::Stdio::piped())
@@ -39,29 +38,63 @@ impl McpServer {
             .take()
             .ok_or_else(|| anyhow!("Failed to get stdout for MCP server '{}'", name))?;
 
-        let mut server = Self {
+        Ok(Self {
             name: name.to_string(),
             process,
             stdin,
             stdout: BufReader::new(stdout),
+        })
+    }
+
+    /// Initialize the spawned server and convert to ready McpServer
+    /// Uses retry with exponential backoff for servers that need startup time
+    pub async fn initialize(self) -> Result<McpServer> {
+        let mut server = McpServer {
+            name: self.name,
+            process: self.process,
+            stdin: self.stdin,
+            stdout: self.stdout,
             tools: Vec::new(),
             request_id: AtomicI64::new(1),
         };
 
-        // Wait a bit for the server to initialize
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        // Try to initialize with retries (servers may need time to start)
+        let max_retries = 5;
+        let mut delay_ms = 100; // Start with 100ms
 
-        // Send initialize request
-        server.initialize().await?;
+        for attempt in 1..=max_retries {
+            match server.initialize_protocol().await {
+                Ok(()) => {
+                    // Success - discover tools and return
+                    server.discover_tools().await?;
+                    return Ok(server);
+                }
+                Err(_) if attempt < max_retries => {
+                    // Retry with backoff
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    delay_ms = (delay_ms * 2).min(1000); // Cap at 1 second
+                }
+                Err(e) => return Err(e),
+            }
+        }
 
-        // Discover available tools
-        server.discover_tools().await?;
-
-        Ok(server)
+        unreachable!()
     }
+}
 
+/// Represents a single MCP server process
+pub struct McpServer {
+    pub name: String,
+    process: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    pub tools: Vec<Tool>,
+    request_id: AtomicI64,
+}
+
+impl McpServer {
     /// Send initialize handshake
-    async fn initialize(&mut self) -> Result<()> {
+    async fn initialize_protocol(&mut self) -> Result<()> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: self.next_id(),

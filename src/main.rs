@@ -178,11 +178,12 @@ async fn main() -> Result<()> {
     let provider_info = detect_provider(&model)?;
     let client = Client::new(&provider_info)?;
 
-    // Initialize MCP manager
+    // Initialize MCP manager (background startup for faster prompt display)
     let mcp_config = determine_config(&args)?;
     let mut mcp_manager = if let Some(config) = mcp_config {
         let mut manager = McpManager::new();
-        manager.load_config(&config, args.silent).await?;
+        // Start servers in background - they'll be awaited when tools are called
+        manager.start_servers_background(&config, args.silent);
         Some(manager)
     } else {
         None
@@ -210,7 +211,9 @@ async fn main() -> Result<()> {
         if !args.silent {
             display::print_model_info(&provider_info.resolved_model, &provider_info.provider);
 
-            if let Some(ref manager) = mcp_manager {
+            if let Some(ref mut manager) = mcp_manager {
+                // Wait for servers to be ready before displaying info
+                manager.await_all_servers().await;
                 let server_info = manager.get_server_info();
                 display::print_mcp_info(&server_info);
             }

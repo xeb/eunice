@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**2,263 lines of Rust** • **3.6MB binary** - Emphasizing "sophisticated simplicity".
+**2,433 lines of Rust** • **3.6MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -136,6 +136,17 @@ Create a `eunice.json` in your working directory for automatic MCP server loadin
 
 Tools are registered with server name prefixes (e.g., `filesystem_read_file`, `time_get_current_time`).
 
+### Lazy Loading
+
+MCP servers are spawned in parallel at startup and initialize in the background. This means:
+
+- **Fast startup**: The prompt appears immediately without waiting for servers
+- **Parallel initialization**: All servers start concurrently, not sequentially
+- **On-demand waiting**: If a tool is called before its server is ready, eunice automatically waits for it
+- **Retry with backoff**: Server initialization retries automatically with exponential backoff (100ms → 1s)
+
+In interactive mode, you'll see `(starting...)` next to servers that are still initializing. In single-shot mode, servers are awaited before the first API call.
+
 ## DMN Mode (Default Mode Network)
 
 Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution with 7 pre-configured MCP servers:
@@ -169,12 +180,12 @@ This ensures long-running batch tasks can complete without manual intervention.
 ├── CLAUDE.md            # Development guide for Claude
 ├── dmn_instructions.md  # DMN system instructions (188 lines)
 ├── src/
-│   ├── main.rs          # Entry point, CLI parsing (257 lines)
-│   ├── models.rs        # Data structures + Gemini types (353 lines)
-│   ├── client.rs        # HTTP client with dual Gemini API support (494 lines)
+│   ├── main.rs          # Entry point, CLI parsing (260 lines)
+│   ├── models.rs        # Data structures + Gemini types (351 lines)
+│   ├── client.rs        # HTTP client with dual Gemini API support (492 lines)
 │   ├── mcp/
-│   │   ├── server.rs    # MCP subprocess management (251 lines)
-│   │   └── manager.rs   # Tool routing (139 lines)
+│   │   ├── server.rs    # MCP subprocess with lazy loading (284 lines)
+│   │   └── manager.rs   # Tool routing with async state (277 lines)
 │   ├── provider.rs      # Provider detection with tests (236 lines)
 │   ├── display.rs       # Terminal UI with indicatif spinners (189 lines)
 │   ├── interactive.rs   # Interactive mode (122 lines)
@@ -184,7 +195,7 @@ This ensures long-running batch tasks can complete without manual intervention.
 └── README.md
 ```
 
-**Total: 2,263 lines** (implementation only, excluding 18 unit tests)
+**Total: 2,433 lines** (implementation only, excluding 23 unit tests)
 
 ## Dependencies
 
