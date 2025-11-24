@@ -76,7 +76,7 @@ impl Client {
     ) -> Result<ChatCompletionResponse> {
         // Check if using native Gemini API
         if self.use_native_gemini_api {
-            return self.chat_completion_gemini_native(model, messages, dmn_mode).await;
+            return self.chat_completion_gemini_native(model, messages, tools, dmn_mode).await;
         }
 
         // Standard OpenAI-compatible API
@@ -136,12 +136,34 @@ impl Client {
         &self,
         model: &str,
         messages: &[Message],
+        tools: Option<&[Tool]>,
         dmn_mode: bool,
     ) -> Result<ChatCompletionResponse> {
+        use crate::models::{GeminiFunctionDeclaration, GeminiTool};
+
         // Convert messages to Gemini format
         let contents = self.convert_messages_to_gemini(messages)?;
 
-        let gemini_request = GeminiRequest { contents };
+        // Convert OpenAI-style tools to Gemini functionDeclarations
+        // Gemini doesn't support all JSON Schema properties, so we need to strip unsupported ones
+        let gemini_tools = tools.map(|t| {
+            let declarations: Vec<GeminiFunctionDeclaration> = t
+                .iter()
+                .map(|tool| GeminiFunctionDeclaration {
+                    name: tool.function.name.clone(),
+                    description: tool.function.description.clone(),
+                    parameters: Self::clean_schema_for_gemini(&tool.function.parameters),
+                })
+                .collect();
+            vec![GeminiTool {
+                function_declarations: declarations,
+            }]
+        });
+
+        let gemini_request = GeminiRequest {
+            contents,
+            tools: gemini_tools,
+        };
 
         // Build URL: base_url already contains /v1beta/models/
         let url = format!("{}{}:generateContent", self.base_url, model);
@@ -182,18 +204,25 @@ impl Client {
                 ));
             }
 
-            let gemini_response = response
-                .json::<GeminiResponse>()
+            // Get raw response text first so we can inspect it
+            let response_text = response
+                .text()
                 .await
-                .context("Failed to parse Gemini response")?;
+                .context("Failed to read Gemini response body")?;
 
-            // Convert Gemini response to OpenAI format
-            return self.convert_gemini_to_openai_response(gemini_response);
+            // Parse the response
+            let gemini_response: GeminiResponse = serde_json::from_str(&response_text)
+                .context("Failed to parse Gemini response JSON")?;
+
+            // Convert Gemini response to OpenAI format, passing raw text for debugging
+            return self.convert_gemini_to_openai_response(gemini_response, &response_text);
         }
     }
 
     /// Convert OpenAI-style messages to Gemini contents format
     fn convert_messages_to_gemini(&self, messages: &[Message]) -> Result<Vec<GeminiContent>> {
+        use crate::models::{GeminiFunctionCallRequest, GeminiFunctionResponse};
+
         let mut contents = Vec::new();
 
         for message in messages {
@@ -202,22 +231,85 @@ impl Client {
                     contents.push(GeminiContent {
                         parts: vec![GeminiPart {
                             text: Some(content.clone()),
+                            function_call: None,
+                            function_response: None,
+                            thought_signature: None,
                         }],
                         role: Some("user".to_string()),
                     });
                 }
-                Message::Assistant { content, .. } => {
+                Message::Assistant { content, tool_calls } => {
+                    let mut parts = Vec::new();
+
+                    // Add text content if present
                     if let Some(text) = content {
-                        contents.push(GeminiContent {
-                            parts: vec![GeminiPart {
+                        if !text.is_empty() {
+                            parts.push(GeminiPart {
                                 text: Some(text.clone()),
-                            }],
+                                function_call: None,
+                                function_response: None,
+                                thought_signature: None,
+                            });
+                        }
+                    }
+
+                    // Add function calls if present
+                    // Extract thought_signature from encoded ID (format: "name::signature")
+                    if let Some(calls) = tool_calls {
+                        for call in calls {
+                            let args: serde_json::Value =
+                                serde_json::from_str(&call.function.arguments).unwrap_or_default();
+
+                            // Extract thought_signature from ID if present
+                            let thought_signature = if call.id.contains("::") {
+                                call.id.split("::").nth(1).map(|s| s.to_string())
+                            } else {
+                                None
+                            };
+
+                            parts.push(GeminiPart {
+                                text: None,
+                                function_call: Some(GeminiFunctionCallRequest {
+                                    name: call.function.name.clone(),
+                                    args,
+                                }),
+                                function_response: None,
+                                thought_signature,
+                            });
+                        }
+                    }
+
+                    if !parts.is_empty() {
+                        contents.push(GeminiContent {
+                            parts,
                             role: Some("model".to_string()),
                         });
                     }
                 }
-                Message::Tool { .. } => {
-                    // Skip tool messages for now - native Gemini API doesn't support tools yet
+                Message::Tool { tool_call_id, content } => {
+                    // Convert tool result to Gemini functionResponse format
+                    // Try to parse the content as JSON, otherwise wrap it
+                    let response_value: serde_json::Value =
+                        serde_json::from_str(content).unwrap_or_else(|_| {
+                            serde_json::json!({ "result": content })
+                        });
+
+                    // Extract function name from tool_call_id
+                    // The ID may be encoded as "name::signature" or just "name"
+                    let function_name = tool_call_id.split("::").next().unwrap_or(tool_call_id).to_string();
+
+                    contents.push(GeminiContent {
+                        parts: vec![GeminiPart {
+                            text: None,
+                            function_call: None,
+                            function_response: Some(GeminiFunctionResponse {
+                                name: function_name,
+                                response: response_value,
+                            }),
+                            thought_signature: None,
+                        }],
+                        role: Some("user".to_string()),
+                    });
                 }
             }
         }
@@ -229,12 +321,71 @@ impl Client {
     fn convert_gemini_to_openai_response(
         &self,
         gemini_response: GeminiResponse,
+        raw_response: &str,
     ) -> Result<ChatCompletionResponse> {
+        // Check for prompt-level blocking first
+        if let Some(ref feedback) = gemini_response.prompt_feedback {
+            if let Some(ref block_reason) = feedback.block_reason {
+                eprintln!("⛔ Gemini blocked the prompt: {}", block_reason);
+                return Err(anyhow!("Prompt blocked by Gemini: {}", block_reason));
+            }
+        }
+
         if gemini_response.candidates.is_empty() {
+            // If no candidates but we have prompt feedback, show safety ratings
+            if let Some(ref feedback) = gemini_response.prompt_feedback {
+                if let Some(ref ratings) = feedback.safety_ratings {
+                    let high_ratings: Vec<_> = ratings
+                        .iter()
+                        .filter(|r| r.probability == "HIGH" || r.probability == "MEDIUM")
+                        .map(|r| format!("{}: {}", r.category, r.probability))
+                        .collect();
+                    if !high_ratings.is_empty() {
+                        eprintln!("⚠️  Gemini safety concerns: {}", high_ratings.join(", "));
+                    }
+                }
+            }
             return Err(anyhow!("Gemini response has no candidates"));
         }
 
         let candidate = &gemini_response.candidates[0];
+
+        // Report non-normal finish reasons
+        if let Some(ref reason) = candidate.finish_reason {
+            match reason.as_str() {
+                "STOP" => {} // Normal completion
+                "MAX_TOKENS" => {
+                    eprintln!("⚠️  Gemini stopped: reached maximum token limit");
+                }
+                "SAFETY" => {
+                    eprintln!("⛔ Gemini stopped: safety filters triggered");
+                }
+                "RECITATION" => {
+                    eprintln!("⛔ Gemini stopped: recitation/copyright concern");
+                }
+                "OTHER" => {
+                    eprintln!("⚠️  Gemini stopped: unspecified reason (OTHER)");
+                }
+                "MALFORMED_FUNCTION_CALL" => {
+                    eprintln!("⚠️  Gemini stopped: model tried to call a function but tools are not enabled for this API path");
+                    if let Some(ref msg) = candidate.finish_message {
+                        eprintln!("   {}", msg);
+                    }
+                }
+                _ => {
+                    eprintln!("⚠️  Gemini stopped with reason: {}", reason);
+                    // Show finish message if available
+                    if let Some(ref msg) = candidate.finish_message {
+                        eprintln!("   {}", msg);
+                    } else {
+                        // For unexpected reasons without a message, dump the raw response
+                        eprintln!("📋 Raw Gemini response:\n{}", raw_response);
+                    }
+                }
+            }
+        }
+
+        // Extract text content
         let text = candidate
             .content
             .parts
@@ -244,12 +395,43 @@ impl Client {
             .collect::<Vec<_>>()
             .join("\n");
 
+        // Extract function calls and convert to OpenAI tool_calls format
+        // Encode both function name and thought_signature in the ID for Gemini 3 compatibility
+        // Format: "name::signature" or just "name" if no signature
+        let tool_calls: Vec<crate::models::ToolCall> = candidate
+            .content
+            .parts
+            .iter()
+            .filter_map(|p| {
+                p.function_call.as_ref().map(|fc| {
+                    let id = match &p.thought_signature {
+                        Some(sig) => format!("{}::{}", fc.name, sig),
+                        None => fc.name.clone(),
+                    };
+                    crate::models::ToolCall {
+                        id,
+                        call_type: "function".to_string(),
+                        function: crate::models::FunctionCall {
+                            name: fc.name.clone(),
+                            arguments: fc.args.to_string(),
+                        },
+                    }
+                })
+            })
+            .collect();
+
+        let tool_calls = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        };
+
         // Build OpenAI-compatible response
         Ok(ChatCompletionResponse {
             choices: vec![crate::models::Choice {
                 message: crate::models::AssistantMessage {
-                    content: Some(text),
-                    tool_calls: None,
+                    content: if text.is_empty() { None } else { Some(text) },
+                    tool_calls,
                 },
             }],
         })
@@ -258,6 +440,55 @@ impl Client {
     /// Get the provider type
     pub fn provider(&self) -> &Provider {
         &self.provider
+    }
+
+    /// Clean a JSON Schema to remove properties that Gemini doesn't support
+    fn clean_schema_for_gemini(schema: &serde_json::Value) -> serde_json::Value {
+        Self::clean_schema_recursive(schema, 0)
+    }
+
+    fn clean_schema_recursive(schema: &serde_json::Value, depth: usize) -> serde_json::Value {
+        // Properties that Gemini doesn't support in function declarations
+        const UNSUPPORTED: &[&str] = &[
+            "additionalProperties",
+            "$schema",
+            "exclusiveMaximum",
+            "exclusiveMinimum",
+            "$id",
+            "$ref",
+            "definitions",
+            "$defs",
+            "default",
+            "examples",
+            "title",
+        ];
+
+        // If schema is too deeply nested, simplify it
+        // Gemini has trouble with schemas nested more than ~4 levels deep
+        if depth > 4 {
+            return serde_json::json!({
+                "type": "object",
+                "description": "Complex nested object (simplified for API compatibility)"
+            });
+        }
+
+        match schema {
+            serde_json::Value::Object(obj) => {
+                let mut cleaned = serde_json::Map::new();
+                for (key, value) in obj {
+                    if !UNSUPPORTED.contains(&key.as_str()) {
+                        cleaned.insert(key.clone(), Self::clean_schema_recursive(value, depth + 1));
+                    }
+                }
+                serde_json::Value::Object(cleaned)
+            }
+            serde_json::Value::Array(arr) => {
+                serde_json::Value::Array(
+                    arr.iter().map(|v| Self::clean_schema_recursive(v, depth)).collect()
+                )
+            }
+            other => other.clone(),
+        }
     }
 }
 
@@ -348,14 +579,14 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_messages_to_gemini_skips_tool_messages() {
+    fn test_convert_messages_to_gemini_converts_tool_messages() {
         let client = create_test_client();
         let messages = vec![
             Message::User {
                 content: "Test".to_string(),
             },
             Message::Tool {
-                tool_call_id: "123".to_string(),
+                tool_call_id: "my_function".to_string(),
                 content: "Tool result".to_string(),
             },
         ];
@@ -364,9 +595,11 @@ mod tests {
         assert!(result.is_ok());
 
         let contents = result.unwrap();
-        // Tool message should be skipped
-        assert_eq!(contents.len(), 1);
+        // Tool message is now converted to functionResponse
+        assert_eq!(contents.len(), 2);
         assert_eq!(contents[0].role, Some("user".to_string()));
+        assert_eq!(contents[1].role, Some("user".to_string())); // functionResponse uses "user" role
+        assert!(contents[1].parts[0].function_response.is_some());
     }
 
     #[test]
@@ -378,13 +611,17 @@ mod tests {
                     parts: vec![GeminiPartResponse {
                         text: Some("This is a test response".to_string()),
                         function_call: None,
+                        thought_signature: None,
                     }],
                     function_call: None,
                 },
+                finish_reason: Some("STOP".to_string()),
+                finish_message: None,
             }],
+            prompt_feedback: None,
         };
 
-        let result = client.convert_gemini_to_openai_response(gemini_response);
+        let result = client.convert_gemini_to_openai_response(gemini_response, "{}");
         assert!(result.is_ok());
 
         let openai_response = result.unwrap();
@@ -406,18 +643,23 @@ mod tests {
                         GeminiPartResponse {
                             text: Some("First part".to_string()),
                             function_call: None,
+                            thought_signature: None,
                         },
                         GeminiPartResponse {
                             text: Some("Second part".to_string()),
                             function_call: None,
+                            thought_signature: None,
                         },
                     ],
                     function_call: None,
                 },
+                finish_reason: Some("STOP".to_string()),
+                finish_message: None,
             }],
+            prompt_feedback: None,
         };
 
-        let result = client.convert_gemini_to_openai_response(gemini_response);
+        let result = client.convert_gemini_to_openai_response(gemini_response, "{}");
         assert!(result.is_ok());
 
         let openai_response = result.unwrap();
@@ -432,9 +674,10 @@ mod tests {
         let client = create_test_client();
         let gemini_response = GeminiResponse {
             candidates: vec![],
+            prompt_feedback: None,
         };
 
-        let result = client.convert_gemini_to_openai_response(gemini_response);
+        let result = client.convert_gemini_to_openai_response(gemini_response, "{}");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no candidates"));
     }

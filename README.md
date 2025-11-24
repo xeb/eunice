@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**1,957 lines of Rust** • **3.5MB binary** - Emphasizing "sophisticated simplicity".
+**2,263 lines of Rust** • **3.6MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -170,8 +170,8 @@ This ensures long-running batch tasks can complete without manual intervention.
 ├── dmn_instructions.md  # DMN system instructions (188 lines)
 ├── src/
 │   ├── main.rs          # Entry point, CLI parsing (257 lines)
-│   ├── models.rs        # Data structures + Gemini types (278 lines)
-│   ├── client.rs        # HTTP client with dual Gemini API support (263 lines)
+│   ├── models.rs        # Data structures + Gemini types (353 lines)
+│   ├── client.rs        # HTTP client with dual Gemini API support (494 lines)
 │   ├── mcp/
 │   │   ├── server.rs    # MCP subprocess management (251 lines)
 │   │   └── manager.rs   # Tool routing (139 lines)
@@ -184,7 +184,7 @@ This ensures long-running batch tasks can complete without manual intervention.
 └── README.md
 ```
 
-**Total: 1,957 lines** (implementation only, excluding 18 unit tests)
+**Total: 2,263 lines** (implementation only, excluding 18 unit tests)
 
 ## Dependencies
 

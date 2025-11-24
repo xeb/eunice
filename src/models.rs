@@ -229,6 +229,23 @@ pub struct OllamaModel {
 #[derive(Debug, Serialize)]
 pub struct GeminiRequest {
     pub contents: Vec<GeminiContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<GeminiTool>>,
+}
+
+/// Gemini tool container
+#[derive(Debug, Serialize)]
+pub struct GeminiTool {
+    #[serde(rename = "functionDeclarations")]
+    pub function_declarations: Vec<GeminiFunctionDeclaration>,
+}
+
+/// Gemini function declaration (equivalent to OpenAI's function spec)
+#[derive(Debug, Serialize)]
+pub struct GeminiFunctionDeclaration {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
 }
 
 /// Gemini content structure
@@ -239,23 +256,71 @@ pub struct GeminiContent {
     pub role: Option<String>,
 }
 
-/// Gemini part structure
+/// Gemini part structure (for requests)
 #[derive(Debug, Serialize)]
 pub struct GeminiPart {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(rename = "functionCall", skip_serializing_if = "Option::is_none")]
+    pub function_call: Option<GeminiFunctionCallRequest>,
+    #[serde(rename = "functionResponse", skip_serializing_if = "Option::is_none")]
+    pub function_response: Option<GeminiFunctionResponse>,
+    /// Thought signature for Gemini 3 models - must be passed back with function calls
+    #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
+}
+
+/// Gemini function call (for requests, when continuing a conversation)
+#[derive(Debug, Serialize)]
+pub struct GeminiFunctionCallRequest {
+    pub name: String,
+    pub args: serde_json::Value,
+}
+
+/// Gemini function response (tool result)
+#[derive(Debug, Serialize)]
+pub struct GeminiFunctionResponse {
+    pub name: String,
+    pub response: serde_json::Value,
 }
 
 /// Gemini API response format
 #[derive(Debug, Deserialize)]
 pub struct GeminiResponse {
     pub candidates: Vec<GeminiCandidate>,
+    /// Feedback about the prompt (may contain block reason)
+    #[serde(rename = "promptFeedback")]
+    pub prompt_feedback: Option<GeminiPromptFeedback>,
 }
 
 /// Gemini candidate structure
 #[derive(Debug, Deserialize)]
 pub struct GeminiCandidate {
     pub content: GeminiContentResponse,
+    /// Why the model stopped generating
+    #[serde(rename = "finishReason")]
+    pub finish_reason: Option<String>,
+    /// Additional detail about the finish reason
+    #[serde(rename = "finishMessage")]
+    pub finish_message: Option<String>,
+}
+
+/// Gemini prompt feedback (may indicate blocked prompts)
+#[derive(Debug, Deserialize)]
+pub struct GeminiPromptFeedback {
+    /// Block reason if the prompt was blocked
+    #[serde(rename = "blockReason")]
+    pub block_reason: Option<String>,
+    /// Safety ratings
+    #[serde(rename = "safetyRatings")]
+    pub safety_ratings: Option<Vec<GeminiSafetyRating>>,
+}
+
+/// Gemini safety rating
+#[derive(Debug, Deserialize)]
+pub struct GeminiSafetyRating {
+    pub category: String,
+    pub probability: String,
 }
 
 /// Gemini content response structure
@@ -273,7 +338,17 @@ pub struct GeminiPartResponse {
     #[serde(default)]
     pub text: Option<String>,
     #[serde(rename = "functionCall")]
-    pub function_call: Option<serde_json::Value>,
+    pub function_call: Option<GeminiFunctionCall>,
+    /// Thought signature for Gemini 3 models - must be passed back with function responses
+    #[serde(rename = "thoughtSignature")]
+    pub thought_signature: Option<String>,
+}
+
+/// Gemini function call in response
+#[derive(Debug, Deserialize)]
+pub struct GeminiFunctionCall {
+    pub name: String,
+    pub args: serde_json::Value,
 }
 
 #[cfg(test)]
@@ -286,9 +361,13 @@ mod tests {
             contents: vec![GeminiContent {
                 parts: vec![GeminiPart {
                     text: Some("Hello".to_string()),
+                    function_call: None,
+                    function_response: None,
+                    thought_signature: None,
                 }],
                 role: Some("user".to_string()),
             }],
+            tools: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();
@@ -320,9 +399,13 @@ mod tests {
             contents: vec![GeminiContent {
                 parts: vec![GeminiPart {
                     text: Some("Test".to_string()),
+                    function_call: None,
+                    function_response: None,
+                    thought_signature: None,
                 }],
                 role: None,
             }],
+            tools: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();

@@ -2,7 +2,7 @@
 
 ## About
 
-Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" with **1,957 lines of implementation code** (excluding tests) and a **3.5MB release binary**.
+Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" with **2,263 lines of implementation code** (excluding tests) and a **3.6MB release binary**.
 
 ## Architecture
 
@@ -65,8 +65,8 @@ make test
 When updating the codebase, **ALWAYS** update both metrics in README.md:
 
 ### Current Metrics
-- **Implementation lines**: 1,957 lines (excluding tests)
-- **Binary size**: 3.5MB (release build)
+- **Implementation lines**: 2,263 lines (excluding tests)
+- **Binary size**: 3.6MB (release build)
 
 ### Count Implementation Lines
 ```bash
@@ -152,8 +152,8 @@ The `gemini-3-pro-preview` model uses a different API format:
 ```
 src/
 ├── main.rs (257)          - CLI entry, arg parsing
-├── models.rs (278)        - Data structures + Gemini response types
-├── client.rs (263)        - HTTP client, format conversions
+├── models.rs (353)        - Data structures + Gemini response types
+├── client.rs (494)        - HTTP client, format conversions
 ├── mcp/
 │   ├── server.rs (251)    - MCP subprocess management
 │   └── manager.rs (139)   - Tool routing
@@ -166,8 +166,8 @@ src/
 
 dmn_instructions.md (188)  - DMN system instructions (embedded via include_str!)
 
-Total: 1,957 lines (implementation) + 188 lines (embedded instructions)
-Binary: 3.5MB (release build)
+Total: 2,263 lines (implementation) + 188 lines (embedded instructions)
+Binary: 3.6MB (release build)
 ```
 
 ## Dependencies
