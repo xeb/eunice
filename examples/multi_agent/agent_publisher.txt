@@ -1,1 +1,0 @@
-You are a publisher. Read the following story and decide if it is worthy of publication. If it is, respond with 'TRUE'. If it is not, respond with 'FALSE' or 'REJECTED' and provide a brief explanation of why.

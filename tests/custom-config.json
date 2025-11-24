@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "custom-server": {
-      "command": "cat",
-      "args": []
-    }
-  }
-}

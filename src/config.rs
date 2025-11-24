@@ -1,4 +1,92 @@
-# SYSTEM INSTRUCTIONS - SYSADMIN MODE
+use crate::models::{McpConfig, McpServerConfig};
+use anyhow::{Context, Result};
+use std::collections::HashMap;
+use std::path::Path;
+
+/// Embedded sysadmin MCP configuration
+pub fn get_sysadmin_mcp_config() -> McpConfig {
+    let mut servers = HashMap::new();
+
+    servers.insert(
+        "shell".to_string(),
+        McpServerConfig {
+            command: "uvx".to_string(),
+            args: vec!["git+https://github.com/emsi/mcp-server-shell".to_string()],
+        },
+    );
+
+    servers.insert(
+        "filesystem".to_string(),
+        McpServerConfig {
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+                ".".to_string(),
+            ],
+        },
+    );
+
+    servers.insert(
+        "text-editor".to_string(),
+        McpServerConfig {
+            command: "uvx".to_string(),
+            args: vec!["mcp-text-editor".to_string()],
+        },
+    );
+
+    servers.insert(
+        "grep".to_string(),
+        McpServerConfig {
+            command: "npx".to_string(),
+            args: vec!["-y".to_string(), "mcp-ripgrep@latest".to_string()],
+        },
+    );
+
+    servers.insert(
+        "memory".to_string(),
+        McpServerConfig {
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-memory".to_string(),
+                "~/.eunice".to_string(),
+            ],
+        },
+    );
+
+    servers.insert(
+        "web".to_string(),
+        McpServerConfig {
+            command: "npx".to_string(),
+            args: vec!["-y".to_string(), "@anthropic-ai/claude-code-mcp-server".to_string()],
+        },
+    );
+
+    servers.insert(
+        "fetch".to_string(),
+        McpServerConfig {
+            command: "uvx".to_string(),
+            args: vec!["mcp-server-fetch".to_string()],
+        },
+    );
+
+    McpConfig {
+        mcp_servers: servers,
+    }
+}
+
+/// Load MCP configuration from a JSON file
+pub fn load_mcp_config(path: &Path) -> Result<McpConfig> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+    serde_json::from_str(&content)
+        .with_context(|| format!("Failed to parse config file: {}", path.display()))
+}
+
+/// Embedded sysadmin instructions
+pub const SYSADMIN_INSTRUCTIONS: &str = r#"# SYSTEM INSTRUCTIONS - SYSADMIN MODE
 
 You are an interactive CLI agent specializing in software engineering tasks. Your primary goal is to help users safely and efficiently, adhering strictly to the following instructions and utilizing your available MCP tools.
 
@@ -183,3 +271,4 @@ When the working directory is a git repository:
 ## Final Reminder
 
 Your core function is efficient and safe assistance. Balance extreme conciseness with the crucial need for clarity, especially regarding safety and potential system modifications. Always prioritize user control and project conventions. Never make assumptions about file contents; use read tools to verify. You are an agent - keep going until the user's query is completely resolved.
+"#;

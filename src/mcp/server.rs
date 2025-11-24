@@ -1,0 +1,251 @@
+use crate::models::{
+    FunctionSpec, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
+    McpToolResult, McpToolsResult, Tool,
+};
+use anyhow::{anyhow, Context, Result};
+use std::sync::atomic::{AtomicI64, Ordering};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::time::{timeout, Duration};
+
+/// Represents a single MCP server process
+pub struct McpServer {
+    pub name: String,
+    process: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    pub tools: Vec<Tool>,
+    request_id: AtomicI64,
+}
+
+impl McpServer {
+    /// Start a new MCP server process
+    pub async fn start(name: &str, command: &str, args: &[String]) -> Result<Self> {
+        let mut process = tokio::process::Command::new(command)
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .with_context(|| format!("Failed to start MCP server '{}': {} {:?}", name, command, args))?;
+
+        let stdin = process
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to get stdin for MCP server '{}'", name))?;
+
+        let stdout = process
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Failed to get stdout for MCP server '{}'", name))?;
+
+        let mut server = Self {
+            name: name.to_string(),
+            process,
+            stdin,
+            stdout: BufReader::new(stdout),
+            tools: Vec::new(),
+            request_id: AtomicI64::new(1),
+        };
+
+        // Wait a bit for the server to initialize
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        // Send initialize request
+        server.initialize().await?;
+
+        // Discover available tools
+        server.discover_tools().await?;
+
+        Ok(server)
+    }
+
+    /// Send initialize handshake
+    async fn initialize(&mut self) -> Result<()> {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: self.next_id(),
+            method: "initialize".to_string(),
+            params: Some(serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "eunice",
+                    "version": "0.1.0"
+                }
+            })),
+        };
+
+        self.send_message(&serde_json::to_value(&request)?).await?;
+        let _response = self.read_message().await?;
+
+        // Send initialized notification
+        let notification = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/initialized".to_string(),
+        };
+
+        self.send_message(&serde_json::to_value(&notification)?)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Discover available tools from the server
+    async fn discover_tools(&mut self) -> Result<()> {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: self.next_id(),
+            method: "tools/list".to_string(),
+            params: None,
+        };
+
+        self.send_message(&serde_json::to_value(&request)?).await?;
+        let response = self.read_message().await?;
+
+        let json_response: JsonRpcResponse = serde_json::from_value(response)?;
+
+        if let Some(result) = json_response.result {
+            let tools_result: McpToolsResult = serde_json::from_value(result)?;
+
+            for mcp_tool in tools_result.tools {
+                let prefixed_name = format!("{}_{}", self.name, mcp_tool.name);
+                let tool = Tool {
+                    tool_type: "function".to_string(),
+                    function: FunctionSpec {
+                        name: prefixed_name,
+                        description: mcp_tool.description.unwrap_or_default(),
+                        parameters: mcp_tool.input_schema.unwrap_or(serde_json::json!({
+                            "type": "object",
+                            "properties": {}
+                        })),
+                    },
+                };
+                self.tools.push(tool);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Call a tool on this server
+    pub async fn call_tool(
+        &mut self,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<String> {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: self.next_id(),
+            method: "tools/call".to_string(),
+            params: Some(serde_json::json!({
+                "name": tool_name,
+                "arguments": arguments
+            })),
+        };
+
+        self.send_message(&serde_json::to_value(&request)?).await?;
+        let response = self.read_message().await?;
+
+        let json_response: JsonRpcResponse = serde_json::from_value(response)?;
+
+        if let Some(error) = json_response.error {
+            return Err(anyhow!("Tool error: {} ({})", error.message, error.code));
+        }
+
+        if let Some(result) = json_response.result {
+            // Try to parse as MCP tool result with content blocks
+            if let Ok(tool_result) = serde_json::from_value::<McpToolResult>(result.clone()) {
+                let text_parts: Vec<String> = tool_result
+                    .content
+                    .into_iter()
+                    .filter_map(|block| block.text)
+                    .collect();
+                return Ok(text_parts.join("\n"));
+            }
+
+            // Fallback: return the raw result as string
+            Ok(serde_json::to_string_pretty(&result)?)
+        } else {
+            Ok("".to_string())
+        }
+    }
+
+    /// Send a JSON-RPC message to the server
+    async fn send_message(&mut self, message: &serde_json::Value) -> Result<()> {
+        let mut msg = serde_json::to_string(message)?;
+        msg.push('\n');
+        self.stdin
+            .write_all(msg.as_bytes())
+            .await
+            .context("Failed to write to MCP server")?;
+        self.stdin
+            .flush()
+            .await
+            .context("Failed to flush MCP server stdin")?;
+        Ok(())
+    }
+
+    /// Read a JSON-RPC message from the server
+    async fn read_message(&mut self) -> Result<serde_json::Value> {
+        let read_timeout = Duration::from_secs(600);
+
+        loop {
+            let mut line = String::new();
+            let result = timeout(read_timeout, self.stdout.read_line(&mut line)).await;
+
+            match result {
+                Ok(Ok(0)) => {
+                    return Err(anyhow!("MCP server '{}' closed connection", self.name));
+                }
+                Ok(Ok(_)) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+
+                    match serde_json::from_str(trimmed) {
+                        Ok(value) => return Ok(value),
+                        Err(_) => {
+                            // Skip non-JSON lines (could be debug output)
+                            continue;
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    return Err(anyhow!("Failed to read from MCP server '{}': {}", self.name, e));
+                }
+                Err(_) => {
+                    return Err(anyhow!(
+                        "Timeout reading from MCP server '{}' after {} seconds",
+                        self.name,
+                        read_timeout.as_secs()
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Get the next request ID
+    fn next_id(&self) -> i64 {
+        self.request_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Stop the MCP server
+    pub async fn stop(&mut self) -> Result<()> {
+        // Try graceful shutdown - kill the process
+        let shutdown_timeout = Duration::from_secs(2);
+
+        // First try to kill gracefully
+        self.process.kill().await.ok();
+
+        match timeout(shutdown_timeout, self.process.wait()).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(anyhow!("Error waiting for MCP server '{}': {}", self.name, e)),
+            Err(_) => {
+                // Force kill if timeout (already killed above, just wait)
+                Ok(())
+            }
+        }
+    }
+}
