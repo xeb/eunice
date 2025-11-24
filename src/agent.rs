@@ -17,6 +17,7 @@ pub async fn run_agent(
     conversation_history: &mut Vec<Message>,
     _suppress_info: bool,
     _events_mode: bool,
+    dmn_mode: bool,
 ) -> Result<()> {
     // Add user message to history
     conversation_history.push(Message::User {
@@ -36,7 +37,7 @@ pub async fn run_agent(
 
         // Call the LLM
         let response = client
-            .chat_completion(model, conversation_history, tools.as_deref())
+            .chat_completion(model, conversation_history, tools.as_deref(), dmn_mode)
             .await?;
 
         let choice = &response.choices[0];

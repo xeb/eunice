@@ -243,6 +243,7 @@ async fn main() -> Result<()> {
             &mut conversation_history,
             false,
             args.events,
+            args.dmn,
         )
         .await?;
     }

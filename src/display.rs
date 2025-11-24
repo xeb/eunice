@@ -1,100 +1,31 @@
 use crate::models::Provider;
 use crate::provider::get_available_models;
 use colored::*;
-use crossterm::{cursor, terminal, ExecutableCommand};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
-use std::io::{stdout, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::time::Duration;
 
-/// Spinner frames for progress indication
-const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-/// Spinner handle that can be used to stop the spinner and display output
-pub struct Spinner {
-    stop_signal: Arc<AtomicBool>,
-    output_tx: mpsc::UnboundedSender<String>,
-    handle: Option<tokio::task::JoinHandle<()>>,
-}
+/// Spinner handle that can be used to stop the spinner
+pub struct Spinner(ProgressBar);
 
 impl Spinner {
     /// Start a new spinner with a message
     pub fn start(message: &str) -> Self {
-        let stop_signal = Arc::new(AtomicBool::new(false));
-        let stop_signal_clone = stop_signal.clone();
-        let message = message.to_string();
-        let (output_tx, mut output_rx) = mpsc::unbounded_channel::<String>();
-
-        let handle = tokio::spawn(async move {
-            let mut frame_idx = 0;
-            let mut stdout = stdout();
-            let mut output_lines: Vec<String> = Vec::new();
-
-            // Hide cursor for cleaner display
-            let _ = stdout.execute(cursor::Hide);
-
-            loop {
-                // Check for new output
-                while let Ok(line) = output_rx.try_recv() {
-                    output_lines.push(line);
-                }
-
-                // Clear current line and display spinner
-                let _ = stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine));
-                let _ = stdout.execute(cursor::MoveToColumn(0));
-
-                let frame = SPINNER_FRAMES[frame_idx % SPINNER_FRAMES.len()];
-
-                // Show output preview if available
-                let display_msg = if !output_lines.is_empty() {
-                    let last_line = output_lines.last().unwrap();
-                    let truncated = if last_line.len() > 60 {
-                        format!("{}...", &last_line[..57])
-                    } else {
-                        last_line.clone()
-                    };
-                    format!("{} {} {} {}", frame.cyan(), message.cyan(), "→".dimmed(), truncated.dimmed())
-                } else {
-                    format!("{} {}", frame.cyan(), message.cyan())
-                };
-
-                print!("{}", display_msg);
-                let _ = stdout.flush();
-
-                if stop_signal_clone.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                frame_idx += 1;
-                tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
-            }
-
-            // Clear the spinner line
-            let _ = stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine));
-            let _ = stdout.execute(cursor::MoveToColumn(0));
-            let _ = stdout.execute(cursor::Show);
-            let _ = stdout.flush();
-        });
-
-        Spinner {
-            stop_signal,
-            output_tx,
-            handle: Some(handle),
-        }
-    }
-
-    /// Send output to display alongside the spinner
-    pub fn add_output(&self, line: &str) {
-        let _ = self.output_tx.send(line.to_string());
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                .template("{spinner:.cyan} {msg}")
+                .unwrap(),
+        );
+        pb.set_message(message.to_string());
+        pb.enable_steady_tick(Duration::from_millis(80));
+        Self(pb)
     }
 
     /// Stop the spinner
-    pub async fn stop(mut self) {
-        self.stop_signal.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.await;
-        }
+    pub async fn stop(self) {
+        self.0.finish_and_clear();
     }
 }
 

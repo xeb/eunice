@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**1,874 lines of Rust** - Emphasizing "sophisticated simplicity".
+**1,950 lines of Rust** (implementation only, excluding tests) - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -16,7 +16,9 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **MCP Integration**: Model Context Protocol servers for extensible tool capabilities
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with pre-configured MCP tools for software engineering
+- **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
 - **Interactive Mode**: Multi-turn conversations with context preservation
+- **Progress Spinners**: Visual feedback during tool execution
 
 ## Installation
 
@@ -146,35 +148,52 @@ Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution
 - **web**: Web search (requires `BRAVE_API_KEY`)
 - **fetch**: HTTP requests
 
+### Autonomous Execution
+
 DMN mode executes tasks autonomously without stopping for confirmation. It makes reasonable decisions and proceeds through all steps automatically, following comprehensive system instructions for software engineering best practices.
+
+### Intelligent Rate Limiting
+
+When DMN mode encounters API rate limits (429 errors), it automatically:
+- Waits 6 seconds
+- Retries the request once
+- Displays progress: `⏳ Rate limit hit (429). DMN mode: retrying in 6 seconds...`
+
+This ensures long-running batch tasks can complete without manual intervention.
 
 ## Project Structure
 
 ```
 ├── Cargo.toml           # Package configuration
-├── Makefile             # Build commands
+├── Makefile             # Build commands with publish automation
+├── CLAUDE.md            # Development guide for Claude
+├── dmn_instructions.md  # DMN system instructions (188 lines)
 ├── src/
-│   ├── main.rs          # Entry point, CLI parsing (256 lines)
-│   ├── config.rs        # Configuration + DMN instructions (274 lines)
-│   ├── models.rs        # Data structures (223 lines)
-│   ├── provider.rs      # Provider detection & routing (221 lines)
-│   ├── display.rs       # Terminal UI (196 lines)
-│   ├── client.rs        # HTTP client (108 lines)
-│   ├── agent.rs         # Agent loop (107 lines)
-│   ├── interactive.rs   # Interactive mode (120 lines)
-│   └── mcp/
-│       ├── server.rs    # MCP subprocess management (251 lines)
-│       └── manager.rs   # Tool routing (139 lines)
+│   ├── main.rs          # Entry point, CLI parsing (257 lines)
+│   ├── models.rs        # Data structures + Gemini types (272 lines)
+│   ├── client.rs        # HTTP client with dual Gemini API support (262 lines)
+│   ├── mcp/
+│   │   ├── server.rs    # MCP subprocess management (251 lines)
+│   │   └── manager.rs   # Tool routing (139 lines)
+│   ├── provider.rs      # Provider detection with tests (236 lines)
+│   ├── display.rs       # Terminal UI with indicatif spinners (189 lines)
+│   ├── interactive.rs   # Interactive mode (122 lines)
+│   ├── agent.rs         # Agent loop (121 lines)
+│   ├── config.rs        # Configuration loading (89 lines)
+│   └── lib.rs           # Library exports (8 lines)
 └── README.md
 ```
+
+**Total: 1,950 lines** (implementation only, excluding 18 unit tests)
 
 ## Dependencies
 
 - **tokio**: Async runtime
-- **reqwest**: HTTP client
-- **clap**: CLI argument parsing
+- **reqwest**: HTTP client with timeout support
+- **clap**: CLI argument parsing with aliases
 - **serde/serde_json**: Serialization
 - **colored**: Terminal colors
+- **crossterm**: Terminal control for spinners
 - **anyhow/thiserror**: Error handling
 
 ## Examples
@@ -228,6 +247,16 @@ eunice --dmn "Find all TODO comments and create issues for them"
 
 # The AI has access to shell, filesystem, grep, and more
 # Executes all steps without stopping for confirmation
+# Automatically handles rate limits with retry
+
+# Example output:
+# 🧠 DMN Mode
+# 🔧 grep_ripgrep({"pattern": "TODO"})
+# ⠹ Running grep_ripgrep
+# → Found 12 TODO comments
+# ...
+# ⏳ Rate limit hit (429). DMN mode: retrying in 6 seconds...
+# [continues automatically after retry]
 ```
 
 ## Environment Variables

@@ -28,6 +28,7 @@ pub struct ProviderInfo {
     pub base_url: String,
     pub api_key: String,
     pub resolved_model: String,
+    pub use_native_gemini_api: bool,
 }
 
 /// Message types for conversation history
@@ -220,4 +221,142 @@ pub struct OllamaTagsResponse {
 #[derive(Debug, Deserialize)]
 pub struct OllamaModel {
     pub name: String,
+}
+
+// Native Gemini API structures
+
+/// Gemini API request format
+#[derive(Debug, Serialize)]
+pub struct GeminiRequest {
+    pub contents: Vec<GeminiContent>,
+}
+
+/// Gemini content structure
+#[derive(Debug, Serialize)]
+pub struct GeminiContent {
+    pub parts: Vec<GeminiPart>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+/// Gemini part structure
+#[derive(Debug, Serialize)]
+pub struct GeminiPart {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// Gemini API response format
+#[derive(Debug, Deserialize)]
+pub struct GeminiResponse {
+    pub candidates: Vec<GeminiCandidate>,
+}
+
+/// Gemini candidate structure
+#[derive(Debug, Deserialize)]
+pub struct GeminiCandidate {
+    pub content: GeminiContentResponse,
+}
+
+/// Gemini content response structure
+#[derive(Debug, Deserialize)]
+pub struct GeminiContentResponse {
+    pub parts: Vec<GeminiPartResponse>,
+}
+
+/// Gemini part response structure
+#[derive(Debug, Deserialize)]
+pub struct GeminiPartResponse {
+    pub text: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gemini_request_serialization() {
+        let request = GeminiRequest {
+            contents: vec![GeminiContent {
+                parts: vec![GeminiPart {
+                    text: Some("Hello".to_string()),
+                }],
+                role: Some("user".to_string()),
+            }],
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("contents"));
+        assert!(json.contains("parts"));
+        assert!(json.contains("Hello"));
+        assert!(json.contains("user"));
+    }
+
+    #[test]
+    fn test_gemini_response_deserialization() {
+        let json = r#"{
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "Response text"}]
+                }
+            }]
+        }"#;
+
+        let response: GeminiResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.candidates.len(), 1);
+        assert_eq!(response.candidates[0].content.parts.len(), 1);
+        assert_eq!(response.candidates[0].content.parts[0].text, "Response text");
+    }
+
+    #[test]
+    fn test_gemini_request_without_role() {
+        let request = GeminiRequest {
+            contents: vec![GeminiContent {
+                parts: vec![GeminiPart {
+                    text: Some("Test".to_string()),
+                }],
+                role: None,
+            }],
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        // Role should not be present when None
+        assert!(!json.contains("role"));
+    }
+
+    #[test]
+    fn test_message_user_serialization() {
+        let message = Message::User {
+            content: "Test content".to_string(),
+        };
+
+        let json = serde_json::to_value(&message).unwrap();
+        assert_eq!(json["role"], "user");
+        assert_eq!(json["content"], "Test content");
+    }
+
+    #[test]
+    fn test_message_assistant_serialization() {
+        let message = Message::Assistant {
+            content: Some("Response".to_string()),
+            tool_calls: None,
+        };
+
+        let json = serde_json::to_value(&message).unwrap();
+        assert_eq!(json["role"], "assistant");
+        assert_eq!(json["content"], "Response");
+    }
+
+    #[test]
+    fn test_message_tool_serialization() {
+        let message = Message::Tool {
+            tool_call_id: "call_123".to_string(),
+            content: "Tool result".to_string(),
+        };
+
+        let json = serde_json::to_value(&message).unwrap();
+        assert_eq!(json["role"], "tool");
+        assert_eq!(json["tool_call_id"], "call_123");
+        assert_eq!(json["content"], "Tool result");
+    }
 }

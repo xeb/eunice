@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
@@ -32,6 +32,7 @@ clap = { version = "4", features = ["derive", "env"] }
 # Terminal UI
 crossterm = "0.28"
 colored = "2"
+indicatif = "0.17"
 
 # Error handling
 thiserror = "2"

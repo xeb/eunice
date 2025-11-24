@@ -59,6 +59,7 @@ pub async fn interactive_mode(
             &mut conversation_history,
             true,
             events_mode,
+            dmn,
         )
         .await?;
     }
@@ -109,6 +110,7 @@ pub async fn interactive_mode(
             &mut conversation_history,
             true,
             events_mode,
+            dmn,
         )
         .await
         {

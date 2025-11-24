@@ -52,11 +52,20 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         let api_key = env::var("GEMINI_API_KEY")
             .map_err(|_| anyhow!("GEMINI_API_KEY required for model '{}'", model))?;
 
+        // Check if this is gemini-3-pro-preview which uses native API
+        let use_native_api = model == "gemini-3-pro-preview";
+        let base_url = if use_native_api {
+            "https://generativelanguage.googleapis.com/v1beta/models/".to_string()
+        } else {
+            "https://generativelanguage.googleapis.com/v1beta/openai/".to_string()
+        };
+
         return Ok(ProviderInfo {
             provider: Provider::Gemini,
-            base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".to_string(),
+            base_url,
             api_key,
             resolved_model: model.to_string(),
+            use_native_gemini_api: use_native_api,
         });
     }
 
@@ -78,6 +87,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             base_url: "https://api.anthropic.com/v1/".to_string(),
             api_key,
             resolved_model,
+            use_native_gemini_api: false,
         });
     }
 
@@ -89,6 +99,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             base_url: format!("{}/v1/", ollama_host),
             api_key: "ollama".to_string(),
             resolved_model: model.to_string(),
+            use_native_gemini_api: false,
         });
     }
 
@@ -111,6 +122,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             base_url: "https://api.openai.com/v1/".to_string(),
             api_key,
             resolved_model: model.to_string(),
+            use_native_gemini_api: false,
         });
     }
 
@@ -121,6 +133,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             base_url: format!("{}/v1/", ollama_host),
             api_key: "ollama".to_string(),
             resolved_model: model.to_string(),
+            use_native_gemini_api: false,
         })
     } else {
         Err(anyhow!(
@@ -196,6 +209,7 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
         "gemini-2.5-flash".to_string(),
         "gemini-2.5-flash-lite".to_string(),
         "gemini-2.5-pro".to_string(),
+        "gemini-3-pro-preview".to_string(),
         "gemini-1.5-flash".to_string(),
         "gemini-1.5-pro".to_string(),
     ];
@@ -218,4 +232,90 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
     result.push((Provider::Ollama, ollama_models, ollama_available));
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_anthropic_alias_resolution() {
+        assert_eq!(resolve_anthropic_alias("sonnet"), "claude-sonnet-4-20250514");
+        assert_eq!(resolve_anthropic_alias("opus"), "claude-opus-4-1-20250805");
+        assert_eq!(resolve_anthropic_alias("haiku"), "claude-haiku-4-5-20251001");
+        assert_eq!(resolve_anthropic_alias("sonnet-4.5"), "claude-sonnet-4-5-20250929");
+        assert_eq!(resolve_anthropic_alias("haiku-4.5"), "claude-haiku-4-5-20251001");
+        // Pass through if not an alias
+        assert_eq!(resolve_anthropic_alias("claude-sonnet-4-20250514"), "claude-sonnet-4-20250514");
+    }
+
+    #[test]
+    fn test_gemini_3_pro_preview_uses_native_api() {
+        // Set a dummy API key for testing
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+
+        let result = detect_provider("gemini-3-pro-preview");
+        assert!(result.is_ok());
+
+        let provider_info = result.unwrap();
+        assert_eq!(provider_info.provider, Provider::Gemini);
+        assert!(provider_info.use_native_gemini_api);
+        assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
+        assert_eq!(provider_info.resolved_model, "gemini-3-pro-preview");
+
+        // Clean up
+        std::env::remove_var("GEMINI_API_KEY");
+    }
+
+    #[test]
+    fn test_other_gemini_models_use_openai_compatible() {
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+
+        let models = vec!["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
+
+        for model in models {
+            let result = detect_provider(model);
+            assert!(result.is_ok());
+
+            let provider_info = result.unwrap();
+            assert_eq!(provider_info.provider, Provider::Gemini);
+            assert!(!provider_info.use_native_gemini_api);
+            assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/openai/");
+        }
+
+        std::env::remove_var("GEMINI_API_KEY");
+    }
+
+    #[test]
+    fn test_anthropic_detection() {
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+
+        let result = detect_provider("sonnet");
+        assert!(result.is_ok());
+
+        let provider_info = result.unwrap();
+        assert_eq!(provider_info.provider, Provider::Anthropic);
+        assert!(!provider_info.use_native_gemini_api);
+        assert_eq!(provider_info.resolved_model, "claude-sonnet-4-20250514");
+
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_openai_detection() {
+        std::env::set_var("OPENAI_API_KEY", "test-key");
+
+        let models = vec!["gpt-4o", "gpt-4", "o1", "o1-mini"];
+
+        for model in models {
+            let result = detect_provider(model);
+            assert!(result.is_ok());
+
+            let provider_info = result.unwrap();
+            assert_eq!(provider_info.provider, Provider::OpenAI);
+            assert!(!provider_info.use_native_gemini_api);
+        }
+
+        std::env::remove_var("OPENAI_API_KEY");
+    }
 }
