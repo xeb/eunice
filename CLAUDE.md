@@ -198,3 +198,5 @@ When adding features:
 
 - **0.1.1**: Added native Gemini API support, 429 retry, spinners, unit tests
 - **0.1.0**: Initial release with multi-provider support and MCP integration
+- When I say "publish" all by itself, update the LOC and Binary size in the README, then write a git commit message, publish the crate and push the git updates. All at once.
+- Oh when I say "publish" do what I said before but also add a git tag and be sure to run tests and make sure the release builds
