@@ -36,7 +36,9 @@ fn resolve_anthropic_alias(model: &str) -> &str {
     match model {
         "sonnet" | "claude-sonnet" => "claude-sonnet-4-20250514",
         "sonnet-4.5" => "claude-sonnet-4-5-20250929",
-        "opus" | "claude-opus" => "claude-opus-4-1-20250805",
+        "opus" | "claude-opus" => "claude-opus-4-5-20251101", // Updated to Opus 4.5
+        "opus-4.5" => "claude-opus-4-5-20251101",
+        "opus-4.1" => "claude-opus-4-1-20250805",
         "haiku" | "claude-haiku" => "claude-haiku-4-5-20251001",
         "haiku-4.5" => "claude-haiku-4-5-20251001",
         _ => model,
@@ -74,6 +76,8 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         || model == "sonnet"
         || model == "sonnet-4.5"
         || model == "opus"
+        || model == "opus-4.5"
+        || model == "opus-4.1"
         || model == "haiku"
         || model == "haiku-4.5"
     {
@@ -106,6 +110,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     // 4. Check for explicit OpenAI patterns
     let is_openai_pattern = model.starts_with("gpt-")
         || model.starts_with("gpt4")
+        || model.starts_with("gpt5")
         || model.starts_with("chatgpt")
         || model == "o1"
         || model == "o1-mini"
@@ -158,7 +163,7 @@ pub fn get_smart_default_model() -> Result<String> {
 
     // 3. Try OpenAI
     if env::var("OPENAI_API_KEY").is_ok() {
-        return Ok("gpt-4o".to_string());
+        return Ok("gpt-5.1".to_string());
     }
 
     // 4. Try Ollama (local models)
@@ -194,12 +199,15 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 
     // OpenAI
     let openai_models = vec![
+        "gpt-5.1".to_string(),
+        "gpt-5.1-codex".to_string(),
+        "gpt-5.1-codex-mini".to_string(),
+        "gpt-5.1-codex-max".to_string(),
         "gpt-4o".to_string(),
         "gpt-4-turbo".to_string(),
-        "gpt-4".to_string(),
-        "gpt-3.5-turbo".to_string(),
         "o1".to_string(),
-        "o1-mini".to_string(),
+        "o3".to_string(),
+        "o3-mini".to_string(),
     ];
     let openai_available = env::var("OPENAI_API_KEY").is_ok();
     result.push((Provider::OpenAI, openai_models, openai_available));
@@ -218,10 +226,11 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 
     // Anthropic
     let anthropic_models = vec![
+        "opus, opus-4.5 (claude-opus-4-5-20251101)".to_string(),
         "sonnet (claude-sonnet-4-20250514)".to_string(),
         "sonnet-4.5 (claude-sonnet-4-5-20250929)".to_string(),
-        "opus (claude-opus-4-1-20250805)".to_string(),
-        "haiku (claude-haiku-4-5-20251001)".to_string(),
+        "opus-4.1 (claude-opus-4-1-20250805)".to_string(),
+        "haiku, haiku-4.5 (claude-haiku-4-5-20251001)".to_string(),
     ];
     let anthropic_available = env::var("ANTHROPIC_API_KEY").is_ok();
     result.push((Provider::Anthropic, anthropic_models, anthropic_available));
@@ -241,7 +250,9 @@ mod tests {
     #[test]
     fn test_anthropic_alias_resolution() {
         assert_eq!(resolve_anthropic_alias("sonnet"), "claude-sonnet-4-20250514");
-        assert_eq!(resolve_anthropic_alias("opus"), "claude-opus-4-1-20250805");
+        assert_eq!(resolve_anthropic_alias("opus"), "claude-opus-4-5-20251101");
+        assert_eq!(resolve_anthropic_alias("opus-4.5"), "claude-opus-4-5-20251101");
+        assert_eq!(resolve_anthropic_alias("opus-4.1"), "claude-opus-4-1-20250805");
         assert_eq!(resolve_anthropic_alias("haiku"), "claude-haiku-4-5-20251001");
         assert_eq!(resolve_anthropic_alias("sonnet-4.5"), "claude-sonnet-4-5-20250929");
         assert_eq!(resolve_anthropic_alias("haiku-4.5"), "claude-haiku-4-5-20251001");

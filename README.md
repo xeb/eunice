@@ -90,7 +90,8 @@ Options:
 ## Provider Support
 
 ### OpenAI
-- Models: `gpt-4o`, `gpt-4-turbo`, `gpt-4`, `gpt-3.5-turbo`, `o1`, `o1-mini`
+- Models: `gpt-5.1`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`
+- Legacy: `gpt-4o`, `gpt-4-turbo`, `o1`, `o3`, `o3-mini`
 - Requires: `OPENAI_API_KEY`
 
 ### Google Gemini
@@ -98,8 +99,9 @@ Options:
 - Requires: `GEMINI_API_KEY`
 
 ### Anthropic Claude
-- Models: `sonnet`, `opus`, `haiku` (aliases for latest versions)
-- Full names: `claude-sonnet-4-20250514`, `claude-opus-4-1-20250805`, etc.
+- Models: `opus`, `sonnet`, `haiku` (aliases for latest versions)
+- Version aliases: `opus-4.5`, `opus-4.1`, `sonnet-4.5`, `haiku-4.5`
+- Full names: `claude-opus-4-5-20251101`, `claude-sonnet-4-20250514`, etc.
 - Requires: `ANTHROPIC_API_KEY`
 
 ### Ollama (Local)
@@ -110,10 +112,10 @@ Options:
 
 When no model is specified, eunice automatically selects the best available:
 
-1. **Ollama** (if running): `gpt-oss:latest` → `deepseek-r1:latest` → `llama3.1:latest`
-2. **Gemini** (if API key set): `gemini-2.5-flash`
-3. **Anthropic** (if API key set): `sonnet`
-4. **OpenAI** (if API key set): `gpt-4o`
+1. **Gemini** (if API key set): `gemini-2.5-flash`
+2. **Anthropic** (if API key set): `sonnet` (Claude Sonnet 4)
+3. **OpenAI** (if API key set): `gpt-5.1`
+4. **Ollama** (if running): `llama3.1:latest` → `deepseek-r1:latest` → first available
 
 ## MCP Configuration
 
