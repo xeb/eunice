@@ -65,7 +65,7 @@ make test
 When updating the codebase, **ALWAYS** update both metrics in README.md:
 
 ### Current Metrics
-- **Implementation lines**: 2,418 lines (excluding tests)
+- **Implementation lines**: 2,414 lines (excluding tests)
 - **Binary size**: 3.6MB (release build)
 
 ### Count Implementation Lines
@@ -155,7 +155,7 @@ src/
 ├── models.rs (362)        - Data structures + Gemini response types
 ├── client.rs (518)        - HTTP client, format conversions
 ├── mcp/
-│   ├── server.rs (284)    - MCP subprocess with lazy loading
+│   ├── server.rs (288)    - MCP subprocess with lazy loading
 │   └── manager.rs (275)   - Tool routing with async state
 ├── provider.rs (245)      - Provider detection
 ├── display.rs (163)       - Terminal UI with indicatif spinners
@@ -166,7 +166,7 @@ src/
 
 dmn_instructions.md (188)  - DMN system instructions (embedded via include_str!)
 
-Total: 2,418 lines (implementation) + 188 lines (embedded instructions)
+Total: 2,414 lines (implementation) + 188 lines (embedded instructions)
 Binary: 3.6MB (release build)
 ```
 

@@ -63,14 +63,6 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         },
     );
 
-    servers.insert(
-        "fetch".to_string(),
-        McpServerConfig {
-            command: "uvx".to_string(),
-            args: vec!["mcp-server-fetch".to_string()],
-        },
-    );
-
     McpConfig {
         mcp_servers: servers,
     }

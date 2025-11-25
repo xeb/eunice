@@ -20,11 +20,14 @@ impl SpawnedServer {
     /// Spawn a server process without initializing it
     /// Note: This is synchronous but fast - it just spawns the process
     pub fn spawn(name: &str, command: &str, args: &[String]) -> Result<Self> {
+        // Note: stderr is set to null to prevent deadlock - if the MCP server
+        // writes too much to stderr and we don't read it, the buffer fills up
+        // and the server blocks on write, causing a timeout.
         let mut process = tokio::process::Command::new(command)
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
             .spawn()
             .with_context(|| format!("Failed to start MCP server '{}': {} {:?}", name, command, args))?;
 
@@ -221,7 +224,8 @@ impl McpServer {
 
     /// Read a JSON-RPC message from the server
     async fn read_message(&mut self) -> Result<serde_json::Value> {
-        let read_timeout = Duration::from_secs(600);
+        // 60 seconds is plenty for any MCP tool call
+        let read_timeout = Duration::from_secs(60);
 
         loop {
             let mut line = String::new();
