@@ -72,40 +72,22 @@ struct Args {
 
 /// Resolve prompt from arguments (may be a file path or string)
 fn resolve_prompt(args: &Args) -> Result<Option<String>> {
-    let prompt_arg = args
+    let some_prompt = args
         .prompt
         .clone()
         .or_else(|| args.prompt_positional.clone());
 
-    let Some(prompt) = prompt_arg else {
-        return Ok(None);
-    };
-
-    // Quick heuristics to determine if it's definitely a string
-    if prompt.len() > 255
-        || prompt.contains('\n')
-        || prompt.contains('?')
-        || prompt.matches(' ').count() > 5
-    {
+    if let Some(prompt) = some_prompt {
+        let path = Path::new(&prompt);
+        if path.exists() && path.is_file() {
+            let content = std::fs::read_to_string(path)
+                .map_err(|e| anyhow!("Failed to read prompt file '{}': {}", prompt, e))?;
+            return Ok(Some(content));
+        }
         return Ok(Some(prompt));
     }
 
-    // Check if it looks like a file path and exists
-    let path = Path::new(&prompt);
-    if path.exists() && path.is_file() {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| anyhow!("Failed to read prompt file '{}': {}", prompt, e))?;
-        return Ok(Some(content));
-    }
-
-    // If it looks like a file path but doesn't exist, error
-    if prompt.contains('/') || prompt.contains('\\') || prompt.ends_with(".txt") || prompt.ends_with(".md") {
-        if !path.exists() {
-            return Err(anyhow!("Prompt file '{}' does not exist", prompt));
-        }
-    }
-
-    Ok(Some(prompt))
+    Ok(None)
 }
 
 /// Determine the MCP configuration to use
@@ -199,7 +181,6 @@ async fn main() -> Result<()> {
             mcp_manager.as_mut(),
             args.silent,
             args.verbose,
-            args.events,
             args.dmn,
         )
         .await?;
@@ -244,8 +225,6 @@ async fn main() -> Result<()> {
             args.silent,
             args.verbose,
             &mut conversation_history,
-            false,
-            args.events,
             args.dmn,
         )
         .await?;

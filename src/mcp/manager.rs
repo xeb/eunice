@@ -155,18 +155,16 @@ impl McpManager {
         arguments: serde_json::Value,
     ) -> Result<String> {
         // Find the server that owns this tool using longest prefix match
-        let mut best_match: Option<(String, String)> = None;
-
-        for server_name in self.servers.keys() {
-            let prefix = format!("{}_", server_name);
-            if tool_name.starts_with(&prefix) {
-                if best_match.is_none() || server_name.len() > best_match.as_ref().unwrap().0.len()
-                {
-                    let actual_tool_name = tool_name[prefix.len()..].to_string();
-                    best_match = Some((server_name.clone(), actual_tool_name));
-                }
-            }
-        }
+        let best_match = self
+            .servers
+            .keys()
+            .filter_map(|server_name| {
+                let prefix = format!("{}_", server_name);
+                tool_name
+                    .strip_prefix(&prefix)
+                    .map(|actual_tool_name| (server_name.clone(), actual_tool_name.to_string()))
+            })
+            .max_by_key(|(server_name, _)| server_name.len());
 
         let Some((server_name, actual_tool_name)) = best_match else {
             return Err(anyhow!("No server found for tool '{}'", tool_name));

@@ -21,6 +21,17 @@ impl std::fmt::Display for Provider {
     }
 }
 
+impl Provider {
+    pub fn get_icon(&self) -> &'static str {
+        match self {
+            Provider::OpenAI => "🤖",
+            Provider::Gemini => "💎",
+            Provider::Anthropic => "🧠",
+            Provider::Ollama => "🦙",
+        }
+    }
+}
+
 /// Information about a detected provider
 #[derive(Debug, Clone)]
 pub struct ProviderInfo {

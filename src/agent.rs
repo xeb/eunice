@@ -15,8 +15,6 @@ pub async fn run_agent(
     silent: bool,
     verbose: bool,
     conversation_history: &mut Vec<Message>,
-    _suppress_info: bool,
-    _events_mode: bool,
     dmn_mode: bool,
 ) -> Result<()> {
     // Add user message to history

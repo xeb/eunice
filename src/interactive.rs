@@ -16,7 +16,6 @@ pub async fn interactive_mode(
     mut mcp_manager: Option<&mut McpManager>,
     silent: bool,
     verbose: bool,
-    events_mode: bool,
     dmn: bool,
 ) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
@@ -38,27 +37,16 @@ pub async fn interactive_mode(
 
     // Process initial prompt if provided
     if let Some(prompt) = initial_prompt {
-        let prompt_with_instructions = if dmn {
-            dmn_injected = true;
-            format!(
-                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
-                DMN_INSTRUCTIONS, prompt
-            )
-        } else {
-            prompt.to_string()
-        };
-
+        let final_prompt = inject_dmn_instructions_if_needed(prompt, &mut dmn_injected, dmn);
         run_agent(
             client,
             model,
-            &prompt_with_instructions,
+            &final_prompt,
             tool_output_limit,
-            mcp_manager.as_deref_mut().map(|m| m as &mut McpManager),
+            mcp_manager.as_deref_mut(),
             silent,
             verbose,
             &mut conversation_history,
-            true,
-            events_mode,
             dmn,
         )
         .await?;
@@ -70,13 +58,9 @@ pub async fn interactive_mode(
         io::stdout().flush()?;
 
         let mut input = String::new();
-        match io::stdin().read_line(&mut input) {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(e) => {
-                display::print_error(&format!("Failed to read input: {}", e));
-                continue;
-            }
+        let bytes_read = io::stdin().read_line(&mut input)?;
+        if bytes_read == 0 {
+            break; // EOF (Ctrl+D)
         }
 
         let input = input.trim();
@@ -88,28 +72,17 @@ pub async fn interactive_mode(
             break;
         }
 
-        // Inject DMN instructions on first interactive input
-        let prompt = if dmn && !dmn_injected {
-            dmn_injected = true;
-            format!(
-                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
-                DMN_INSTRUCTIONS, input
-            )
-        } else {
-            input.to_string()
-        };
+        let final_prompt = inject_dmn_instructions_if_needed(input, &mut dmn_injected, dmn);
 
         if let Err(e) = run_agent(
             client,
             model,
-            &prompt,
+            &final_prompt,
             tool_output_limit,
-            mcp_manager.as_deref_mut().map(|m| m as &mut McpManager),
+            mcp_manager.as_deref_mut(),
             silent,
             verbose,
             &mut conversation_history,
-            true,
-            events_mode,
             dmn,
         )
         .await
@@ -119,4 +92,21 @@ pub async fn interactive_mode(
     }
 
     Ok(())
+}
+
+/// Inject DMN instructions if in DMN mode and not already injected
+fn inject_dmn_instructions_if_needed(
+    prompt: &str,
+    dmn_injected: &mut bool,
+    dmn: bool,
+) -> String {
+    if dmn && !*dmn_injected {
+        *dmn_injected = true;
+        format!(
+            "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
+            DMN_INSTRUCTIONS, prompt
+        )
+    } else {
+        prompt.to_string()
+    }
 }

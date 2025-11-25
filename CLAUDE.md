@@ -47,7 +47,7 @@ User Input → Provider Detection → Client → API Request → Response
 
 ## Testing
 
-The project includes **18 unit tests** covering:
+The project includes **23 unit tests** covering:
 - Provider detection logic
 - Message format conversions
 - Response parsing
@@ -65,7 +65,7 @@ make test
 When updating the codebase, **ALWAYS** update both metrics in README.md:
 
 ### Current Metrics
-- **Implementation lines**: 2,468 lines (excluding tests)
+- **Implementation lines**: 2,418 lines (excluding tests)
 - **Binary size**: 3.6MB (release build)
 
 ### Count Implementation Lines
@@ -151,22 +151,22 @@ The `gemini-3-pro-preview` model uses a different API format:
 
 ```
 src/
-├── main.rs (257)          - CLI entry, arg parsing
-├── models.rs (353)        - Data structures + Gemini response types
-├── client.rs (494)        - HTTP client, format conversions
+├── main.rs (239)          - CLI entry, arg parsing
+├── models.rs (362)        - Data structures + Gemini response types
+├── client.rs (518)        - HTTP client, format conversions
 ├── mcp/
 │   ├── server.rs (284)    - MCP subprocess with lazy loading
-│   └── manager.rs (277)   - Tool routing with async state
-├── provider.rs (236)      - Provider detection
-├── display.rs (189)       - Terminal UI with indicatif spinners
-├── interactive.rs (122)   - Interactive REPL mode
-├── agent.rs (121)         - Agent loop with tool execution
+│   └── manager.rs (275)   - Tool routing with async state
+├── provider.rs (245)      - Provider detection
+├── display.rs (163)       - Terminal UI with indicatif spinners
+├── interactive.rs (112)   - Interactive REPL mode
+├── agent.rs (119)         - Agent loop with tool execution
 ├── config.rs (89)         - Configuration loading
 └── lib.rs (8)             - Library exports
 
 dmn_instructions.md (188)  - DMN system instructions (embedded via include_str!)
 
-Total: 2,433 lines (implementation) + 188 lines (embedded instructions)
+Total: 2,418 lines (implementation) + 188 lines (embedded instructions)
 Binary: 3.6MB (release build)
 ```
 

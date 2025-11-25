@@ -55,16 +55,9 @@ pub fn print_tool_result(result: &str, limit: usize) {
 
 /// Print model information
 pub fn print_model_info(model: &str, provider: &Provider) {
-    let icon = match provider {
-        Provider::OpenAI => "🤖",
-        Provider::Gemini => "💎",
-        Provider::Anthropic => "🧠",
-        Provider::Ollama => "🦙",
-    };
-
     println!(
         "{} {} ({})",
-        icon,
+        provider.get_icon(),
         model.yellow().bold(),
         provider.to_string().yellow()
     );
@@ -116,58 +109,9 @@ pub fn print_model_list() {
     let models = get_available_models();
 
     for (provider, model_list, available) in models {
-        let icon = match provider {
-            Provider::OpenAI => "🤖",
-            Provider::Gemini => "💎",
-            Provider::Anthropic => "🧠",
-            Provider::Ollama => "🦙",
-        };
-
+        let icon = provider.get_icon();
         let status = if available { "✅" } else { "❌" };
-
-        // Check for API key (show last 4 chars if available)
-        let key_status = match provider {
-            Provider::OpenAI => {
-                if let Ok(key) = env::var("OPENAI_API_KEY") {
-                    if key.len() >= 4 {
-                        format!("...{}", &key[key.len() - 4..])
-                    } else {
-                        "set".to_string()
-                    }
-                } else {
-                    "not set".to_string()
-                }
-            }
-            Provider::Gemini => {
-                if let Ok(key) = env::var("GEMINI_API_KEY") {
-                    if key.len() >= 4 {
-                        format!("...{}", &key[key.len() - 4..])
-                    } else {
-                        "set".to_string()
-                    }
-                } else {
-                    "not set".to_string()
-                }
-            }
-            Provider::Anthropic => {
-                if let Ok(key) = env::var("ANTHROPIC_API_KEY") {
-                    if key.len() >= 4 {
-                        format!("...{}", &key[key.len() - 4..])
-                    } else {
-                        "set".to_string()
-                    }
-                } else {
-                    "not set".to_string()
-                }
-            }
-            Provider::Ollama => {
-                if available {
-                    "running".to_string()
-                } else {
-                    "not running".to_string()
-                }
-            }
-        };
+        let key_status = get_key_status(&provider, available);
 
         println!(
             "{} {} {} ({})",
@@ -185,5 +129,35 @@ pub fn print_model_list() {
             }
         }
         println!();
+    }
+}
+
+/// Get the status of the API key for a given provider
+fn get_key_status(provider: &Provider, available: bool) -> String {
+    match provider {
+        Provider::Ollama => {
+            if available {
+                "running".to_string()
+            } else {
+                "not running".to_string()
+            }
+        }
+        _ => {
+            let key_name = match provider {
+                Provider::OpenAI => "OPENAI_API_KEY",
+                Provider::Gemini => "GEMINI_API_KEY",
+                Provider::Anthropic => "ANTHROPIC_API_KEY",
+                _ => unreachable!(),
+            };
+            if let Ok(key) = env::var(key_name) {
+                if key.len() >= 4 {
+                    format!("...{}", &key[key.len() - 4..])
+                } else {
+                    "set".to_string()
+                }
+            } else {
+                "not set".to_string()
+            }
+        }
     }
 }
