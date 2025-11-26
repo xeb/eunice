@@ -1,61 +1,96 @@
 # Component Map
 
-```mermaid
-graph TD
-    Main[main.rs] --> Agent[agent.rs]
-    Main --> Interactive[interactive.rs]
-    Main --> McpManager[mcp/manager.rs]
-    Agent --> Client[client.rs]
-    Agent --> McpManager
-    Interactive --> Client
-    Interactive --> McpManager
-    McpManager --> McpServer[mcp/server.rs]
-    McpServer --> Models[models.rs]
-    Client --> Models
-    Client --> Provider[provider.rs]
-    Config[config.rs] --> McpManager
-    Config --> Models
-    Display[display.rs] -.-> Agent
+```
+eunice/
+├── CLI Entry (main.rs)
+│   ├── Args parsing (clap)
+│   ├── Mode selection: --dmn, --interactive, one-shot
+│   └── Config loading (eunice.json or embedded)
+│
+├── LLM Client Layer
+│   ├── client.rs ─────────────────────────────────────────┐
+│   │   └── Unified API for OpenAI/Gemini/Claude/Ollama    │
+│   ├── provider.rs                                         │
+│   │   └── Provider detection and URL/env configuration   │
+│   └── models.rs                                           │
+│       └── Message, Tool, API request/response types      │
+│                                                           │
+├── Agent System ◄──────────────────────────────────────────┤
+│   ├── agent.rs                                            │
+│   │   └── Core loop: LLM → tools → results → repeat      │
+│   ├── interactive.rs                                      │
+│   │   └── REPL wrapper with DMN injection                │
+│   └── config.rs                                           │
+│       ├── DMN MCP server configuration (hardcoded)       │
+│       └── DMN_INSTRUCTIONS (compiled-in prompt)          │
+│                                                           │
+├── MCP Layer (Tool Execution) ◄────────────────────────────┤
+│   ├── mcp/mod.rs                                          │
+│   │   └── McpManager: server lifecycle, tool routing     │
+│   ├── mcp/client.rs                                       │
+│   │   └── JSON-RPC over stdio                            │
+│   └── mcp/server.rs                                       │
+│       └── Server spawn, init, reconnect                  │
+│                                                           │
+└── Display Layer                                           │
+    └── display.rs                                          │
+        └── Spinners, tool output, progress indicators     │
 ```
 
-## Component Status
-
-| Component | Status | Lines | Last Analyzed |
-|-----------|--------|-------|---------------|
-| `src/` (core) | ✅ Explored | ~2.4k | 2025-11-26 |
-| `src/mcp/` | ✅ Deep dive | 628 | 2025-11-26 |
-| `src/client.rs` | 🔍 Needs deep dive | 706 | - |
-| `examples/` | ⏳ Pending | - | - |
-
-## Data Flow
+## Data Flow (DMN Mode)
 
 ```
-User Input
+User Prompt
     │
     ▼
 ┌─────────────────┐
-│   main.rs       │ (CLI parsing, mode selection)
+│ DMN_INSTRUCTIONS│ ← Embedded system prompt
+│ + prompt wrap   │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│    agent.rs     │ ← Agent loop
+│   run_agent()   │
 └────────┬────────┘
          │
     ┌────┴────┐
+    │         │
     ▼         ▼
-┌───────┐ ┌───────────┐
-│ Agent │ │Interactive│  (DMN mode vs Chat mode)
-└───┬───┘ └─────┬─────┘
+┌───────┐  ┌─────────┐
+│client │  │   MCP   │
+│.rs    │  │ manager │
+└───┬───┘  └────┬────┘
     │           │
-    └─────┬─────┘
-          ▼
-    ┌───────────┐
-    │  Client   │  (LLM API abstraction)
-    └─────┬─────┘
-          │
-    ┌─────┴─────┐
     ▼           ▼
-┌────────┐  ┌──────────┐
-│ OpenAI │  │  Gemini  │  (Provider-specific handling)
-│  API   │  │ Native   │
-└────────┘  └──────────┘
-
-Tool Execution Path:
-Agent → McpManager → McpServer (child process) → JSON-RPC → Tool Result
+ OpenAI    MCP Servers
+ Gemini    (shell, fs,
+ Claude     grep, etc.)
+ Ollama
 ```
+
+## Component Dependencies
+
+| Component | Depends On | Depended By |
+|-----------|------------|-------------|
+| main.rs | all | - |
+| client.rs | provider.rs, models.rs | agent.rs, interactive.rs |
+| agent.rs | client.rs, mcp/, display.rs | main.rs, interactive.rs |
+| mcp/ | models.rs | agent.rs |
+| config.rs | models.rs | main.rs, interactive.rs |
+| display.rs | - | agent.rs, main.rs |
+
+## Module Boundaries
+
+### Public APIs
+- `client::Client` - LLM communication
+- `agent::run_agent()` - Single agent execution
+- `interactive::interactive_mode()` - REPL mode
+- `mcp::McpManager` - Tool orchestration
+- `config::get_dmn_mcp_config()` - Default tool config
+- `config::DMN_INSTRUCTIONS` - System prompt
+
+### Internal Only
+- Provider detection logic
+- Gemini response conversion
+- MCP JSON-RPC protocol details
