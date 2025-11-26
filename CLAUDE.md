@@ -65,7 +65,7 @@ make test
 When updating the codebase, **ALWAYS** update both metrics in README.md:
 
 ### Current Metrics
-- **Implementation lines**: 2,475 lines (excluding tests)
+- **Implementation lines**: 2,495 lines (excluding tests)
 - **Binary size**: 3.6MB (release build)
 
 ### Count Implementation Lines
@@ -151,7 +151,7 @@ The `gemini-3-pro-preview` model uses a different API format:
 
 ```
 src/
-├── main.rs (239)          - CLI entry, arg parsing
+├── main.rs (259)          - CLI entry, arg parsing
 ├── models.rs (362)        - Data structures + Gemini response types
 ├── client.rs (518)        - HTTP client, format conversions
 ├── mcp/
@@ -166,7 +166,7 @@ src/
 
 dmn_instructions.md (188)  - DMN system instructions (embedded via include_str!)
 
-Total: 2,475 lines (implementation) + 188 lines (embedded instructions)
+Total: 2,495 lines (implementation) + 188 lines (embedded instructions)
 Binary: 3.6MB (release build)
 ```
 

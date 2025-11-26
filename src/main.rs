@@ -70,6 +70,16 @@ struct Args {
     prompt_positional: Option<String>,
 }
 
+/// Auto-discover prompt files in priority order
+const PROMPT_FILES: &[&str] = &[
+    "prompt.txt",
+    "prompt.md",
+    "instruction.txt",
+    "instruction.md",
+    "instructions.txt",
+    "instructions.md",
+];
+
 /// Resolve prompt from arguments (may be a file path or string)
 fn resolve_prompt(args: &Args) -> Result<Option<String>> {
     let some_prompt = args
@@ -85,6 +95,16 @@ fn resolve_prompt(args: &Args) -> Result<Option<String>> {
             return Ok(Some(content));
         }
         return Ok(Some(prompt));
+    }
+
+    // Auto-discover prompt files if no prompt specified
+    for filename in PROMPT_FILES {
+        let path = Path::new(filename);
+        if path.exists() && path.is_file() {
+            let content = std::fs::read_to_string(path)
+                .map_err(|e| anyhow!("Failed to read prompt file '{}': {}", filename, e))?;
+            return Ok(Some(content));
+        }
     }
 
     Ok(None)

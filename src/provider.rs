@@ -153,7 +153,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
 pub fn get_smart_default_model() -> Result<String> {
     // 1. Try Gemini first (preferred default)
     if env::var("GEMINI_API_KEY").is_ok() {
-        return Ok("gemini-2.5-flash".to_string());
+        return Ok("gemini-3-pro-preview".to_string());
     }
 
     // 2. Try Anthropic
