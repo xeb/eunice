@@ -1,6 +1,6 @@
 use crate::client::Client;
 use crate::display;
-use crate::display::Spinner;
+use crate::display::{Spinner, ThinkingSpinner};
 use crate::mcp::McpManager;
 use crate::models::Message;
 use anyhow::Result;
@@ -33,10 +33,24 @@ pub async fn run_agent(
 
         display::debug("Calling LLM...", verbose);
 
+        // Start thinking spinner
+        let thinking_spinner = if !silent {
+            Some(ThinkingSpinner::start())
+        } else {
+            None
+        };
+
         // Call the LLM
         let response = client
             .chat_completion(model, conversation_history, tools.as_deref(), dmn_mode)
-            .await?;
+            .await;
+
+        // Stop thinking spinner
+        if let Some(spinner) = thinking_spinner {
+            spinner.stop();
+        }
+
+        let response = response?;
 
         let choice = &response.choices[0];
 

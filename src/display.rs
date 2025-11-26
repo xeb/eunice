@@ -3,6 +3,8 @@ use crate::provider::get_available_models;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Spinner handle that can be used to stop the spinner
@@ -26,6 +28,51 @@ impl Spinner {
     /// Stop the spinner
     pub async fn stop(self) {
         self.0.finish_and_clear();
+    }
+}
+
+/// Thinking spinner that shows elapsed time
+pub struct ThinkingSpinner {
+    pb: ProgressBar,
+    running: Arc<AtomicBool>,
+}
+
+impl ThinkingSpinner {
+    /// Start a new thinking spinner with elapsed time counter
+    pub fn start() -> Self {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                .template("{spinner:.yellow} {msg}")
+                .unwrap(),
+        );
+        pb.set_message("Thinking... 0s");
+
+        let running = Arc::new(AtomicBool::new(true));
+        let running_clone = running.clone();
+        let pb_clone = pb.clone();
+
+        // Spawn a task to update the elapsed time every second
+        tokio::spawn(async move {
+            let mut seconds = 0u64;
+            while running_clone.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if running_clone.load(Ordering::Relaxed) {
+                    seconds += 1;
+                    pb_clone.set_message(format!("Thinking... {}s", seconds));
+                }
+            }
+        });
+
+        pb.enable_steady_tick(Duration::from_millis(80));
+        Self { pb, running }
+    }
+
+    /// Stop the thinking spinner
+    pub fn stop(self) {
+        self.running.store(false, Ordering::Relaxed);
+        self.pb.finish_and_clear();
     }
 }
 

@@ -65,7 +65,7 @@ make test
 When updating the codebase, **ALWAYS** update both metrics in README.md:
 
 ### Current Metrics
-- **Implementation lines**: 2,414 lines (excluding tests)
+- **Implementation lines**: 2,475 lines (excluding tests)
 - **Binary size**: 3.6MB (release build)
 
 ### Count Implementation Lines
@@ -158,15 +158,15 @@ src/
 │   ├── server.rs (288)    - MCP subprocess with lazy loading
 │   └── manager.rs (275)   - Tool routing with async state
 ├── provider.rs (245)      - Provider detection
-├── display.rs (163)       - Terminal UI with indicatif spinners
+├── display.rs (210)       - Terminal UI with indicatif spinners
 ├── interactive.rs (112)   - Interactive REPL mode
-├── agent.rs (119)         - Agent loop with tool execution
+├── agent.rs (133)         - Agent loop with tool execution
 ├── config.rs (89)         - Configuration loading
 └── lib.rs (8)             - Library exports
 
 dmn_instructions.md (188)  - DMN system instructions (embedded via include_str!)
 
-Total: 2,414 lines (implementation) + 188 lines (embedded instructions)
+Total: 2,475 lines (implementation) + 188 lines (embedded instructions)
 Binary: 3.6MB (release build)
 ```
 
