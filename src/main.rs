@@ -136,10 +136,20 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
         return Ok(Some(load_mcp_config(path)?));
     }
 
-    // Auto-discover eunice.json in current directory
-    let default_config = Path::new("eunice.json");
-    if default_config.exists() {
-        return Ok(Some(load_mcp_config(default_config)?));
+    // Auto-discover eunice.toml or eunice.json in current directory (prefer TOML)
+    let toml_config = Path::new("eunice.toml");
+    let json_config = Path::new("eunice.json");
+
+    if toml_config.exists() && json_config.exists() {
+        eprintln!("Warning: Both eunice.toml and eunice.json exist. Using eunice.toml.");
+    }
+
+    if toml_config.exists() {
+        return Ok(Some(load_mcp_config(toml_config)?));
+    }
+
+    if json_config.exists() {
+        return Ok(Some(load_mcp_config(json_config)?));
     }
 
     Ok(None)

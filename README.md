@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**2,495 lines of Rust** • **3.6MB binary** - Emphasizing "sophisticated simplicity".
+**2,512 lines of Rust** • **3.9MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -45,7 +45,10 @@ cargo install --path .
 ## Quick Start
 
 ```bash
-# Use smart default model (prefers local Ollama)
+# Zero-config: auto-discovers eunice.json + prompt.txt in current directory
+eunice
+
+# Use smart default model (prefers Gemini)
 eunice "What files are in this directory?"
 
 # Specify a model
@@ -95,7 +98,7 @@ Options:
 - Requires: `OPENAI_API_KEY`
 
 ### Google Gemini
-- Models: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro`
+- Models: `gemini-3-pro-preview` (default), `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro`
 - Requires: `GEMINI_API_KEY`
 
 ### Anthropic Claude
@@ -142,7 +145,9 @@ If no prompt file is found and no prompt is given, eunice enters interactive mod
 
 ## MCP Configuration
 
-Create a `eunice.json` in your working directory for automatic MCP server loading:
+Create a `eunice.json` or `eunice.toml` in your working directory for automatic MCP server loading.
+
+### JSON Format
 
 ```json
 {
@@ -157,6 +162,35 @@ Create a `eunice.json` in your working directory for automatic MCP server loadin
     }
   }
 }
+```
+
+### TOML Format
+
+```toml
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[mcpServers.time]
+command = "uvx"
+args = ["mcp-server-time"]
+
+[mcpServers.time_mcpz]
+command = "mcpz"
+args = ["run", "mcp-server-time"]
+```
+
+### Using mcpz
+
+[mcpz](https://github.com/xeb/mcpz) is a lightweight MCP server runner that simplifies running MCP tools:
+
+```bash
+# Install mcpz
+cargo install mcpz
+
+# Run MCP servers via mcpz
+mcpz server shell        # Shell execution
+mcpz run mcp-server-time # Run any MCP server
 ```
 
 Tools are registered with server name prefixes (e.g., `filesystem_read_file`, `time_get_current_time`).

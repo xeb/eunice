@@ -68,13 +68,20 @@ pub fn get_dmn_mcp_config() -> McpConfig {
     }
 }
 
-/// Load MCP configuration from a JSON file
+/// Load MCP configuration from a JSON or TOML file
 pub fn load_mcp_config(path: &Path) -> Result<McpConfig> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {}", path.display()))?;
 
-    serde_json::from_str(&content)
-        .with_context(|| format!("Failed to parse config file: {}", path.display()))
+    // Determine format based on file extension
+    let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    match extension {
+        "toml" => toml::from_str(&content)
+            .with_context(|| format!("Failed to parse TOML config file: {}", path.display())),
+        _ => serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse JSON config file: {}", path.display())),
+    }
 }
 
 /// DMN (Default Mode Network) instructions loaded from external file
