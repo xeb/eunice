@@ -1,0 +1,7 @@
+[mcpServers.brave]
+command = "mcpz"
+args = ["run", "@brave/brave-search-mcp-server"]
+
+[mcpServers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]

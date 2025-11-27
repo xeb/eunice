@@ -1,0 +1,7 @@
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[mcpServers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
