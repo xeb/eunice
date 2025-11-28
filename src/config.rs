@@ -3,27 +3,31 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Check if mcpz is installed
+fn has_mcpz() -> bool {
+    std::process::Command::new("mcpz").arg("--version").output().is_ok()
+}
+
 /// Embedded DMN (Default Mode Network) MCP configuration
 pub fn get_dmn_mcp_config() -> McpConfig {
     let mut servers = HashMap::new();
+    let use_mcpz = has_mcpz();
 
     servers.insert(
         "shell".to_string(),
-        McpServerConfig {
-            command: "uvx".to_string(),
-            args: vec!["git+https://github.com/emsi/mcp-server-shell".to_string()],
+        if use_mcpz {
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "shell".into()] }
+        } else {
+            McpServerConfig { command: "uvx".into(), args: vec!["git+https://github.com/emsi/mcp-server-shell".into()] }
         },
     );
 
     servers.insert(
         "filesystem".to_string(),
-        McpServerConfig {
-            command: "npx".to_string(),
-            args: vec![
-                "-y".to_string(),
-                "@modelcontextprotocol/server-filesystem".to_string(),
-                ".".to_string(),
-            ],
+        if use_mcpz {
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()] }
+        } else {
+            McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()] }
         },
     );
 
@@ -65,6 +69,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
 
     McpConfig {
         mcp_servers: servers,
+        agents: HashMap::new(),
     }
 }
 

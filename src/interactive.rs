@@ -4,6 +4,7 @@ use crate::config::DMN_INSTRUCTIONS;
 use crate::display;
 use crate::mcp::McpManager;
 use crate::models::Message;
+use crate::orchestrator::AgentOrchestrator;
 use anyhow::Result;
 use std::io::{self, Write};
 
@@ -14,12 +15,19 @@ pub async fn interactive_mode(
     initial_prompt: Option<&str>,
     tool_output_limit: usize,
     mut mcp_manager: Option<&mut McpManager>,
+    orchestrator: Option<&AgentOrchestrator>,
+    agent_name: Option<&str>,
     silent: bool,
     verbose: bool,
     dmn: bool,
 ) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
     let mut dmn_injected = false;
+
+    // Wait for MCP servers to be ready before showing prompt
+    if let Some(ref mut manager) = mcp_manager {
+        manager.await_all_servers().await;
+    }
 
     // Show model/MCP info once at startup
     if !silent {
@@ -33,21 +41,27 @@ pub async fn interactive_mode(
         if dmn {
             display::print_dmn_mode();
         }
+
+        if let Some(name) = agent_name {
+            eprintln!("🤖 Multi-Agent Mode: starting as '{}'", name);
+        }
     }
 
     // Process initial prompt if provided
     if let Some(prompt) = initial_prompt {
-        let final_prompt = inject_dmn_instructions_if_needed(prompt, &mut dmn_injected, dmn);
-        run_agent(
+        run_prompt(
             client,
             model,
-            &final_prompt,
+            prompt,
             tool_output_limit,
-            mcp_manager.as_deref_mut(),
+            &mut mcp_manager,
+            orchestrator,
+            agent_name,
             silent,
             verbose,
-            &mut conversation_history,
             dmn,
+            &mut dmn_injected,
+            &mut conversation_history,
         )
         .await?;
     }
@@ -72,18 +86,19 @@ pub async fn interactive_mode(
             break;
         }
 
-        let final_prompt = inject_dmn_instructions_if_needed(input, &mut dmn_injected, dmn);
-
-        if let Err(e) = run_agent(
+        if let Err(e) = run_prompt(
             client,
             model,
-            &final_prompt,
+            input,
             tool_output_limit,
-            mcp_manager.as_deref_mut(),
+            &mut mcp_manager,
+            orchestrator,
+            agent_name,
             silent,
             verbose,
-            &mut conversation_history,
             dmn,
+            &mut dmn_injected,
+            &mut conversation_history,
         )
         .await
         {
@@ -91,6 +106,60 @@ pub async fn interactive_mode(
         }
     }
 
+    Ok(())
+}
+
+/// Run a single prompt - either through orchestrator (multi-agent) or directly
+async fn run_prompt(
+    client: &Client,
+    model: &str,
+    prompt: &str,
+    tool_output_limit: usize,
+    mcp_manager: &mut Option<&mut McpManager>,
+    orchestrator: Option<&AgentOrchestrator>,
+    agent_name: Option<&str>,
+    silent: bool,
+    verbose: bool,
+    dmn: bool,
+    dmn_injected: &mut bool,
+    conversation_history: &mut Vec<Message>,
+) -> Result<()> {
+    // Use orchestrator if available (multi-agent mode)
+    let use_multi_agent = orchestrator.is_some() && agent_name.is_some() && mcp_manager.is_some();
+
+    if use_multi_agent {
+        let orch = orchestrator.unwrap();
+        let name = agent_name.unwrap();
+        let manager = mcp_manager.as_mut().unwrap();
+        orch.run_agent(
+            client,
+            model,
+            name,
+            prompt,
+            None,
+            manager,
+            tool_output_limit,
+            silent,
+            verbose,
+            0,
+        )
+        .await?;
+    } else {
+        // Single-agent mode (original behavior)
+        let final_prompt = inject_dmn_instructions_if_needed(prompt, dmn_injected, dmn);
+        run_agent(
+            client,
+            model,
+            &final_prompt,
+            tool_output_limit,
+            mcp_manager.as_deref_mut(),
+            silent,
+            verbose,
+            conversation_history,
+            dmn,
+        )
+        .await?;
+    }
     Ok(())
 }
 

@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**2,512 lines of Rust** • **3.9MB binary** - Emphasizing "sophisticated simplicity".
+**3,131 lines of Rust** • **4.0MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -14,6 +14,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Multi-Provider Support**: OpenAI, Google Gemini, Anthropic Claude, and local Ollama models
 - **Unified API**: Uses OpenAI-compatible endpoints for all providers
 - **MCP Integration**: Model Context Protocol servers for extensible tool capabilities
+- **Multi-Agent Orchestration**: Agents can invoke other agents as tools for complex workflows
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with pre-configured MCP tools for software engineering
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
@@ -43,6 +44,8 @@ cargo install --path .
 ```
 
 ## Quick Start
+
+![Basic Usage](assets/demo_basic.gif)
 
 ```bash
 # Zero-config: auto-discovers eunice.json + prompt.txt in current directory
@@ -79,9 +82,11 @@ Options:
       --prompt <PROMPT>         Prompt as file path or string
       --tool-output-limit <N>   Limit tool output display (default: 50, 0=unlimited)
       --list-models             Show all available models
-      --config <FILE>           Path to MCP configuration JSON
+      --config <FILE>           Path to MCP configuration JSON/TOML
       --no-mcp                  Disable MCP even if eunice.json exists
       --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
+      --agent <NAME>            Run as specific agent (default: root if agents configured)
+      --list-agents             List configured agents
   -i, --interact                Interactive mode for multi-turn conversations
       --silent                  Suppress all output except AI responses
       --verbose                 Enable verbose debug output
@@ -208,6 +213,8 @@ In interactive mode, you'll see `(starting...)` next to servers that are still i
 
 ## DMN Mode (Default Mode Network)
 
+![DMN Mode](assets/demo_dmn.gif)
+
 Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution with 7 pre-configured MCP servers:
 
 - **shell**: Execute shell commands
@@ -231,30 +238,89 @@ When DMN mode encounters API rate limits (429 errors), it automatically:
 
 This ensures long-running batch tasks can complete without manual intervention.
 
+## Multi-Agent Mode
+
+![Multi-Agent Mode](assets/demo_multiagent.gif)
+
+Eunice supports multi-agent orchestration where agents can invoke other agents as tools.
+
+### Configuration
+
+Add an `[agents]` section to your `eunice.toml`:
+
+```toml
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[mcpServers.filesystem]
+command = "mcpz"
+args = ["server", "filesystem"]
+
+[agents.root]
+prompt = "You are the coordinator. Delegate tasks to workers."
+tools = []
+can_invoke = ["worker"]
+
+[agents.worker]
+prompt = "agents/worker.md"  # Can be file path
+tools = ["shell", "filesystem"]
+can_invoke = []
+```
+
+### Usage
+
+```bash
+# Auto-uses 'root' agent when [agents] section exists
+eunice "Build a web app"
+
+# Use specific agent
+eunice --agent worker "Run the tests"
+
+# List configured agents
+eunice --list-agents
+```
+
+### How It Works
+
+1. When `[agents]` section exists in config, multi-agent mode auto-enables
+2. Each agent gets `invoke_*` tools for agents in their `can_invoke` list
+3. Agent prompts can be inline strings or file paths (`.md`, `.txt`)
+4. MCP tools are filtered per-agent based on `tools` list
+5. Agents can invoke other agents recursively with depth tracking
+
+### Example: Restaurant Simulation
+
+See [examples/real_multi_agent](examples/real_multi_agent) for a complete example simulating a restaurant with counter, chef, cook, and supplier agents.
+
 ## Project Structure
 
 ```
 ├── Cargo.toml           # Package configuration
 ├── Makefile             # Build commands with publish automation
-├── CLAUDE.md            # Development guide for Claude
-├── dmn_instructions.md  # DMN system instructions (188 lines)
+├── CLAUDE.md            # Development guide
+├── dmn_instructions.md  # DMN system instructions
 ├── src/
-│   ├── main.rs          # Entry point, CLI parsing (259 lines)
-│   ├── models.rs        # Data structures + Gemini types (362 lines)
-│   ├── client.rs        # HTTP client with dual Gemini API support (518 lines)
+│   ├── main.rs          # Entry point, CLI parsing
+│   ├── models.rs        # Data structures + AgentConfig
+│   ├── client.rs        # HTTP client with provider support
 │   ├── mcp/
-│   │   ├── server.rs    # MCP subprocess with lazy loading (288 lines)
-│   │   └── manager.rs   # Tool routing with async state (275 lines)
-│   ├── provider.rs      # Provider detection (245 lines)
-│   ├── display.rs       # Terminal UI with indicatif spinners (210 lines)
-│   ├── interactive.rs   # Interactive mode (112 lines)
-│   ├── agent.rs         # Agent loop (133 lines)
-│   ├── config.rs        # Configuration loading (89 lines)
-│   └── lib.rs           # Library exports (8 lines)
+│   │   ├── mod.rs       # Module exports
+│   │   ├── server.rs    # MCP subprocess with lazy loading
+│   │   └── manager.rs   # Tool routing with async state
+│   ├── orchestrator/
+│   │   ├── mod.rs       # Module exports
+│   │   └── orchestrator.rs  # Multi-agent coordination
+│   ├── provider.rs      # Provider detection
+│   ├── display.rs       # Terminal UI with spinners
+│   ├── interactive.rs   # Interactive mode
+│   ├── agent.rs         # Single-agent loop
+│   ├── config.rs        # Configuration loading
+│   └── lib.rs           # Library exports
+├── examples/
+│   └── real_multi_agent/  # Restaurant simulation example
 └── README.md
 ```
-
-**Total: 2,495 lines** (implementation only, excluding 23 unit tests)
 
 See the full [Component Map](examples/codebase_archaeologist/workspace/component_map.md) for architecture details. *This was generated by eunice - see [examples/codebase_archaeologist](examples/codebase_archaeologist) for more.*
 

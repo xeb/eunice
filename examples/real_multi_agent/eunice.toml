@@ -1,0 +1,41 @@
+# Restaurant Simulation - Multi-Agent Example
+#
+# This simulates a restaurant with multiple agents:
+# - counter: Takes orders from customers (root agent)
+# - head_chef: Coordinates the kitchen
+# - line_cook: Prepares individual dishes
+# - supplier: Manages pantry inventory
+#
+# Run with: eunice "I'd like to order a burger and fries please"
+
+[mcpServers.filesystem]
+command = "mcpz"
+args = ["server", "filesystem"]
+
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+# Counter - the customer-facing agent (root)
+[agents.root]
+prompt = "agents/counter.md"
+tools = ["filesystem"]
+can_invoke = ["head_chef"]
+
+# Head Chef - coordinates the kitchen
+[agents.head_chef]
+prompt = "agents/head_chef.md"
+tools = ["filesystem"]
+can_invoke = ["line_cook", "supplier"]
+
+# Line Cook - prepares dishes
+[agents.line_cook]
+prompt = "agents/line_cook.md"
+tools = ["filesystem", "shell"]
+can_invoke = []
+
+# Supplier - manages pantry inventory
+[agents.supplier]
+prompt = "agents/supplier.md"
+tools = ["filesystem"]
+can_invoke = []

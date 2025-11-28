@@ -5,4 +5,5 @@ pub mod display;
 pub mod interactive;
 pub mod mcp;
 pub mod models;
+pub mod orchestrator;
 pub mod provider;

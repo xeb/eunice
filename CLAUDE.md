@@ -2,7 +2,7 @@
 
 ## About
 
-Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" with **2,433 lines of implementation code** (excluding tests) and a **3.6MB release binary**.
+Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It supports **multi-agent orchestration** where agents can invoke other agents as tools. It emphasizes "sophisticated simplicity".
 
 ## Architecture
 
@@ -45,13 +45,20 @@ User Input → Provider Detection → Client → API Request → Response
    - Tool execution with spinners
    - Conversation history management
 
+6. **Multi-Agent Orchestrator** (`src/orchestrator/`)
+   - Manages agent configurations and prompts
+   - Creates `invoke_*` tools for agent-to-agent calls
+   - Filters MCP tools by agent permissions
+   - Handles recursive agent invocation with depth tracking
+
 ## Testing
 
-The project includes **23 unit tests** covering:
+The project includes **30 unit tests** covering:
 - Provider detection logic
 - Message format conversions
 - Response parsing
 - Gemini API serialization/deserialization
+- Multi-agent orchestrator logic
 
 Run tests with:
 ```bash
@@ -64,20 +71,18 @@ make test
 
 When updating the codebase, **ALWAYS** update both metrics in README.md:
 
-### Current Metrics
-- **Implementation lines**: 2,495 lines (excluding tests)
-- **Binary size**: 3.6MB (release build)
-
 ### Count Implementation Lines
 ```bash
-for file in src/*.rs src/mcp/*.rs; do
-  test_start=$(grep -n "^#\[cfg(test)\]" "$file" | cut -d: -f1)
+for file in src/*.rs src/mcp/*.rs src/orchestrator/*.rs; do
+  test_start=$(grep -n "^#\[cfg(test)\]" "$file" | cut -d: -f1 | head -1)
   if [ -n "$test_start" ]; then
-    echo "$file: $((test_start - 1)) lines"
+    lines=$((test_start - 1))
   else
-    echo "$file: $(wc -l < "$file") lines"
+    lines=$(wc -l < "$file")
   fi
+  total=$((total + lines))
 done
+echo "Total: $total lines"
 ```
 
 ### Check Binary Size
@@ -139,6 +144,46 @@ The `gemini-3-pro-preview` model uses a different API format:
 - `Message::Assistant` → role: "model"
 - `Message::Tool` → skipped (not supported)
 
+## Multi-Agent Architecture
+
+Eunice supports multi-agent orchestration where agents can invoke other agents as tools.
+
+### Configuration
+
+Agents are defined in `eunice.toml`:
+
+```toml
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[agents.root]
+prompt = "You are the coordinator..."
+tools = []                           # MCP servers this agent can use
+can_invoke = ["worker"]              # Agents this agent can call
+
+[agents.worker]
+prompt = "agents/worker.md"          # Can be file path
+tools = ["shell"]
+can_invoke = []
+```
+
+### How It Works
+
+1. When `[agents]` section exists, multi-agent mode is auto-enabled
+2. Default agent is `root` (or specify with `--agent name`)
+3. Each agent gets `invoke_*` tools for agents in `can_invoke`
+4. Agent invocation is recursive with depth tracking
+5. MCP tools are filtered per-agent based on `tools` list
+
+### CLI Usage
+
+```bash
+eunice "task"                    # Uses root agent if agents configured
+eunice --agent worker "task"     # Use specific agent
+eunice --list-agents             # Show configured agents
+```
+
 ## Key Design Decisions
 
 1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
@@ -146,28 +191,30 @@ The `gemini-3-pro-preview` model uses a different API format:
 3. **Message Format Abstraction**: Internal `Message` enum converts to provider formats
 4. **DMN Mode for Autonomy**: Automatic retry and continuous execution
 5. **MCP for Extensibility**: Tools provided via Model Context Protocol servers
+6. **Agents as Tools**: Agent-to-agent calls are just tool calls, reusing MCP infrastructure
 
 ## File Structure
 
 ```
 src/
-├── main.rs (259)          - CLI entry, arg parsing
-├── models.rs (362)        - Data structures + Gemini response types
-├── client.rs (518)        - HTTP client, format conversions
+├── main.rs              - CLI entry, arg parsing, multi-agent detection
+├── models.rs            - Data structures + AgentConfig
+├── client.rs            - HTTP client, format conversions
 ├── mcp/
-│   ├── server.rs (288)    - MCP subprocess with lazy loading
-│   └── manager.rs (275)   - Tool routing with async state
-├── provider.rs (245)      - Provider detection
-├── display.rs (210)       - Terminal UI with indicatif spinners
-├── interactive.rs (112)   - Interactive REPL mode
-├── agent.rs (133)         - Agent loop with tool execution
-├── config.rs (89)         - Configuration loading
-└── lib.rs (8)             - Library exports
+│   ├── mod.rs           - Module exports
+│   ├── server.rs        - MCP subprocess with lazy loading
+│   └── manager.rs       - Tool routing with async state
+├── orchestrator/
+│   ├── mod.rs           - Module exports
+│   └── orchestrator.rs  - Multi-agent coordination
+├── provider.rs          - Provider detection
+├── display.rs           - Terminal UI with indicatif spinners
+├── interactive.rs       - Interactive REPL mode
+├── agent.rs             - Single-agent loop with tool execution
+├── config.rs            - Configuration loading
+└── lib.rs               - Library exports
 
-dmn_instructions.md (188)  - DMN system instructions (embedded via include_str!)
-
-Total: 2,495 lines (implementation) + 188 lines (embedded instructions)
-Binary: 3.6MB (release build)
+dmn_instructions.md      - DMN system instructions (embedded via include_str!)
 ```
 
 ## Dependencies
@@ -196,7 +243,20 @@ When adding features:
 
 ## Version History
 
+- **0.2.0**: Multi-agent orchestration, agents can invoke other agents as tools
+- **0.1.12**: TOML config support, mcpz preference for DMN mode
+- **0.1.11**: Default model changed to gemini-3-pro-preview, auto-prompt discovery
+- **0.1.10**: Thinking indicator with elapsed time
+- **0.1.9**: Fixed MCP server timeout (stderr deadlock)
 - **0.1.1**: Added native Gemini API support, 429 retry, spinners, unit tests
 - **0.1.0**: Initial release with multi-provider support and MCP integration
-- When I say "publish" all by itself, update the LOC and Binary size in the README, then write a git commit message, publish the crate and push the git updates. All at once.
-- Oh when I say "publish" do what I said before but also add a git tag and be sure to run tests and make sure the release builds
+
+## Publishing Notes
+
+When I say "publish" all by itself:
+1. Update LOC and Binary size in README.md
+2. Write git commit message
+3. Run tests and build release
+4. Add git tag
+5. Publish crate and push git updates
+- when insay "publish", FIRST run all tests, if they pass, git commit changes with a good summary message, update the LOC in thr Readme and the binary size, then commit, and then cargo publish

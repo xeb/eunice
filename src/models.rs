@@ -124,10 +124,25 @@ pub struct AssistantMessage {
 }
 
 /// MCP configuration file structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
-    #[serde(rename = "mcpServers")]
+    #[serde(rename = "mcpServers", default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+    #[serde(default)]
+    pub agents: HashMap<String, AgentConfig>,
+}
+
+/// Configuration for a single agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// System prompt (inline string or file path)
+    pub prompt: String,
+    /// MCP server names this agent can access
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// Agent names this agent can invoke
+    #[serde(default)]
+    pub can_invoke: Vec<String>,
 }
 
 /// Configuration for a single MCP server
