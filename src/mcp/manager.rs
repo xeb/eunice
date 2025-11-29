@@ -1,15 +1,45 @@
+use crate::mcp::http_server::HttpMcpServer;
 use crate::mcp::server::{McpServer, SpawnedServer};
 use crate::models::{McpConfig, Tool};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use tokio::task::JoinHandle;
 
+/// A ready MCP server (either stdio or HTTP)
+pub enum ReadyServer {
+    Stdio(McpServer),
+    Http(HttpMcpServer),
+}
+
+impl ReadyServer {
+    pub fn tools(&self) -> &[Tool] {
+        match self {
+            ReadyServer::Stdio(s) => &s.tools,
+            ReadyServer::Http(s) => &s.tools,
+        }
+    }
+
+    pub async fn call_tool(&mut self, tool_name: &str, arguments: serde_json::Value) -> Result<String> {
+        match self {
+            ReadyServer::Stdio(s) => s.call_tool(tool_name, arguments).await,
+            ReadyServer::Http(s) => s.call_tool(tool_name, arguments).await,
+        }
+    }
+
+    pub async fn stop(&mut self) -> Result<()> {
+        match self {
+            ReadyServer::Stdio(s) => s.stop().await,
+            ReadyServer::Http(_) => Ok(()), // HTTP servers don't need stopping
+        }
+    }
+}
+
 /// State of an MCP server during lazy initialization
 pub enum ServerState {
     /// Server is starting up in background
-    Initializing(JoinHandle<Result<McpServer>>),
+    Initializing(JoinHandle<Result<ReadyServer>>),
     /// Server is ready to use
-    Ready(McpServer),
+    Ready(ReadyServer),
     /// Server failed to start
     Failed(String),
 }
@@ -36,52 +66,103 @@ impl McpManager {
         self.silent = silent;
 
         for (name, server_config) in &config.mcp_servers {
-            if !silent {
-                eprintln!("Starting MCP server: {} (background)", name);
+            // Check if this is an HTTP server or stdio server
+            if server_config.is_http() {
+                self.start_http_server(name, server_config.url.as_ref().unwrap(), silent);
+            } else {
+                self.start_stdio_server(name, &server_config.command, &server_config.args, silent);
+            }
+        }
+    }
+
+    /// Start an HTTP-based MCP server in the background
+    fn start_http_server(&mut self, name: &str, url: &str, silent: bool) {
+        if !silent {
+            eprintln!("Connecting to HTTP MCP server: {} at {}", name, url);
+        }
+
+        let server_name = name.to_string();
+        let server_url = url.to_string();
+        let is_silent = silent;
+
+        let handle = tokio::spawn(async move {
+            let result = HttpMcpServer::connect(&server_name, &server_url).await;
+
+            if !is_silent {
+                match &result {
+                    Ok(server) => {
+                        eprintln!(
+                            "  {} ready (HTTP): {} tools ({})",
+                            server_name,
+                            server.tools.len(),
+                            server
+                                .tools
+                                .iter()
+                                .map(|t| t.function.name.clone())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("  {} failed (HTTP): {}", server_name, e);
+                    }
+                }
             }
 
-            // Spawn the process synchronously (fast, doesn't block)
-            match SpawnedServer::spawn(name, &server_config.command, &server_config.args) {
-                Ok(spawned) => {
-                    let server_name = name.clone();
-                    let is_silent = silent;
+            result.map(ReadyServer::Http)
+        });
 
-                    // Spawn async initialization in background
-                    let handle = tokio::spawn(async move {
-                        let result = spawned.initialize().await;
-                        if !is_silent {
-                            match &result {
-                                Ok(server) => {
-                                    eprintln!(
-                                        "  {} ready: {} tools ({})",
-                                        server_name,
-                                        server.tools.len(),
-                                        server
-                                            .tools
-                                            .iter()
-                                            .map(|t| t.function.name.clone())
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("  {} failed: {}", server_name, e);
-                                }
+        self.servers
+            .insert(name.to_string(), ServerState::Initializing(handle));
+    }
+
+    /// Start a stdio-based MCP server in the background
+    fn start_stdio_server(&mut self, name: &str, command: &str, args: &[String], silent: bool) {
+        if !silent {
+            eprintln!("Starting MCP server: {} (background)", name);
+        }
+
+        // Spawn the process synchronously (fast, doesn't block)
+        match SpawnedServer::spawn(name, command, args) {
+            Ok(spawned) => {
+                let server_name = name.to_string();
+                let is_silent = silent;
+
+                // Spawn async initialization in background
+                let handle = tokio::spawn(async move {
+                    let result = spawned.initialize().await;
+                    if !is_silent {
+                        match &result {
+                            Ok(server) => {
+                                eprintln!(
+                                    "  {} ready: {} tools ({})",
+                                    server_name,
+                                    server.tools.len(),
+                                    server
+                                        .tools
+                                        .iter()
+                                        .map(|t| t.function.name.clone())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("  {} failed: {}", server_name, e);
                             }
                         }
-                        result
-                    });
-
-                    self.servers
-                        .insert(name.clone(), ServerState::Initializing(handle));
-                }
-                Err(e) => {
-                    if !silent {
-                        eprintln!("Failed to spawn MCP server '{}': {}", name, e);
                     }
-                    self.servers
-                        .insert(name.clone(), ServerState::Failed(e.to_string()));
+                    result.map(ReadyServer::Stdio)
+                });
+
+                self.servers
+                    .insert(name.to_string(), ServerState::Initializing(handle));
+            }
+            Err(e) => {
+                if !silent {
+                    eprintln!("Failed to spawn MCP server '{}': {}", name, e);
                 }
+                self.servers
+                    .insert(name.to_string(), ServerState::Failed(e.to_string()));
             }
         }
     }
@@ -141,7 +222,7 @@ impl McpManager {
         let mut tools = Vec::new();
         for state in self.servers.values() {
             if let ServerState::Ready(server) = state {
-                tools.extend(server.tools.clone());
+                tools.extend(server.tools().iter().cloned());
             }
         }
         tools
@@ -199,12 +280,12 @@ impl McpManager {
         for (name, state) in &self.servers {
             match state {
                 ServerState::Ready(server) => {
-                    let tool_names: Vec<String> = server
-                        .tools
+                    let tools = server.tools();
+                    let tool_names: Vec<String> = tools
                         .iter()
                         .map(|t| t.function.name.clone())
                         .collect();
-                    info.push((name.clone(), server.tools.len(), tool_names));
+                    info.push((name.clone(), tools.len(), tool_names));
                 }
                 ServerState::Initializing(_) => {
                     info.push((name.clone(), 0, vec!["(starting...)".to_string()]));
@@ -234,6 +315,20 @@ impl McpManager {
         }
 
         Ok(())
+    }
+
+    /// Get information about failed servers for error reporting to the model
+    pub fn get_failed_servers(&self) -> Vec<(String, String)> {
+        self.servers
+            .iter()
+            .filter_map(|(name, state)| {
+                if let ServerState::Failed(err) = state {
+                    Some((name.clone(), err.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Check if any servers are loaded (in any state)

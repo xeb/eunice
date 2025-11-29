@@ -16,18 +16,18 @@ pub fn get_dmn_mcp_config() -> McpConfig {
     servers.insert(
         "shell".to_string(),
         if use_mcpz {
-            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "shell".into()] }
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "shell".into()], url: None }
         } else {
-            McpServerConfig { command: "uvx".into(), args: vec!["git+https://github.com/emsi/mcp-server-shell".into()] }
+            McpServerConfig { command: "uvx".into(), args: vec!["git+https://github.com/emsi/mcp-server-shell".into()], url: None }
         },
     );
 
     servers.insert(
         "filesystem".to_string(),
         if use_mcpz {
-            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()] }
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()], url: None }
         } else {
-            McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()] }
+            McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()], url: None }
         },
     );
 
@@ -36,6 +36,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         McpServerConfig {
             command: "uvx".to_string(),
             args: vec!["mcp-text-editor".to_string()],
+            url: None,
         },
     );
 
@@ -44,6 +45,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         McpServerConfig {
             command: "npx".to_string(),
             args: vec!["-y".to_string(), "mcp-ripgrep@latest".to_string()],
+            url: None,
         },
     );
 
@@ -56,6 +58,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
                 "@modelcontextprotocol/server-memory".to_string(),
                 "~/.eunice".to_string(),
             ],
+            url: None,
         },
     );
 
@@ -64,6 +67,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         McpServerConfig {
             command: "npx".to_string(),
             args: vec!["-y".to_string(), "@brave/brave-search-mcp-server".to_string()],
+            url: None,
         },
     );
 

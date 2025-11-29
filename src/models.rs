@@ -146,10 +146,27 @@ pub struct AgentConfig {
 }
 
 /// Configuration for a single MCP server
+/// Supports two transport types:
+/// - Stdio: command + args (spawn a subprocess)
+/// - HTTP: url (connect to remote Streamable HTTP server)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
+    /// Command to spawn (for stdio transport)
+    #[serde(default)]
     pub command: String,
+    /// Arguments for the command (for stdio transport)
+    #[serde(default)]
     pub args: Vec<String>,
+    /// URL for HTTP transport (e.g., "http://localhost:3323/mcp")
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+impl McpServerConfig {
+    /// Check if this is an HTTP-based server
+    pub fn is_http(&self) -> bool {
+        self.url.is_some()
+    }
 }
 
 /// JSON-RPC request

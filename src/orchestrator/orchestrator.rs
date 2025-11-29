@@ -203,9 +203,25 @@ impl AgentOrchestrator {
     ) -> Result<String> {
         let indent = "  ".repeat(depth);
 
+        // Build prompt with failed server info
+        let failed = mcp_manager.get_failed_servers();
+        let final_prompt = if failed.is_empty() {
+            prompt.to_string()
+        } else {
+            let errors: Vec<String> = failed
+                .iter()
+                .map(|(name, err)| format!("- {}: {}", name, err))
+                .collect();
+            format!(
+                "{}\n\n[SYSTEM NOTE: The following MCP servers failed to connect. You cannot use tools from these servers:\n{}]",
+                prompt,
+                errors.join("\n")
+            )
+        };
+
         // Add user message
         conversation_history.push(Message::User {
-            content: prompt.to_string(),
+            content: final_prompt,
         });
 
         let tools_option = if tools.is_empty() { None } else { Some(tools) };

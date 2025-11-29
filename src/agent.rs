@@ -17,12 +17,32 @@ pub async fn run_agent(
     conversation_history: &mut Vec<Message>,
     dmn_mode: bool,
 ) -> Result<()> {
+    // Build the prompt, including any failed server info
+    let final_prompt = if let Some(ref manager) = mcp_manager {
+        let failed = manager.get_failed_servers();
+        if failed.is_empty() {
+            prompt.to_string()
+        } else {
+            let errors: Vec<String> = failed
+                .iter()
+                .map(|(name, err)| format!("- {}: {}", name, err))
+                .collect();
+            format!(
+                "{}\n\n[SYSTEM NOTE: The following MCP servers failed to connect. You cannot use tools from these servers:\n{}]",
+                prompt,
+                errors.join("\n")
+            )
+        }
+    } else {
+        prompt.to_string()
+    };
+
     // Add user message to history
     conversation_history.push(Message::User {
-        content: prompt.to_string(),
+        content: final_prompt.clone(),
     });
 
-    display::debug(&format!("Sending prompt: {}", prompt), verbose);
+    display::debug(&format!("Sending prompt: {}", final_prompt), verbose);
 
     loop {
         // Get available tools
