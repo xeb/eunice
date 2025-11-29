@@ -251,12 +251,12 @@ When adding features:
 - **0.1.1**: Added native Gemini API support, 429 retry, spinners, unit tests
 - **0.1.0**: Initial release with multi-provider support and MCP integration
 
-## Publishing Notes
+## Publishing
 
-When I say "publish" all by itself:
-1. Update LOC and Binary size in README.md
-2. Write git commit message
-3. Run tests and build release
-4. Add git tag
-5. Publish crate and push git updates
-- when insay "publish", FIRST run all tests, if they pass, git commit changes with a good summary message, update the LOC in thr Readme and the binary size, then commit, and then cargo publish
+When the user says "publish":
+1. Run `cargo test` - all tests must pass
+2. Update LOC and binary size in README.md
+3. Git commit with descriptive message
+4. Git tag (e.g., `v0.2.1`)
+5. Git push (with tags)
+6. `cargo publish`

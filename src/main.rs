@@ -9,7 +9,7 @@ mod orchestrator;
 mod provider;
 
 use crate::client::Client;
-use crate::config::{get_dmn_mcp_config, load_mcp_config, DMN_INSTRUCTIONS};
+use crate::config::{get_dmn_mcp_config, load_mcp_config, DMN_INSTRUCTIONS, LLMS_TXT, LLMS_FULL_TXT};
 use crate::mcp::McpManager;
 use crate::models::{McpConfig, Message};
 use crate::orchestrator::AgentOrchestrator;
@@ -38,6 +38,14 @@ struct Args {
     /// Show all available models
     #[arg(long)]
     list_models: bool,
+
+    /// Output llms.txt (LLM context index)
+    #[arg(long = "llms-txt")]
+    llms_txt: bool,
+
+    /// Output llms-full.txt (full LLM context)
+    #[arg(long = "llms-full-txt")]
+    llms_full_txt: bool,
 
     /// Path to MCP configuration JSON
     #[arg(long)]
@@ -228,6 +236,18 @@ async fn main() -> Result<()> {
     // Handle --list-models
     if args.list_models {
         display::print_model_list();
+        return Ok(());
+    }
+
+    // Handle --llms-txt
+    if args.llms_txt {
+        print!("{}", LLMS_TXT);
+        return Ok(());
+    }
+
+    // Handle --llms-full-txt
+    if args.llms_full_txt {
+        print!("{}", LLMS_FULL_TXT);
         return Ok(());
     }
 

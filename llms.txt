@@ -1,0 +1,36 @@
+# Eunice
+
+> An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama. Features multi-agent orchestration, autonomous DMN mode, and MCP tool integration.
+
+Eunice provides a single CLI for multiple AI providers with automatic model detection, tool execution via Model Context Protocol (MCP), and a unique multi-agent system where agents can invoke other agents as tools.
+
+## Core Documentation
+
+- [README.md](README.md): Installation, quick start, CLI options, provider configuration, and feature overview
+- [CLAUDE.md](CLAUDE.md): Development guide, architecture, testing, and contribution guidelines
+
+## Configuration
+
+- [dmn_instructions.md](dmn_instructions.md): System instructions for autonomous Default Mode Network (DMN) mode
+- [MULTIAGENT_DESIGN_1.md](MULTIAGENT_DESIGN_1.md): Multi-agent architecture design where agents invoke other agents as tools
+
+## Examples
+
+- [examples/real_multi_agent/](examples/real_multi_agent/): Restaurant simulation demonstrating multi-agent orchestration
+- [examples/real_multi_agent/eunice.toml](examples/real_multi_agent/eunice.toml): Example multi-agent configuration with 4 cooperating agents
+- [examples/just_shell_inspection/](examples/just_shell_inspection/): Simple MCP shell server example
+
+## Source Structure
+
+- [src/main.rs](src/main.rs): CLI entry point, argument parsing, mode selection
+- [src/client.rs](src/client.rs): HTTP client with provider-specific handling
+- [src/provider.rs](src/provider.rs): Model detection and provider routing
+- [src/agent.rs](src/agent.rs): Single-agent conversation loop
+- [src/orchestrator/](src/orchestrator/): Multi-agent coordination system
+- [src/mcp/](src/mcp/): MCP server management and tool routing
+- [src/models.rs](src/models.rs): Data structures for messages, tools, and configs
+
+## Optional
+
+- [Cargo.toml](Cargo.toml): Rust package configuration and dependencies
+- [create_demo.sh](create_demo.sh): Script to generate demo GIFs using asciinema

@@ -1,0 +1,1464 @@
+# Eunice
+
+> An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama. Features multi-agent orchestration, autonomous DMN mode, and MCP tool integration.
+
+This file contains the complete documentation for Eunice in a single file for LLM consumption.
+
+---
+
+## README
+
+# eunice
+
+[![Crates.io](https://img.shields.io/crates/v/eunice.svg)](https://crates.io/crates/eunice)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
+
+**3,155 lines of Rust** • **4.1MB binary** - Emphasizing "sophisticated simplicity".
+
+**Homepage**: [longrunningagents.com](https://longrunningagents.com)
+
+## Features
+
+- **Multi-Provider Support**: OpenAI, Google Gemini, Anthropic Claude, and local Ollama models
+- **Unified API**: Uses OpenAI-compatible endpoints for all providers
+- **MCP Integration**: Model Context Protocol servers for extensible tool capabilities
+- **Multi-Agent Orchestration**: Agents can invoke other agents as tools for complex workflows
+- **Smart Defaults**: Automatically selects the best available model
+- **DMN Mode**: Default Mode Network - autonomous batch execution with pre-configured MCP tools for software engineering
+- **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
+- **Interactive Mode**: Multi-turn conversations with context preservation
+- **Progress Spinners**: Visual feedback during tool execution
+
+## Installation
+
+### From crates.io
+
+```bash
+cargo install eunice
+```
+
+### From Source
+
+```bash
+cargo build --release
+```
+
+The binary will be at `target/release/eunice`.
+
+### Install Globally (from source)
+
+```bash
+cargo install --path .
+```
+
+## Quick Start
+
+![Basic Usage](assets/demo_basic.gif)
+
+```bash
+# Zero-config: auto-discovers eunice.json + prompt.txt in current directory
+eunice
+
+# Use smart default model (prefers Gemini)
+eunice "What files are in this directory?"
+
+# Specify a model
+eunice --model gemini-2.5-flash "Explain this code"
+eunice --model sonnet "Review this implementation"
+eunice --model llama3.1:latest "Summarize this text"
+
+# Interactive mode
+eunice --interact
+
+# With MCP tools
+eunice --config ./mcp-config.json "What time is it?"
+
+# DMN mode - autonomous batch execution (auto-loads 7 MCP servers)
+eunice --dmn "Fix the bug in main.rs"
+```
+
+## Command Line Options
+
+```
+Usage: eunice [OPTIONS] [PROMPT]
+
+Arguments:
+  [PROMPT]  Prompt as positional argument (can be file path or string)
+
+Options:
+      --model <MODEL>           AI model to use
+      --prompt <PROMPT>         Prompt as file path or string
+      --tool-output-limit <N>   Limit tool output display (default: 50, 0=unlimited)
+      --list-models             Show all available models
+      --config <FILE>           Path to MCP configuration JSON/TOML
+      --no-mcp                  Disable MCP even if eunice.json exists
+      --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
+      --agent <NAME>            Run as specific agent (default: root if agents configured)
+      --list-agents             List configured agents
+  -i, --interact                Interactive mode for multi-turn conversations
+      --silent                  Suppress all output except AI responses
+      --verbose                 Enable verbose debug output
+      --events                  Output JSON-RPC events to stdout
+  -h, --help                    Print help
+  -V, --version                 Print version
+```
+
+## Provider Support
+
+### OpenAI
+- Models: `gpt-5.1`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`
+- Legacy: `gpt-4o`, `gpt-4-turbo`, `o1`, `o3`, `o3-mini`
+- Requires: `OPENAI_API_KEY`
+
+### Google Gemini
+- Models: `gemini-3-pro-preview` (default), `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro`
+- Requires: `GEMINI_API_KEY`
+
+### Anthropic Claude
+- Models: `opus`, `sonnet`, `haiku` (aliases for latest versions)
+- Version aliases: `opus-4.5`, `opus-4.1`, `sonnet-4.5`, `haiku-4.5`
+- Full names: `claude-opus-4-5-20251101`, `claude-sonnet-4-20250514`, etc.
+- Requires: `ANTHROPIC_API_KEY`
+
+### Ollama (Local)
+- Models: Any installed model (`llama3.1:latest`, `deepseek-r1:latest`, etc.)
+- Requires: Ollama running at `http://localhost:11434` (or `OLLAMA_HOST`)
+
+## Smart Model Selection
+
+When no model is specified, eunice automatically selects the best available:
+
+1. **Gemini** (if API key set): `gemini-3-pro-preview`
+2. **Anthropic** (if API key set): `sonnet` (Claude Sonnet 4)
+3. **OpenAI** (if API key set): `gpt-5.1`
+4. **Ollama** (if running): `llama3.1:latest` → `deepseek-r1:latest` → first available
+
+## Auto-Prompt Discovery
+
+When no prompt is specified (via argument or `--prompt`), eunice automatically looks for prompt files in the current directory:
+
+1. `prompt.txt`
+2. `prompt.md`
+3. `instruction.txt`
+4. `instruction.md`
+5. `instructions.txt`
+6. `instructions.md`
+
+The first file found is used as the prompt. This enables a workflow where you can:
+
+```bash
+# Create your prompt file
+echo "Analyze this codebase and list all TODO comments" > prompt.txt
+
+# Run eunice without specifying a prompt
+eunice --dmn
+```
+
+If no prompt file is found and no prompt is given, eunice enters interactive mode.
+
+## MCP Configuration
+
+Create a `eunice.json` or `eunice.toml` in your working directory for automatic MCP server loading.
+
+### JSON Format
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"]
+    }
+  }
+}
+```
+
+### TOML Format
+
+```toml
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[mcpServers.time]
+command = "uvx"
+args = ["mcp-server-time"]
+
+[mcpServers.time_mcpz]
+command = "mcpz"
+args = ["run", "mcp-server-time"]
+```
+
+### Using mcpz
+
+[mcpz](https://github.com/xeb/mcpz) is a lightweight MCP server runner that simplifies running MCP tools:
+
+```bash
+# Install mcpz
+cargo install mcpz
+
+# Run MCP servers via mcpz
+mcpz server shell        # Shell execution
+mcpz run mcp-server-time # Run any MCP server
+```
+
+Tools are registered with server name prefixes (e.g., `filesystem_read_file`, `time_get_current_time`).
+
+### Lazy Loading
+
+MCP servers are spawned in parallel at startup and initialize in the background. This means:
+
+- **Fast startup**: The prompt appears immediately without waiting for servers
+- **Parallel initialization**: All servers start concurrently, not sequentially
+- **On-demand waiting**: If a tool is called before its server is ready, eunice automatically waits for it
+- **Retry with backoff**: Server initialization retries automatically with exponential backoff (100ms → 1s)
+
+In interactive mode, you'll see `(starting...)` next to servers that are still initializing. In single-shot mode, servers are awaited before the first API call.
+
+## DMN Mode (Default Mode Network)
+
+![DMN Mode](assets/demo_dmn.gif)
+
+Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution with 7 pre-configured MCP servers:
+
+- **shell**: Execute shell commands
+- **filesystem**: File operations
+- **text-editor**: Line-based editing with conflict detection
+- **grep**: Fast code search via ripgrep
+- **memory**: Persistent memory storage
+- **web**: Web search (requires `BRAVE_API_KEY`)
+- **fetch**: HTTP requests
+
+### Autonomous Execution
+
+DMN mode executes tasks autonomously without stopping for confirmation. It makes reasonable decisions and proceeds through all steps automatically, following comprehensive system instructions for software engineering best practices.
+
+### Intelligent Rate Limiting
+
+When DMN mode encounters API rate limits (429 errors), it automatically:
+- Waits 6 seconds
+- Retries the request once
+- Displays progress: `⏳ Rate limit hit (429). DMN mode: retrying in 6 seconds...`
+
+This ensures long-running batch tasks can complete without manual intervention.
+
+## Multi-Agent Mode
+
+![Multi-Agent Mode](assets/demo_multiagent.gif)
+
+Eunice supports multi-agent orchestration where agents can invoke other agents as tools.
+
+### Configuration
+
+Add an `[agents]` section to your `eunice.toml`:
+
+```toml
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[mcpServers.filesystem]
+command = "mcpz"
+args = ["server", "filesystem"]
+
+[agents.root]
+prompt = "You are the coordinator. Delegate tasks to workers."
+tools = []
+can_invoke = ["worker"]
+
+[agents.worker]
+prompt = "agents/worker.md"  # Can be file path
+tools = ["shell", "filesystem"]
+can_invoke = []
+```
+
+### Usage
+
+```bash
+# Auto-uses 'root' agent when [agents] section exists
+eunice "Build a web app"
+
+# Use specific agent
+eunice --agent worker "Run the tests"
+
+# List configured agents
+eunice --list-agents
+```
+
+### How It Works
+
+1. When `[agents]` section exists in config, multi-agent mode auto-enables
+2. Each agent gets `invoke_*` tools for agents in their `can_invoke` list
+3. Agent prompts can be inline strings or file paths (`.md`, `.txt`)
+4. MCP tools are filtered per-agent based on `tools` list
+5. Agents can invoke other agents recursively with depth tracking
+
+### Example: Restaurant Simulation
+
+See [examples/real_multi_agent](examples/real_multi_agent) for a complete example simulating a restaurant with counter, chef, cook, and supplier agents.
+
+## Project Structure
+
+```
+├── Cargo.toml           # Package configuration
+├── Makefile             # Build commands with publish automation
+├── CLAUDE.md            # Development guide
+├── dmn_instructions.md  # DMN system instructions
+├── src/
+│   ├── main.rs          # Entry point, CLI parsing
+│   ├── models.rs        # Data structures + AgentConfig
+│   ├── client.rs        # HTTP client with provider support
+│   ├── mcp/
+│   │   ├── mod.rs       # Module exports
+│   │   ├── server.rs    # MCP subprocess with lazy loading
+│   │   └── manager.rs   # Tool routing with async state
+│   ├── orchestrator/
+│   │   ├── mod.rs       # Module exports
+│   │   └── orchestrator.rs  # Multi-agent coordination
+│   ├── provider.rs      # Provider detection
+│   ├── display.rs       # Terminal UI with spinners
+│   ├── interactive.rs   # Interactive mode
+│   ├── agent.rs         # Single-agent loop
+│   ├── config.rs        # Configuration loading
+│   └── lib.rs           # Library exports
+├── examples/
+│   └── real_multi_agent/  # Restaurant simulation example
+└── README.md
+```
+
+See the full [Component Map](examples/codebase_archaeologist/workspace/component_map.md) for architecture details. *This was generated by eunice - see [examples/codebase_archaeologist](examples/codebase_archaeologist) for more.*
+
+## Dependencies
+
+- **tokio**: Async runtime
+- **reqwest**: HTTP client with timeout support
+- **clap**: CLI argument parsing with aliases
+- **serde/serde_json**: Serialization
+- **colored**: Terminal colors
+- **crossterm**: Terminal control for spinners
+- **anyhow/thiserror**: Error handling
+
+## Examples
+
+### Basic Usage
+
+```bash
+# Simple prompt
+eunice "What is 2+2?"
+
+# Read from file
+eunice --prompt ./question.txt
+
+# Silent mode (only AI response)
+eunice --silent "Summarize this in one sentence"
+```
+
+### With MCP Tools
+
+```bash
+# Use time server
+eunice --config ./config.json "What time is it in Tokyo?"
+
+# The AI will call time_get_current_time or time_convert_time
+```
+
+### Interactive Session
+
+```bash
+$ eunice --interact --model sonnet
+┌──────────────────────────────────────────────────┐
+│ Model Info                                       │
+├──────────────────────────────────────────────────┤
+│ 🧠 Model: claude-sonnet-4-20250514 (Anthropic) │
+└──────────────────────────────────────────────────┘
+
+> What files are in this directory?
+[Response with tool calls...]
+
+> Now explain the main.rs file
+[Continues with conversation context...]
+
+> exit
+```
+
+### DMN Mode
+
+```bash
+# Complex software engineering task - runs autonomously
+eunice --dmn "Find all TODO comments and create issues for them"
+
+# The AI has access to shell, filesystem, grep, and more
+# Executes all steps without stopping for confirmation
+# Automatically handles rate limits with retry
+
+# Example output:
+# 🧠 DMN Mode
+# 🔧 grep_ripgrep({"pattern": "TODO"})
+# ⠹ Running grep_ripgrep
+# → Found 12 TODO comments
+# ...
+# ⏳ Rate limit hit (429). DMN mode: retrying in 6 seconds...
+# [continues automatically after retry]
+```
+
+## Environment Variables
+
+```bash
+# API Keys
+export OPENAI_API_KEY="sk-..."
+export GEMINI_API_KEY="..."
+export ANTHROPIC_API_KEY="..."
+export BRAVE_API_KEY="..."  # For web search in DMN mode
+
+# Ollama host (optional)
+export OLLAMA_HOST="http://localhost:11434"
+```
+
+## License
+
+MIT
+
+---
+
+## Development Guide (CLAUDE.md)
+
+# Eunice - Development Guide
+
+## About
+
+Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It supports **multi-agent orchestration** where agents can invoke other agents as tools. It emphasizes "sophisticated simplicity".
+
+## Architecture
+
+### Provider System
+
+The codebase uses a provider abstraction layer that routes requests to different AI APIs:
+
+```
+User Input → Provider Detection → Client → API Request → Response
+```
+
+**Special Case: Gemini API Dual Support**
+- Most models: Use OpenAI-compatible API (`/v1beta/openai/`)
+- `gemini-3-pro-preview`: Uses native Gemini API (`/v1beta/models/{model}:generateContent`)
+
+### Key Components
+
+1. **Provider Detection** (`src/provider.rs`)
+   - Detects model → provider mapping
+   - Handles model aliases (e.g., `sonnet` → `claude-sonnet-4-20250514`)
+   - Sets `use_native_gemini_api` flag for special models
+
+2. **Client** (`src/client.rs`)
+   - HTTP client with provider-specific headers
+   - Message format conversion (OpenAI ↔ Gemini)
+   - 429 retry logic with 6-second backoff (DMN mode only)
+
+3. **MCP Integration** (`src/mcp/`)
+   - Manages multiple MCP server subprocesses
+   - JSON-RPC communication
+   - Tool discovery and routing
+
+4. **DMN Mode** (`src/config.rs`)
+   - Default Mode Network: Autonomous batch execution
+   - Pre-configured with 7 MCP servers
+   - Includes comprehensive system instructions
+
+5. **Agent Loop** (`src/agent.rs`)
+   - Main conversation loop
+   - Tool execution with spinners
+   - Conversation history management
+
+6. **Multi-Agent Orchestrator** (`src/orchestrator/`)
+   - Manages agent configurations and prompts
+   - Creates `invoke_*` tools for agent-to-agent calls
+   - Filters MCP tools by agent permissions
+   - Handles recursive agent invocation with depth tracking
+
+## Testing
+
+The project includes **30 unit tests** covering:
+- Provider detection logic
+- Message format conversions
+- Response parsing
+- Gemini API serialization/deserialization
+- Multi-agent orchestrator logic
+
+Run tests with:
+```bash
+cargo test
+# or
+make test
+```
+
+## Line Count and Binary Size Guidelines
+
+When updating the codebase, **ALWAYS** update both metrics in README.md:
+
+### Count Implementation Lines
+```bash
+for file in src/*.rs src/mcp/*.rs src/orchestrator/*.rs; do
+  test_start=$(grep -n "^#\[cfg(test)\]" "$file" | cut -d: -f1 | head -1)
+  if [ -n "$test_start" ]; then
+    lines=$((test_start - 1))
+  else
+    lines=$(wc -l < "$file")
+  fi
+  total=$((total + lines))
+done
+echo "Total: $total lines"
+```
+
+### Check Binary Size
+```bash
+make binary-size
+# or
+cargo build --release && ls -lh target/release/eunice
+```
+
+**Important**: Update both values in README.md after any code changes.
+
+## Development Workflow
+
+### Adding a New Provider
+
+1. Update `Provider` enum in `src/models.rs`
+2. Add detection logic in `src/provider.rs::detect_provider()`
+3. Handle authentication in `src/client.rs::new()`
+4. Add provider-specific logic if needed
+5. Add tests in `src/provider.rs`
+
+### Adding a New Model
+
+1. If using existing provider API format, just add to available models list
+2. If using different API format (like gemini-3-pro-preview):
+   - Add flag to `ProviderInfo`
+   - Implement format conversion in `Client`
+   - Add tests for conversions
+
+### Publishing
+
+Update version and publish:
+```bash
+make publish  # Bumps patch version and publishes to crates.io
+```
+
+## Native Gemini API Implementation
+
+The `gemini-3-pro-preview` model uses a different API format:
+
+**Request Format:**
+```json
+{
+  "contents": [
+    {
+      "parts": [{"text": "user message"}],
+      "role": "user"
+    }
+  ]
+}
+```
+
+**Authentication:**
+- Header: `x-goog-api-key: $GEMINI_API_KEY`
+- URL: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent`
+
+**Conversion Logic:**
+- `Message::User` → role: "user"
+- `Message::Assistant` → role: "model"
+- `Message::Tool` → skipped (not supported)
+
+## Multi-Agent Architecture
+
+Eunice supports multi-agent orchestration where agents can invoke other agents as tools.
+
+### Configuration
+
+Agents are defined in `eunice.toml`:
+
+```toml
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[agents.root]
+prompt = "You are the coordinator..."
+tools = []                           # MCP servers this agent can use
+can_invoke = ["worker"]              # Agents this agent can call
+
+[agents.worker]
+prompt = "agents/worker.md"          # Can be file path
+tools = ["shell"]
+can_invoke = []
+```
+
+### How It Works
+
+1. When `[agents]` section exists, multi-agent mode is auto-enabled
+2. Default agent is `root` (or specify with `--agent name`)
+3. Each agent gets `invoke_*` tools for agents in `can_invoke`
+4. Agent invocation is recursive with depth tracking
+5. MCP tools are filtered per-agent based on `tools` list
+
+### CLI Usage
+
+```bash
+eunice "task"                    # Uses root agent if agents configured
+eunice --agent worker "task"     # Use specific agent
+eunice --list-agents             # Show configured agents
+```
+
+## Key Design Decisions
+
+1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
+2. **Per-Model API Selection**: Uses `use_native_gemini_api` flag for special cases
+3. **Message Format Abstraction**: Internal `Message` enum converts to provider formats
+4. **DMN Mode for Autonomy**: Automatic retry and continuous execution
+5. **MCP for Extensibility**: Tools provided via Model Context Protocol servers
+6. **Agents as Tools**: Agent-to-agent calls are just tool calls, reusing MCP infrastructure
+
+## File Structure
+
+```
+src/
+├── main.rs              - CLI entry, arg parsing, multi-agent detection
+├── models.rs            - Data structures + AgentConfig
+├── client.rs            - HTTP client, format conversions
+├── mcp/
+│   ├── mod.rs           - Module exports
+│   ├── server.rs        - MCP subprocess with lazy loading
+│   └── manager.rs       - Tool routing with async state
+├── orchestrator/
+│   ├── mod.rs           - Module exports
+│   └── orchestrator.rs  - Multi-agent coordination
+├── provider.rs          - Provider detection
+├── display.rs           - Terminal UI with indicatif spinners
+├── interactive.rs       - Interactive REPL mode
+├── agent.rs             - Single-agent loop with tool execution
+├── config.rs            - Configuration loading
+└── lib.rs               - Library exports
+
+dmn_instructions.md      - DMN system instructions (embedded via include_str!)
+```
+
+## Dependencies
+
+- **tokio**: Async runtime for HTTP and MCP communication
+- **reqwest**: HTTP client with timeout support
+- **serde/serde_json**: Serialization
+- **clap**: CLI with aliases and env var support
+- **colored**: Terminal colors
+- **indicatif**: Progress spinners with braille characters
+- **crossterm**: Terminal control
+- **anyhow/thiserror**: Error handling
+
+## Contributing
+
+When adding features:
+1. Write implementation code first
+2. Add unit tests
+3. Update line counts and binary size:
+   - Count implementation lines (see "Line Count Guidelines")
+   - Run `make binary-size` to get release binary size
+   - Update both values in README.md
+4. Update this CLAUDE.md file if structure changed
+5. Run `make test` to verify
+6. Run `cargo build --release` to check for warnings
+
+## Version History
+
+- **0.2.0**: Multi-agent orchestration, agents can invoke other agents as tools
+- **0.1.12**: TOML config support, mcpz preference for DMN mode
+- **0.1.11**: Default model changed to gemini-3-pro-preview, auto-prompt discovery
+- **0.1.10**: Thinking indicator with elapsed time
+- **0.1.9**: Fixed MCP server timeout (stderr deadlock)
+- **0.1.1**: Added native Gemini API support, 429 retry, spinners, unit tests
+- **0.1.0**: Initial release with multi-provider support and MCP integration
+
+## Publishing
+
+When the user says "publish":
+1. Run `cargo test` - all tests must pass
+2. Update LOC and binary size in README.md
+3. Git commit with descriptive message
+4. Git tag (e.g., `v0.2.1`)
+5. Git push (with tags)
+6. `cargo publish`
+---
+
+## DMN Instructions
+
+# SYSTEM INSTRUCTIONS - DEFAULT MODE NETWORK (DMN)
+
+You are running in **autonomous batch mode**. Execute ALL steps without stopping for confirmation. Do not ask questions - make reasonable decisions and proceed. Complete the entire task from start to finish without user interaction.
+
+You are a CLI agent specializing in software engineering tasks. Your primary goal is to help users safely and efficiently, adhering strictly to the following instructions and utilizing your available MCP tools.
+
+## Core Mandates
+
+**Autonomous Execution**: Make reasonable decisions independently. Do not stop to ask for clarification - infer intent from context and proceed with the most sensible approach. If multiple valid approaches exist, choose the most conventional one.
+
+**Conventions**: Rigorously adhere to existing project conventions when reading or modifying code. Analyze surrounding code, tests, and configuration first.
+
+**Libraries/Frameworks**: NEVER assume a library/framework is available or appropriate. Verify its established usage within the project (check imports, configuration files like 'package.json', 'Cargo.toml', 'requirements.txt', 'build.gradle', etc., or observe neighboring files) before employing it.
+
+**Style & Structure**: Mimic the style (formatting, naming), structure, framework choices, typing, and architectural patterns of existing code in the project.
+
+**Idiomatic Changes**: When editing, understand the local context (imports, functions/classes) to ensure your changes integrate naturally and idiomatically.
+
+**Comments**: Add code comments sparingly. Focus on *why* something is done, especially for complex logic, rather than *what* is done. Only add high-value comments if necessary for clarity or if requested by the user. Do not edit comments that are separate from the code you are changing. NEVER talk to the user or describe your changes through comments.
+
+**Proactiveness**: Fulfill the user's request thoroughly. When adding features or fixing bugs, this includes adding tests to ensure quality. Consider all created files, especially tests, to be permanent artifacts unless the user says otherwise.
+
+**No Summaries**: After completing a code modification or file operation, do not provide summaries unless asked.
+
+**No Reverts**: Do not revert changes to the codebase unless asked to do so by the user. Only revert changes made by you if they have resulted in an error or if the user has explicitly asked you to revert the changes.
+
+## Primary Workflows
+
+### Software Engineering
+
+When requested to perform tasks like fixing bugs, adding features, refactoring, or explaining code:
+
+**Understand & Strategize**: Think about the user's request and the relevant codebase context. For complex refactoring or system-wide analysis, use filesystem and grep tools to build comprehensive understanding. For simple, targeted searches (like finding a specific function name or file path), use search tools directly.
+
+**Plan**: Build a coherent plan based on your understanding. For complex tasks, break them down into smaller subtasks and use the todos tools to track progress. Share a concise yet clear plan with the user if it helps. Use an iterative development process that includes writing unit tests to verify changes.
+
+**Implement**: Use available MCP tools (filesystem write/edit, shell execution) to act on the plan, strictly adhering to project conventions.
+
+**Verify (Tests)**: If applicable, verify changes using the project's testing procedures. Identify test commands by examining README files, build/package configuration, or existing test patterns. NEVER assume standard test commands.
+
+**Verify (Standards)**: After making code changes, execute project-specific build, linting, and type-checking commands (e.g., 'tsc', 'npm run lint', 'ruff check .'). This ensures code quality and adherence to standards.
+
+**Finalize**: After all verification passes, consider the task complete. Do not remove or revert any changes or created files. Await the user's next instruction.
+
+### New Applications
+
+When building new applications from scratch - autonomously implement and deliver a visually appealing, substantially complete, and functional prototype:
+
+- Understand requirements and identify core features, UX, aesthetic, platform constraints
+- Propose a clear, concise plan with technology stack and approach
+- Obtain user approval for the plan
+- Implement each feature using shell commands for scaffolding (npm init, create-react-app, etc.)
+- Verify work against requirements, fix bugs, ensure no compile errors
+- Provide instructions on how to start the application and request feedback
+
+## Operational Guidelines
+
+### Tone and Style
+
+- Concise & Direct: Professional, direct, and concise tone suitable for CLI
+- Minimal Output: Aim for fewer than 3 lines of text output per response when practical
+- No Chitchat: Avoid conversational filler, preambles, or postambles
+- Formatting: Use GitHub-flavored Markdown rendered in monospace
+- Tools vs. Text: Use tools for actions, text output only for communication
+- Handling Inability: If unable to fulfill request, state so briefly with alternatives if appropriate
+
+### Security and Safety
+
+- Explain Critical Commands: Before executing commands that modify file system, codebase, or system state, provide brief explanation of purpose and impact
+- Security First: Always apply security best practices. Never introduce code that exposes, logs, or commits secrets, API keys, or sensitive information
+
+### Tool Usage
+
+- Parallelism: Execute multiple independent tool calls in parallel when feasible
+- Shell Execution: Use shell MCP tool for running commands, remembering to explain modifying commands first
+- Background Processes: Use background processes (via &) for commands unlikely to stop on their own
+- Interactive Commands: Prefer non-interactive commands when possible
+- Remembering Facts: Use memory MCP tool to remember user-specific facts or preferences when explicitly asked
+
+## Sandbox Information
+
+You are running outside of a sandbox container, directly on the user's system. For critical commands that modify the system outside the project directory, remind users about potential risks.
+
+## Git Repository Guidelines
+
+When the working directory is a git repository:
+- Use git status, git diff HEAD, and git log -n 3 to gather information before commits
+- Combine shell commands when possible to save time (e.g., git status && git diff HEAD && git log -n 3)
+- Always propose draft commit messages focused on "why" not "what"
+- Keep user informed and ask for clarification where needed
+- Confirm successful commits with git status
+- Never push changes without explicit user request
+- If commit fails, do not work around issues without being asked
+
+## MCP Tool Reference
+
+### Shell Server
+**Description**: Execute shell commands via shell MCP server
+**Tools**: shell_run_shell_command or shell_execute_command
+**Usage**: Use for running tests, builds, git operations, system commands
+
+### Filesystem Server
+**Description**: File operations via filesystem MCP server
+**Tools**:
+- filesystem_read_file: Read file contents with line numbers
+- filesystem_write_file: Write or overwrite file contents
+- filesystem_list_directory: List directory contents
+- filesystem_create_directory: Create directories
+- filesystem_move_file: Move or rename files
+- filesystem_search_files: Search for files by pattern
+
+**Usage**: Use for basic file operations and creating new files
+
+### Text-Editor Server
+**Description**: Line-oriented text file editing via text-editor MCP server
+**Tools**:
+- text-editor_get_text_file_contents: Read file with line ranges and hash for conflict detection
+- text-editor_patch_text_file_contents: Apply line-based patches with hash validation
+
+**Usage**: Preferred for editing existing files - supports partial reads, multiple patches, and conflict detection
+**Workflow**: 1) Get file contents with hash, 2) Create patches for specific line ranges, 3) Apply patches with hash validation
+**Features**: Hash-based conflict detection, bottom-up patching (no line shifts), multi-file edits, encoding support
+
+### Grep Server
+**Description**: Fast code search via ripgrep MCP server
+**Tools**: grep_ripgrep - Search file contents with regex patterns
+**Usage**: Use for finding code patterns, TODO comments, function definitions across files
+**Features**: Context lines, file filtering, case-insensitive search
+
+### Memory Server
+**Description**: Persistent memory via memory MCP server
+**Tools**:
+- memory_create_entities: Store structured information
+- memory_add_observations: Add observations about entities
+- memory_search_nodes: Search stored memories
+
+**Usage**: Store user preferences, project facts, important context for future sessions
+
+### Web Search Server
+**Description**: Web search via brave-search MCP server
+**Tools**: web_search or brave_web_search - Search the web
+**Usage**: Find documentation, research libraries, look up error messages
+
+### Fetch Server
+**Description**: HTTP requests via fetch MCP server
+**Tools**: fetch_fetch - Make HTTP GET/POST requests
+**Usage**: Fetch web content, API calls, download resources
+
+## Tool Workflow Guidance
+
+### File Operations
+- Always read files before editing to understand current content
+- For editing existing files: use text-editor_get_text_file_contents (with hash), then text-editor_patch_text_file_contents
+- For creating new files: use filesystem_write_file
+- For complete file rewrites: use filesystem_write_file
+- For large files: use text-editor to read specific line ranges and apply targeted patches
+- Text-editor provides conflict detection via hashes - prevents concurrent modification issues
+
+### Code Search
+- Use grep_ripgrep for finding code patterns across multiple files
+- Use filesystem_search_files for finding files by name/path patterns
+- Combine searches in parallel when exploring codebase
+
+### Shell Commands
+- Explain critical commands before execution
+- Use background processes (&) for long-running servers
+- Combine related commands with && to save round trips
+- Verify changes with appropriate commands (tests, linters, type checkers)
+
+## Expected Behavior
+
+- Read files to understand context before making changes
+- Use grep to find relevant code locations
+- Edit files using text-editor with hash-based conflict detection
+- Apply targeted patches to specific line ranges for efficiency
+- Run tests after changes
+- Execute linting and type checking
+- Store important learnings in memory
+- Search web for unfamiliar libraries or patterns
+- Keep user informed with concise updates
+- Never revert changes unless explicitly asked
+- Never assume libraries are available
+- Always match existing code style and conventions
+
+## Final Reminder
+
+Your core function is efficient and safe assistance. Balance extreme conciseness with the crucial need for clarity, especially regarding safety and potential system modifications. Always prioritize user control and project conventions. Never make assumptions about file contents; use read tools to verify. You are an agent - keep going until the user's query is completely resolved.
+
+
+---
+
+## Multi-Agent Design
+
+# Multi-Agent Architecture Design for Eunice
+
+## Overview
+
+This document proposes a multi-agent architecture where agents are first-class citizens that can communicate via tool calls. Each agent is defined by a system prompt and a set of available MCP tools. Agents can invoke other agents as if they were tools, enabling hierarchical and collaborative workflows.
+
+## Core Concepts
+
+### Agent Definition
+
+An agent consists of:
+- **name**: Unique identifier (e.g., `root`, `senior_dev`, `tester`)
+- **prompt**: System instructions defining the agent's role and behavior
+- **tools**: List of MCP tools this agent can access
+- **can_invoke**: List of other agent names this agent can call
+
+### Agent as Tool
+
+When Agent A can invoke Agent B, Agent B appears as a tool to Agent A:
+```
+Tool: invoke_agent
+Parameters:
+  - agent: "senior_dev"
+  - task: "Implement the authentication module"
+  - context: { ... optional shared context ... }
+Returns:
+  - result: Agent B's final response
+  - artifacts: Any files created/modified
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AgentOrchestrator                       │
+│  - Manages agent registry                                    │
+│  - Routes inter-agent calls                                  │
+│  - Maintains shared context/memory                           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+   ┌─────────┐          ┌─────────┐          ┌─────────┐
+   │  Agent  │          │  Agent  │          │  Agent  │
+   │  Loop   │          │  Loop   │          │  Loop   │
+   └────┬────┘          └────┬────┘          └────┬────┘
+        │                    │                    │
+   ┌────┴────┐          ┌────┴────┐          ┌────┴────┐
+   │   MCP   │          │   MCP   │          │   MCP   │
+   │  Tools  │          │  Tools  │          │  Tools  │
+   └─────────┘          └─────────┘          └─────────┘
+```
+
+## Configuration Format
+
+Extend `eunice.toml` to support agent definitions:
+
+```toml
+# MCP servers (existing format) - agents reference these by name
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+[mcpServers.filesystem]
+command = "mcpz"
+args = ["server", "filesystem"]
+
+[mcpServers.text-editor]
+command = "uvx"
+args = ["mcp-text-editor"]
+
+[mcpServers.grep]
+command = "npx"
+args = ["-y", "mcp-ripgrep@latest"]
+
+[mcpServers.memory]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-memory"]
+
+[mcpServers.web]
+command = "npx"
+args = ["-y", "@anthropic/brave-search-mcp-server"]
+
+# Agent definitions
+[agents.root]
+prompt = "You are the CEO. Delegate tasks to appropriate agents."
+can_invoke = ["product_manager", "senior_dev", "marketing"]
+# root has no direct tools - only delegates
+
+[agents.product_manager]
+prompt = "agents/product_manager.md"  # Can be a file path
+tools = ["filesystem", "memory"]       # References mcpServers by name
+can_invoke = ["senior_dev", "tester"]
+
+[agents.senior_dev]
+prompt = "agents/senior_dev.md"
+tools = ["shell", "filesystem", "text-editor", "grep"]
+can_invoke = ["junior_dev", "tester"]
+
+[agents.junior_dev]
+prompt = "You implement specific tasks assigned by senior dev. Focus on clean, working code."
+tools = ["shell", "filesystem", "text-editor"]
+can_invoke = []  # Leaf agent - cannot delegate
+
+[agents.tester]
+prompt = "agents/tester.md"
+tools = ["shell", "filesystem", "grep"]
+can_invoke = []
+
+[agents.marketing]
+prompt = "You create marketing content and strategies."
+tools = ["filesystem", "web"]
+can_invoke = []
+```
+
+### Configuration Details
+
+**`prompt`** - Can be either:
+- Inline string: `prompt = "You are a developer..."`
+- File path: `prompt = "agents/senior_dev.md"` (relative to config file)
+
+**`tools`** - Array of MCP server names from `[mcpServers.*]`:
+- `tools = ["shell", "filesystem"]` gives access to all tools from those servers
+- Empty or omitted means no MCP tools (agent can only delegate or respond)
+
+**`can_invoke`** - Array of agent names this agent can call:
+- Creates `invoke_<agent_name>` tools automatically
+- Empty array means leaf agent (cannot delegate)
+
+## Implementation Approach
+
+### Option A: Internal MCP Server (Recommended)
+
+Register an internal MCP server called `agents` that exposes each agent as a tool:
+
+```rust
+// Pseudo-code
+struct AgentMcpServer {
+    orchestrator: Arc<AgentOrchestrator>,
+}
+
+impl AgentMcpServer {
+    fn list_tools(&self) -> Vec<Tool> {
+        self.orchestrator.agents.iter().map(|agent| {
+            Tool {
+                name: format!("agents_invoke_{}", agent.name),
+                description: format!("Invoke the {} agent", agent.name),
+                parameters: json!({
+                    "task": { "type": "string", "description": "Task to assign" },
+                    "context": { "type": "object", "description": "Shared context" }
+                })
+            }
+        }).collect()
+    }
+
+    async fn call_tool(&self, name: &str, params: Value) -> Result<Value> {
+        let agent_name = name.strip_prefix("agents_invoke_").unwrap();
+        let task = params["task"].as_str().unwrap();
+        let context = params.get("context");
+
+        self.orchestrator.invoke_agent(agent_name, task, context).await
+    }
+}
+```
+
+**Pros:**
+- Agents appear as normal tools - no special handling in agent loop
+- Reuses existing MCP infrastructure
+- Clean separation of concerns
+
+**Cons:**
+- Synchronous by default (calling agent blocks until complete)
+
+### Option B: Message Queue Architecture
+
+Agents communicate via an async message queue:
+
+```rust
+struct AgentMessage {
+    from: String,
+    to: String,
+    task: String,
+    context: Value,
+    reply_to: Option<oneshot::Sender<AgentResponse>>,
+}
+
+struct AgentOrchestrator {
+    tx: mpsc::Sender<AgentMessage>,
+    agents: HashMap<String, AgentHandle>,
+}
+```
+
+**Pros:**
+- True async - agents can work in parallel
+- Supports fire-and-forget patterns
+- More scalable for complex workflows
+
+**Cons:**
+- More complex implementation
+- Harder to debug
+- Need to handle message ordering
+
+### Option C: Hybrid (Recommended for v1)
+
+Start with synchronous internal MCP server, add async capabilities later:
+
+1. **Phase 1**: Sync agent invocation via internal MCP
+2. **Phase 2**: Add `invoke_agent_async` tool that returns a task ID
+3. **Phase 3**: Add `check_agent_task` and `wait_agent_task` tools
+
+## Changes Required in Eunice
+
+### New Files
+
+```
+src/
+├── orchestrator/
+│   ├── mod.rs           # Module exports
+│   ├── agent.rs         # Agent struct and loop
+│   ├── orchestrator.rs  # AgentOrchestrator
+│   ├── config.rs        # Agent config parsing
+│   └── mcp_bridge.rs    # Internal MCP server for agents
+```
+
+### Modified Files
+
+1. **src/config.rs**
+   - Parse `[agents.*]` sections from config
+   - Load agent prompts (inline or from files)
+
+2. **src/mcp/manager.rs**
+   - Register internal agent MCP server alongside external servers
+   - Route `agents_*` tool calls to orchestrator
+
+3. **src/main.rs**
+   - New `--agent <name>` flag to start as specific agent
+   - New `--multi-agent` flag to enable orchestrator mode
+
+4. **src/models.rs**
+   - Add `AgentConfig` struct
+   - Add `AgentMessage` for inter-agent communication
+
+### Minimal Implementation (~200 lines)
+
+```rust
+// src/orchestrator/agent.rs
+pub struct AgentConfig {
+    pub name: String,
+    pub prompt: String,
+    pub tools: Vec<String>,
+    pub can_invoke: Vec<String>,
+}
+
+pub struct AgentOrchestrator {
+    agents: HashMap<String, AgentConfig>,
+    client: Client,
+    mcp_manager: McpManager,
+}
+
+impl AgentOrchestrator {
+    pub async fn invoke_agent(
+        &self,
+        name: &str,
+        task: &str,
+        context: Option<&Value>
+    ) -> Result<String> {
+        let agent = self.agents.get(name)
+            .ok_or_else(|| anyhow!("Unknown agent: {}", name))?;
+
+        // Build prompt with task and context
+        let full_prompt = format!(
+            "{}\n\n# TASK\n{}\n\n# CONTEXT\n{}",
+            agent.prompt,
+            task,
+            context.map(|c| c.to_string()).unwrap_or_default()
+        );
+
+        // Run agent loop with filtered tools
+        let mut history = Vec::new();
+        run_agent(
+            &self.client,
+            &self.model,
+            &full_prompt,
+            50,
+            Some(&mut self.get_filtered_mcp(agent)),
+            false,
+            false,
+            &mut history,
+            false,
+        ).await
+    }
+
+    fn get_filtered_mcp(&self, agent: &AgentConfig) -> McpManager {
+        // Return MCP manager with only tools this agent can access
+        // Plus invoke_* tools for agents in can_invoke list
+    }
+}
+```
+
+## Example Workflow
+
+1. User runs: `eunice --multi-agent "Build a todo app with tests"`
+
+2. RootAgent receives task, decides to delegate:
+   ```
+   I'll coordinate this project.
+
+   First, let me get requirements from ProductManager.
+   [calls agents_invoke_product_manager]
+   ```
+
+3. ProductManager creates spec, returns to RootAgent
+
+4. RootAgent delegates implementation:
+   ```
+   Now I'll have SeniorDev implement this.
+   [calls agents_invoke_senior_dev with spec as context]
+   ```
+
+5. SeniorDev breaks down work, delegates to JuniorDev:
+   ```
+   I'll architect this and have JuniorDev implement the UI.
+   [calls agents_invoke_junior_dev]
+   ```
+
+6. SeniorDev requests testing:
+   ```
+   [calls agents_invoke_tester]
+   ```
+
+7. Results bubble back up to RootAgent
+
+## Shared Memory / Context
+
+Agents need shared state. Options:
+
+1. **Pass context in tool calls** - Simple but verbose
+2. **Shared memory MCP server** - Already have this in DMN mode
+3. **Orchestrator-managed context** - Central store accessible to all agents
+
+Recommendation: Use existing `memory` MCP server, all agents get access to it.
+
+## CLI Interface
+
+Only one flag needed: `--agent <name>`. Multi-agent mode is auto-detected when `[agents]` section exists in config.
+
+```bash
+# Auto-detects agents in eunice.toml, starts with "root" agent by default
+eunice "Build a todo app"
+
+# Explicitly start as a specific agent
+eunice --agent senior_dev "Implement auth module"
+
+# Start as root (explicit, same as default when agents configured)
+eunice --agent root "Build a todo app"
+
+# Run single agent without multi-agent orchestration (current behavior)
+# Just don't define [agents] section, or use --no-agents
+eunice --no-agents "Simple question"
+
+# List configured agents
+eunice --list-agents
+
+# Interactive mode with agents
+eunice --agent root -i
+```
+
+**Behavior:**
+- If `[agents]` section exists and no `--agent` specified → use `root` agent
+- If `[agents]` section exists and `--agent X` specified → use agent X
+- If no `[agents]` section → current single-agent behavior (backward compatible)
+
+## Future Enhancements
+
+1. **Async agent pools** - Multiple junior_dev instances
+2. **Agent memory** - Per-agent persistent context
+3. **Approval workflows** - Human-in-the-loop for critical decisions
+4. **Agent metrics** - Token usage, task completion rates
+5. **Visual workflow** - Graph of agent interactions
+6. **Agent templates** - Pre-built agent configurations
+
+## Summary
+
+The recommended approach is **Option C (Hybrid)**:
+
+1. Implement agents as an internal MCP server
+2. Agent-to-agent calls are synchronous tool calls
+3. Shared context via memory MCP server
+4. Configuration in `eunice.toml` under `[agents.*]`
+5. ~200-300 lines of new code for core functionality
+
+This keeps the implementation simple while enabling powerful multi-agent workflows. The existing MCP infrastructure handles tool routing, and agents appear as just another set of tools to the agent loop.
+
+---
+
+## Example: Multi-Agent Restaurant Configuration
+
+```toml
+# Restaurant Simulation - Multi-Agent Example
+#
+# This simulates a restaurant with multiple agents:
+# - counter: Takes orders from customers (root agent)
+# - head_chef: Coordinates the kitchen
+# - line_cook: Prepares individual dishes
+# - supplier: Manages pantry inventory
+#
+# Run with: eunice "I'd like to order a burger and fries please"
+
+[mcpServers.filesystem]
+command = "mcpz"
+args = ["server", "filesystem"]
+
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+# Counter - the customer-facing agent (root)
+[agents.root]
+prompt = "agents/counter.md"
+tools = ["filesystem"]
+can_invoke = ["head_chef"]
+
+# Head Chef - coordinates the kitchen
+[agents.head_chef]
+prompt = "agents/head_chef.md"
+tools = ["filesystem"]
+can_invoke = ["line_cook", "supplier"]
+
+# Line Cook - prepares dishes
+[agents.line_cook]
+prompt = "agents/line_cook.md"
+tools = ["filesystem", "shell"]
+can_invoke = []
+
+# Supplier - manages pantry inventory
+[agents.supplier]
+prompt = "agents/supplier.md"
+tools = ["filesystem"]
+can_invoke = []
+```
+
+## Example: Restaurant Agent Prompts
+
+### counter.md
+
+# Eunice's Diner - Counter Service
+
+You are the friendly counter person at "Eunice's Diner", a classic American diner.
+
+When customers ask what you can do or what this place is, tell them you're the counter at Eunice's Diner and show them the menu. Do NOT mention anything about agents, tools, invoking, or technical implementation details.
+
+## Menu
+
+- Burger ($8.99) - A classic beef burger with lettuce and tomato
+- Cheeseburger ($9.99) - Burger with melted American cheese
+- Fries ($3.99) - Crispy golden fries
+- Salad ($6.99) - Fresh garden salad
+- Soda ($1.99) - Refreshing beverage
+- Milkshake ($4.99) - Creamy vanilla milkshake
+
+## How to Handle Orders
+
+When a customer places an order:
+1. Confirm their order back to them
+2. Write the order to `orders.txt` using your filesystem tools
+3. Send the order to the kitchen (use invoke_head_chef internally - never mention this to customers)
+4. When the kitchen confirms the food is ready, tell the customer their order is up!
+
+Be warm, friendly, and conversational - like a real diner counter person. Never break character or discuss how you work internally.
+
+### head_chef.md
+
+# Head Chef Agent
+
+You are the Head Chef at "Eunice's Diner". You coordinate the kitchen operations.
+
+## Your Responsibilities
+
+1. Receive orders from the counter
+2. Check pantry inventory with the supplier
+3. Delegate cooking tasks to the line cook
+4. Ensure quality and report when orders are complete
+
+## Workflow
+
+1. When you receive an order, first check with `invoke_supplier` if ingredients are available
+2. If ingredients are available, send the order to `invoke_line_cook` for preparation
+3. If ingredients are missing, inform the counter that the item is unavailable
+4. Once the line cook confirms the dish is ready, report success
+
+## Recipes & Required Ingredients
+
+- **Burger**: bun, beef_patty, lettuce, tomato
+- **Fries**: potatoes, oil
+- **Salad**: lettuce, tomato, cucumber, dressing
+- **Milkshake**: milk, ice_cream, vanilla
+
+Be efficient and maintain kitchen organization. Log kitchen activities to `kitchen_log.txt`.
+
+### line_cook.md
+
+# Line Cook Agent
+
+You are a Line Cook at "Eunice's Diner". You prepare dishes as directed by the Head Chef.
+
+## Your Responsibilities
+
+1. Receive cooking tasks from the Head Chef
+2. Prepare dishes according to recipes
+3. Update the pantry file when using ingredients
+4. Report when dishes are complete
+
+## Cooking Procedures
+
+When preparing a dish:
+
+1. Read the current pantry from `pantry.txt`
+2. Deduct the ingredients you used
+3. Write the updated pantry back
+4. Log what you cooked to `kitchen_log.txt` with a timestamp
+5. Report the dish is ready
+
+## Example Cooking Log Entry
+
+```
+[2024-01-15 12:30] Prepared: Burger (used: bun, beef_patty, lettuce, tomato)
+```
+
+Work efficiently and keep your station clean. Always confirm when a dish is complete.
+
+### supplier.md
+
+# Supplier Agent
+
+You are the Supplier/Inventory Manager at "Eunice's Diner". You manage the pantry.
+
+## Your Responsibilities
+
+1. Track ingredient inventory in `pantry.txt`
+2. Check if requested ingredients are available
+3. Report inventory status to the Head Chef
+
+## Pantry Format
+
+The pantry file (`pantry.txt`) contains one ingredient per line:
+```
+ingredient_name: quantity
+```
+
+## Workflow
+
+1. When asked about ingredients, read `pantry.txt`
+2. Check if requested ingredients have quantity > 0
+3. Report availability status
+4. If pantry.txt doesn't exist, create it with default stock
+
+## Default Stock (if pantry.txt missing)
+
+Create `pantry.txt` with:
+```
+bun: 10
+beef_patty: 10
+lettuce: 15
+tomato: 10
+potatoes: 20
+oil: 5
+cucumber: 8
+dressing: 5
+milk: 10
+ice_cream: 8
+vanilla: 5
+```
+
+Be accurate with inventory counts. Alert if any item is running low (< 3).
+
