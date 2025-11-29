@@ -185,6 +185,32 @@ command = "mcpz"
 args = ["run", "mcp-server-time"]
 ```
 
+### HTTP Transport (Remote Servers)
+
+Eunice supports MCP servers via Streamable HTTP transport. Use `url` instead of `command`/`args`:
+
+```toml
+[mcpServers.remote_shell]
+url = "http://localhost:3323/mcp"
+```
+
+You can mix stdio and HTTP servers in the same config:
+
+```toml
+# Local stdio server
+[mcpServers.local]
+command = "mcpz"
+args = ["server", "shell"]
+
+# Remote HTTP server
+[mcpServers.remote]
+url = "http://192.168.1.100:3323/mcp"
+```
+
+If an HTTP server fails to connect, the model is informed so it can explain the issue to the user.
+
+See `examples/remote_mcp/` for a complete example.
+
 ### Using mcpz
 
 [mcpz](https://github.com/xeb/mcpz) is a lightweight MCP server runner that simplifies running MCP tools:

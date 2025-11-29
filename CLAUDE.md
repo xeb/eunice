@@ -31,9 +31,11 @@ User Input → Provider Detection → Client → API Request → Response
    - 429 retry logic with 6-second backoff (DMN mode only)
 
 3. **MCP Integration** (`src/mcp/`)
-   - Manages multiple MCP server subprocesses
+   - Manages multiple MCP server subprocesses (stdio) or HTTP connections
+   - Supports two transports: stdio (command/args) and Streamable HTTP (url)
    - JSON-RPC communication
    - Tool discovery and routing
+   - Failed server reporting to model
 
 4. **DMN Mode** (`src/config.rs`)
    - Default Mode Network: Autonomous batch execution
@@ -202,7 +204,8 @@ src/
 ├── client.rs            - HTTP client, format conversions
 ├── mcp/
 │   ├── mod.rs           - Module exports
-│   ├── server.rs        - MCP subprocess with lazy loading
+│   ├── server.rs        - MCP subprocess (stdio transport)
+│   ├── http_server.rs   - MCP HTTP client (Streamable HTTP transport)
 │   └── manager.rs       - Tool routing with async state
 ├── orchestrator/
 │   ├── mod.rs           - Module exports
@@ -243,6 +246,8 @@ When adding features:
 
 ## Version History
 
+- **0.2.2**: Streamable HTTP MCP transport, failed server reporting to model
+- **0.2.1**: Embedded llms.txt/llms-full.txt via --llms-txt/--llms-full-txt flags
 - **0.2.0**: Multi-agent orchestration, agents can invoke other agents as tools
 - **0.1.12**: TOML config support, mcpz preference for DMN mode
 - **0.1.11**: Default model changed to gemini-3-pro-preview, auto-prompt discovery
