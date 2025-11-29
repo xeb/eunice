@@ -46,6 +46,7 @@ User Input → Provider Detection → Client → API Request → Response
    - Main conversation loop
    - Tool execution with spinners
    - Conversation history management
+   - Built-in `interpret_image` tool for multimodal analysis
 
 6. **Multi-Agent Orchestrator** (`src/orchestrator/`)
    - Manages agent configurations and prompts
@@ -186,6 +187,34 @@ eunice --agent worker "task"     # Use specific agent
 eunice --list-agents             # Show configured agents
 ```
 
+## Image Interpretation
+
+Eunice includes a built-in `interpret_image` tool for multimodal image analysis.
+
+### Enabling
+
+- **DMN mode**: Auto-enabled with `--dmn`
+- **Standalone**: Use `--images` flag
+
+### Implementation (`src/agent.rs`)
+
+1. `get_interpret_image_tool_spec()` - Returns tool definition
+2. `execute_interpret_image()` - Reads file, base64 encodes, calls multimodal API
+3. Tool is added when `enable_image_tool` flag is true
+
+### Multimodal API Support (`src/client.rs`)
+
+- `chat_completion_with_image()` method handles both:
+  - Native Gemini API (via `inlineData`)
+  - OpenAI-compatible API (via `image_url` content blocks)
+
+### CLI Usage
+
+```bash
+eunice --images "Describe screenshot.png"
+eunice --dmn "Analyze diagram.jpg and summarize it"
+```
+
 ## Key Design Decisions
 
 1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
@@ -194,6 +223,7 @@ eunice --list-agents             # Show configured agents
 4. **DMN Mode for Autonomy**: Automatic retry and continuous execution
 5. **MCP for Extensibility**: Tools provided via Model Context Protocol servers
 6. **Agents as Tools**: Agent-to-agent calls are just tool calls, reusing MCP infrastructure
+7. **Built-in Tools**: Special tools like `interpret_image` are handled directly by the agent
 
 ## File Structure
 
@@ -230,6 +260,7 @@ dmn_instructions.md      - DMN system instructions (embedded via include_str!)
 - **indicatif**: Progress spinners with braille characters
 - **crossterm**: Terminal control
 - **anyhow/thiserror**: Error handling
+- **base64**: Image encoding for multimodal requests
 
 ## Contributing
 
@@ -246,6 +277,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.3**: Image interpretation via `--images` flag and `interpret_image` built-in tool
 - **0.2.2**: Streamable HTTP MCP transport, failed server reporting to model
 - **0.2.1**: Embedded llms.txt/llms-full.txt via --llms-txt/--llms-full-txt flags
 - **0.2.0**: Multi-agent orchestration, agents can invoke other agents as tools

@@ -2,8 +2,83 @@ use crate::client::Client;
 use crate::display;
 use crate::display::{Spinner, ThinkingSpinner};
 use crate::mcp::McpManager;
-use crate::models::Message;
-use anyhow::Result;
+use crate::models::{FunctionSpec, Message, Tool};
+use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+// --- Built-in interpret_image tool ---
+const INTERPRET_IMAGE_TOOL_NAME: &str = "interpret_image";
+
+fn get_interpret_image_tool_spec() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionSpec {
+            name: INTERPRET_IMAGE_TOOL_NAME.to_string(),
+            description: "Analyzes an image file and returns a text description. The user's request will be used to guide the analysis.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path to the image file to analyze."
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "A specific prompt to guide the image analysis."
+                    }
+                },
+                "required": ["file_path", "prompt"]
+            }),
+        },
+    }
+}
+
+async fn execute_interpret_image(
+    client: &Client,
+    model: &str,
+    args: serde_json::Value,
+) -> Result<String> {
+    let file_path = args["file_path"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing file_path"))?;
+    let prompt = args["prompt"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing prompt"))?;
+
+    // Read the image file
+    let image_bytes = std::fs::read(file_path)
+        .with_context(|| format!("Failed to read image file: {}", file_path))?;
+
+    // Guess MIME type from extension
+    let mime_type = match std::path::Path::new(file_path)
+        .extension()
+        .and_then(|s| s.to_str())
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream", // Default
+    };
+
+    // Base64 encode the image
+    let image_base64 = STANDARD.encode(&image_bytes);
+
+    // Call the client's multimodal chat completion method
+    let response = client
+        .chat_completion_with_image(model, prompt, &image_base64, mime_type, true)
+        .await?;
+
+    // Extract text from the response
+    let content = response
+        .choices
+        .get(0)
+        .and_then(|c| c.message.content.as_ref())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "No text content received from model.".to_string());
+
+    Ok(content)
+}
 
 /// Run the agent loop until completion
 pub async fn run_agent(
@@ -15,7 +90,7 @@ pub async fn run_agent(
     silent: bool,
     verbose: bool,
     conversation_history: &mut Vec<Message>,
-    dmn_mode: bool,
+    enable_image_tool: bool,
 ) -> Result<()> {
     // Build the prompt, including any failed server info
     let final_prompt = if let Some(ref manager) = mcp_manager {
@@ -46,10 +121,20 @@ pub async fn run_agent(
 
     loop {
         // Get available tools
-        let tools = mcp_manager
+        let mut tools = mcp_manager
             .as_ref()
             .map(|m| m.get_tools())
-            .filter(|t| !t.is_empty());
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| !t.function.name.is_empty())
+            .collect::<Vec<_>>();
+
+        // Add built-in interpret_image tool when enabled (via --dmn or --images)
+        if enable_image_tool {
+            tools.push(get_interpret_image_tool_spec());
+        }
+
+        let tools_option = if tools.is_empty() { None } else { Some(tools.as_slice()) };
 
         display::debug("Calling LLM...", verbose);
 
@@ -62,7 +147,12 @@ pub async fn run_agent(
 
         // Call the LLM
         let response = client
-            .chat_completion(model, conversation_history, tools.as_deref(), dmn_mode)
+            .chat_completion(
+                model,
+                serde_json::to_value(&*conversation_history)?,
+                tools_option.as_deref(),
+                enable_image_tool,
+            )
             .await;
 
         // Stop thinking spinner
@@ -122,14 +212,14 @@ pub async fn run_agent(
             };
 
             // Execute tool via MCP manager
-            let result = if let Some(ref mut manager) = mcp_manager.as_deref_mut() {
-                match manager.execute_tool(tool_name, args).await {
-                    Ok(result) => result,
-                    Err(e) => format!("Error: {}", e),
-                }
+            let result = if tool_name == INTERPRET_IMAGE_TOOL_NAME {
+                execute_interpret_image(client, model, args).await
+            } else if let Some(ref mut manager) = mcp_manager.as_deref_mut() {
+                manager.execute_tool(tool_name, args).await
             } else {
-                "Error: No MCP manager available".to_string()
-            };
+                Ok("Error: No MCP manager available".to_string())
+            }
+            .unwrap_or_else(|e| format!("Error: {}", e));
 
             // Stop spinner
             if let Some(spinner) = spinner {

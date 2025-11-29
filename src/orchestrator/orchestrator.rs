@@ -239,7 +239,12 @@ impl AgentOrchestrator {
 
             // Call the LLM
             let response = client
-                .chat_completion(model, conversation_history, tools_option, false)
+                .chat_completion(
+                    model,
+                    serde_json::to_value(&*conversation_history)?,
+                    tools_option,
+                    false,
+                )
                 .await;
 
             // Stop thinking spinner

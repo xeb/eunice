@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**3,568 lines of Rust** • **4.2MB binary** - Emphasizing "sophisticated simplicity".
+**3,800 lines of Rust** • **4.3MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -15,6 +15,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Unified API**: Uses OpenAI-compatible endpoints for all providers
 - **MCP Integration**: Model Context Protocol servers for extensible tool capabilities
 - **Multi-Agent Orchestration**: Agents can invoke other agents as tools for complex workflows
+- **Image Interpretation**: Built-in multimodal image analysis via `--images` flag
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with pre-configured MCP tools for software engineering
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
@@ -91,6 +92,7 @@ Options:
       --silent                  Suppress all output except AI responses
       --verbose                 Enable verbose debug output
       --events                  Output JSON-RPC events to stdout
+      --images                  Enable built-in image interpretation tool
   -h, --help                    Print help
   -V, --version                 Print version
 ```
@@ -322,6 +324,61 @@ See [examples/real_multi_agent](examples/real_multi_agent) for a complete exampl
 ### Example: Remote MCP Server
 
 See [examples/remote_mcp](examples/remote_mcp) for connecting to a remote MCP server via HTTP transport.
+
+## Image Interpretation
+
+Eunice includes a built-in `interpret_image` tool that enables multimodal image analysis using your configured AI provider.
+
+### Enabling Image Interpretation
+
+The image tool is available in two ways:
+
+```bash
+# Via DMN mode (auto-enabled)
+eunice --dmn "Describe the image at screenshot.png"
+
+# Via --images flag (standalone, no MCP required)
+eunice --images "What does this diagram show?" diagram.png
+eunice --images --no-mcp "Analyze sample.jpg"
+```
+
+### How It Works
+
+1. The model detects image analysis requests and calls `interpret_image`
+2. Eunice reads the image file and base64-encodes it
+3. A multimodal request is sent to the AI provider
+4. The analysis is returned as the tool result
+
+### Supported Formats
+
+- PNG (`.png`)
+- JPEG (`.jpg`, `.jpeg`)
+- GIF (`.gif`)
+- WebP (`.webp`)
+
+### Provider Support
+
+Image interpretation works with multimodal-capable models:
+
+- **Gemini**: Full support via native Gemini API
+- **OpenAI**: Full support via vision endpoints
+- **Anthropic Claude**: Full support via vision API
+- **Ollama**: Depends on model (e.g., `llava`)
+
+### Example
+
+```bash
+# Analyze a screenshot
+eunice --images "What error is shown in screenshot.png?"
+
+# Describe architecture diagram
+eunice --images "Explain the flow in architecture.png"
+
+# In DMN mode with other tools
+eunice --dmn "Read diagram.jpg and create a markdown summary in notes.md"
+```
+
+See [examples/image_understanding](examples/image_understanding) for a complete example.
 
 ## Project Structure
 

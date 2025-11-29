@@ -20,6 +20,7 @@ pub async fn interactive_mode(
     silent: bool,
     verbose: bool,
     dmn: bool,
+    enable_image_tool: bool,
 ) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
     let mut dmn_injected = false;
@@ -60,6 +61,7 @@ pub async fn interactive_mode(
             silent,
             verbose,
             dmn,
+            enable_image_tool,
             &mut dmn_injected,
             &mut conversation_history,
         )
@@ -97,6 +99,7 @@ pub async fn interactive_mode(
             silent,
             verbose,
             dmn,
+            enable_image_tool,
             &mut dmn_injected,
             &mut conversation_history,
         )
@@ -121,6 +124,7 @@ async fn run_prompt(
     silent: bool,
     verbose: bool,
     dmn: bool,
+    enable_image_tool: bool,
     dmn_injected: &mut bool,
     conversation_history: &mut Vec<Message>,
 ) -> Result<()> {
@@ -156,7 +160,7 @@ async fn run_prompt(
             silent,
             verbose,
             conversation_history,
-            dmn,
+            enable_image_tool,
         )
         .await?;
     }

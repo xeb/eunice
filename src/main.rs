@@ -83,6 +83,10 @@ struct Args {
     #[arg(long)]
     events: bool,
 
+    /// Enable built-in image interpretation tool
+    #[arg(long)]
+    images: bool,
+
     /// Positional prompt argument
     #[arg()]
     prompt_positional: Option<String>,
@@ -362,6 +366,7 @@ async fn main() -> Result<()> {
             args.silent,
             args.verbose,
             args.dmn,
+            args.dmn || args.images,
         )
         .await?;
     } else {
@@ -426,7 +431,7 @@ async fn main() -> Result<()> {
                 args.silent,
                 args.verbose,
                 &mut conversation_history,
-                args.dmn,
+                args.dmn || args.images,
             )
             .await?;
         }

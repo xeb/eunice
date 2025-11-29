@@ -1,0 +1,1 @@
+Analyze the image at `sample.jpg` and describe what you see. Pay close attention to any numbers visible on the digital display.

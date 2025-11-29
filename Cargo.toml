@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
@@ -44,6 +44,7 @@ chrono = "0.4"
 
 # UUID for request IDs
 uuid = { version = "1", features = ["v4"] }
+base64 = "0.22.1"
 
 [profile.release]
 lto = true

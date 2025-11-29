@@ -68,13 +68,16 @@ impl Client {
     pub async fn chat_completion(
         &self,
         model: &str,
-        messages: &[Message],
+        messages: serde_json::Value,
         tools: Option<&[Tool]>,
         dmn_mode: bool,
     ) -> Result<ChatCompletionResponse> {
         // Check if using native Gemini API
         if self.use_native_gemini_api {
-            return self.chat_completion_gemini_native(model, messages, tools, dmn_mode).await;
+            let messages: Vec<Message> = serde_json::from_value(messages)?;
+            return self
+                .chat_completion_gemini_native(model, &messages, tools, dmn_mode)
+                .await;
         }
 
         // Standard OpenAI-compatible API
@@ -82,7 +85,7 @@ impl Client {
 
         let request = ChatCompletionRequest {
             model: model.to_string(),
-            messages: messages.to_vec(),
+            messages,
             tools: tools.map(|t| t.to_vec()),
             tool_choice: tools.map(|_| "auto".to_string()),
         };
@@ -217,6 +220,116 @@ impl Client {
         }
     }
 
+    /// Send a chat completion request with an image
+    pub async fn chat_completion_with_image(
+        &self,
+        model: &str,
+        prompt: &str,
+        image_data: &str, // base64
+        mime_type: &str,
+        _dmn_mode: bool,
+    ) -> Result<ChatCompletionResponse> {
+        // Use native Gemini API for multimodal requests if configured
+        if self.use_native_gemini_api {
+            let gemini_request = GeminiRequest {
+                contents: vec![GeminiContent {
+                    parts: vec![
+                        GeminiPart {
+                            text: Some(prompt.to_string()),
+                            inline_data: None,
+                            function_call: None,
+                            function_response: None,
+                            thought_signature: None,
+                        },
+                        GeminiPart {
+                            text: None,
+                            inline_data: Some(crate::models::GeminiInlineData {
+                                mime_type: mime_type.to_string(),
+                                data: image_data.to_string(),
+                            }),
+                            function_call: None,
+                            function_response: None,
+                            thought_signature: None,
+                        },
+                    ],
+                    role: Some("user".to_string()),
+                }],
+                tools: None, // No tools for image interpretation
+            };
+
+            let url = format!("{}{}:generateContent", self.base_url, model);
+            let response = self
+                .http
+                .post(&url)
+                .header("x-goog-api-key", &self.api_key)
+                .json(&gemini_request)
+                .send()
+                .await
+                .context("Failed to send Gemini multimodal request")?;
+
+            if !response.status().is_success() {
+                return Err(anyhow!(
+                    "Gemini API request failed with status {}: {}",
+                    response.status(),
+                    response.text().await.unwrap_or_default()
+                ));
+            }
+
+            let response_text = response.text().await.context("Failed to read Gemini response body")?;
+            let gemini_response: GeminiResponse =
+                serde_json::from_str(&response_text).context("Failed to parse Gemini response")?;
+            return self.convert_gemini_to_openai_response(gemini_response, &response_text);
+        }
+
+        // Standard OpenAI-compatible API for multimodal
+        let url = format!("{}chat/completions", self.base_url);
+        let messages = serde_json::json!([
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": prompt
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:{};base64,{}", mime_type, image_data)
+                        }
+                    }
+                ]
+            }
+        ]);
+
+        let request = ChatCompletionRequest {
+            model: model.to_string(),
+            messages,
+            tools: None,
+            tool_choice: None,
+        };
+
+        let response = self
+            .http
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send OpenAI multimodal request")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "API request failed with status {}: {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            ));
+        }
+
+        response
+            .json::<ChatCompletionResponse>()
+            .await
+            .context("Failed to parse OpenAI multimodal response")
+    }
+
     /// Convert OpenAI-style messages to Gemini contents format
     fn convert_messages_to_gemini(&self, messages: &[Message]) -> Result<Vec<GeminiContent>> {
         use crate::models::{GeminiFunctionCallRequest, GeminiFunctionResponse};
@@ -229,6 +342,7 @@ impl Client {
                     contents.push(GeminiContent {
                         parts: vec![GeminiPart {
                             text: Some(content.clone()),
+                            inline_data: None,
                             function_call: None,
                             function_response: None,
                             thought_signature: None,
@@ -244,6 +358,7 @@ impl Client {
                         if !text.is_empty() {
                             parts.push(GeminiPart {
                                 text: Some(text.clone()),
+                                inline_data: None,
                                 function_call: None,
                                 function_response: None,
                                 thought_signature: None,
@@ -267,6 +382,7 @@ impl Client {
 
                             parts.push(GeminiPart {
                                 text: None,
+                                inline_data: None,
                                 function_call: Some(GeminiFunctionCallRequest {
                                     name: call.function.name.clone(),
                                     args,
@@ -299,6 +415,7 @@ impl Client {
                     contents.push(GeminiContent {
                         parts: vec![GeminiPart {
                             text: None,
+                            inline_data: None,
                             function_call: None,
                             function_response: Some(GeminiFunctionResponse {
                                 name: function_name,

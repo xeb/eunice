@@ -97,7 +97,7 @@ pub struct FunctionSpec {
 #[derive(Debug, Serialize)]
 pub struct ChatCompletionRequest {
     pub model: String,
-    pub messages: Vec<Message>,
+    pub messages: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -304,6 +304,8 @@ pub struct GeminiContent {
 pub struct GeminiPart {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(rename = "inlineData", skip_serializing_if = "Option::is_none")]
+    pub inline_data: Option<GeminiInlineData>,
     #[serde(rename = "functionCall", skip_serializing_if = "Option::is_none")]
     pub function_call: Option<GeminiFunctionCallRequest>,
     #[serde(rename = "functionResponse", skip_serializing_if = "Option::is_none")]
@@ -311,6 +313,14 @@ pub struct GeminiPart {
     /// Thought signature for Gemini 3 models - must be passed back with function calls
     #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
     pub thought_signature: Option<String>,
+}
+
+/// Gemini inline data for images
+#[derive(Debug, Serialize)]
+pub struct GeminiInlineData {
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    pub data: String, // base64
 }
 
 /// Gemini function call (for requests, when continuing a conversation)
@@ -405,6 +415,7 @@ mod tests {
                     function_call: None,
                     function_response: None,
                     thought_signature: None,
+                    inline_data: None,
                 }],
                 role: Some("user".to_string()),
             }],
@@ -443,6 +454,7 @@ mod tests {
                     function_call: None,
                     function_response: None,
                     thought_signature: None,
+                    inline_data: None,
                 }],
                 role: None,
             }],
