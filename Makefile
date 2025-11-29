@@ -1,4 +1,4 @@
-.PHONY: help build release install interact clean test list-models bump-version publish binary-size
+.PHONY: help build release install interact clean test list-models bump-version publish binary-size demo
 
 # Colors
 CYAN := \033[36m
@@ -58,3 +58,6 @@ publish: bump-version ## Bump version and publish to crates.io
 binary-size: release ## Show release binary size
 	@size=$$(ls -lh target/release/eunice | awk '{print $$5}'); \
 	echo "$(GREEN)Binary size: $$size$(RESET)"
+
+demo: install ## Create demo GIFs for README
+	@bash assets/create_demo.sh

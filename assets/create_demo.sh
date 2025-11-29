@@ -10,8 +10,9 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ASSETS_DIR="$SCRIPT_DIR/assets"
+# Script is in assets/, project root is parent
+ASSETS_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$ASSETS_DIR")"
 
 echo "=== Eunice Demo GIF Generator ==="
 echo ""
@@ -29,8 +30,7 @@ for cmd in asciinema agg eunice; do
     fi
 done
 
-# Create assets directory
-mkdir -p "$ASSETS_DIR"
+# Assets directory already exists (we're in it)
 
 echo "Creating demo GIFs in $ASSETS_DIR..."
 echo ""
@@ -116,12 +116,12 @@ record_demo "demo_basic" 90 22 18 "$BASIC_SCRIPT"
 # Demo 2: DMN Mode
 # =============================================================================
 # Find a good example directory
-if [ -d "$SCRIPT_DIR/examples/just_shell_inspection" ]; then
-    DMN_EXAMPLE="$SCRIPT_DIR/examples/just_shell_inspection"
-elif [ -d "$SCRIPT_DIR/examples/codebase_archaeologist" ]; then
-    DMN_EXAMPLE="$SCRIPT_DIR/examples/codebase_archaeologist"
+if [ -d "$PROJECT_DIR/examples/just_shell_inspection" ]; then
+    DMN_EXAMPLE="$PROJECT_DIR/examples/just_shell_inspection"
+elif [ -d "$PROJECT_DIR/examples/codebase_archaeologist" ]; then
+    DMN_EXAMPLE="$PROJECT_DIR/examples/codebase_archaeologist"
 else
-    DMN_EXAMPLE="$SCRIPT_DIR"
+    DMN_EXAMPLE="$PROJECT_DIR"
 fi
 
 DMN_SCRIPT="/tmp/demo_dmn.sh"
@@ -169,9 +169,9 @@ record_demo "demo_dmn" 100 28 16 "$DMN_SCRIPT"
 # Demo 3: Multi-Agent Mode
 # =============================================================================
 # Clean up any previous artifacts
-rm -f "$SCRIPT_DIR/examples/real_multi_agent/orders.txt" \
-      "$SCRIPT_DIR/examples/real_multi_agent/kitchen_log.txt" \
-      "$SCRIPT_DIR/examples/real_multi_agent/pantry.txt" 2>/dev/null || true
+rm -f "$PROJECT_DIR/examples/real_multi_agent/orders.txt" \
+      "$PROJECT_DIR/examples/real_multi_agent/kitchen_log.txt" \
+      "$PROJECT_DIR/examples/real_multi_agent/pantry.txt" 2>/dev/null || true
 
 MULTI_SCRIPT="/tmp/demo_multiagent.sh"
 cat > "$MULTI_SCRIPT" << SCRIPT
@@ -193,7 +193,7 @@ echo ""
 echo -e "\033[1;36m# Multi-Agent Mode - Restaurant Simulation\033[0m"
 sleep 0.5
 
-run "cd $SCRIPT_DIR/examples/real_multi_agent && pwd"
+run "cd $PROJECT_DIR/examples/real_multi_agent && pwd"
 
 echo ""
 echo -e "\033[1;36m# List configured agents\033[0m"
@@ -207,7 +207,7 @@ sleep 0.5
 
 show 'eunice "I would like a cheeseburger please"'
 sleep 0.3
-cd "$SCRIPT_DIR/examples/real_multi_agent"
+cd "$PROJECT_DIR/examples/real_multi_agent"
 timeout 60 eunice "I would like a cheeseburger please" 2>&1 | head -50 || true
 sleep 1
 

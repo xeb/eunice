@@ -319,6 +319,10 @@ eunice --list-agents
 
 See [examples/real_multi_agent](examples/real_multi_agent) for a complete example simulating a restaurant with counter, chef, cook, and supplier agents.
 
+### Example: Remote MCP Server
+
+See [examples/remote_mcp](examples/remote_mcp) for connecting to a remote MCP server via HTTP transport.
+
 ## Project Structure
 
 ```
