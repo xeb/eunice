@@ -39,7 +39,8 @@ User Input → Provider Detection → Client → API Request → Response
 
 4. **DMN Mode** (`src/config.rs`)
    - Default Mode Network: Autonomous batch execution
-   - Pre-configured with 7 MCP servers
+   - Minimal tool set: shell + filesystem (interpret_image is built-in)
+   - Shell provides access to grep, curl, wget, git, etc.
    - Includes comprehensive system instructions
 
 5. **Agent Loop** (`src/agent.rs`)
@@ -277,6 +278,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.4**: Minimal DMN (shell + filesystem only), Design Goals section, curl/wget for web
 - **0.2.3**: Image interpretation via `--images` flag and `interpret_image` built-in tool
 - **0.2.2**: Streamable HTTP MCP transport, failed server reporting to model
 - **0.2.1**: Embedded llms.txt/llms-full.txt via --llms-txt/--llms-full-txt flags

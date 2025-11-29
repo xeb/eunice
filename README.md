@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**3,800 lines of Rust** • **4.3MB binary** - Emphasizing "sophisticated simplicity".
+**3,761 lines of Rust** • **4.3MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -17,10 +17,25 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Multi-Agent Orchestration**: Agents can invoke other agents as tools for complex workflows
 - **Image Interpretation**: Built-in multimodal image analysis via `--images` flag
 - **Smart Defaults**: Automatically selects the best available model
-- **DMN Mode**: Default Mode Network - autonomous batch execution with pre-configured MCP tools for software engineering
+- **DMN Mode**: Default Mode Network - autonomous batch execution with minimal MCP tools
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
 - **Interactive Mode**: Multi-turn conversations with context preservation
-- **Progress Spinners**: Visual feedback during tool execution
+
+## Design Goals
+
+Eunice is designed with these principles:
+
+1. **Minimal**: Small codebase (~3,800 lines), few dependencies, fast startup. No bloat.
+
+2. **Multi-Backend**: Support multiple LLM providers (OpenAI, Gemini, Claude, Ollama) through a unified interface. Switch models with a flag.
+
+3. **Agentic**: Following [Simon Willison's definition](https://simonwillison.net/2024/Oct/26/what-is-an-agent/) - an LLM that runs in a loop, calling tools, until it decides it's done. The model decides when to stop.
+
+4. **Agents as Prompts + Tools**: An agent is simply a system prompt plus access to MCP tools. No complex agent frameworks - just configuration.
+
+5. **Multi-Agent**: Support agent hierarchies where agents can invoke other agents as tools. Recursive, composable, simple.
+
+6. **Functional over Cautious**: Prioritize getting things done over excessive safety warnings. Users running eunice have opted into autonomous execution. Don't be overly protective of the system it runs on.
 
 ## Installation
 
@@ -243,15 +258,13 @@ In interactive mode, you'll see `(starting...)` next to servers that are still i
 
 ![DMN Mode](assets/demo_dmn.gif)
 
-Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution with 7 pre-configured MCP servers:
+Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution with a minimal tool set:
 
-- **shell**: Execute shell commands
-- **filesystem**: File operations
-- **text-editor**: Line-based editing with conflict detection
-- **grep**: Fast code search via ripgrep
-- **memory**: Persistent memory storage
-- **web**: Web search (requires `BRAVE_API_KEY`)
-- **fetch**: HTTP requests
+- **shell**: Execute any shell command (grep, curl, wget, git, npm, cargo, etc.)
+- **filesystem**: File operations (read, write, list, search)
+- **interpret_image**: Built-in image analysis (always available)
+
+The shell tool gives access to everything: use `grep`/`rg` for code search, `curl`/`wget` for web requests, and any other CLI tool installed on your system.
 
 ### Autonomous Execution
 
@@ -326,6 +339,8 @@ See [examples/real_multi_agent](examples/real_multi_agent) for a complete exampl
 See [examples/remote_mcp](examples/remote_mcp) for connecting to a remote MCP server via HTTP transport.
 
 ## Image Interpretation
+
+![Image Interpretation](assets/demo_images.gif)
 
 Eunice includes a built-in `interpret_image` tool that enables multimodal image analysis using your configured AI provider.
 

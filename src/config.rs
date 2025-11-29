@@ -9,6 +9,7 @@ fn has_mcpz() -> bool {
 }
 
 /// Embedded DMN (Default Mode Network) MCP configuration
+/// Minimal set: shell + filesystem (interpret_image is built-in)
 pub fn get_dmn_mcp_config() -> McpConfig {
     let mut servers = HashMap::new();
     let use_mcpz = has_mcpz();
@@ -28,46 +29,6 @@ pub fn get_dmn_mcp_config() -> McpConfig {
             McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()], url: None }
         } else {
             McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()], url: None }
-        },
-    );
-
-    servers.insert(
-        "text-editor".to_string(),
-        McpServerConfig {
-            command: "uvx".to_string(),
-            args: vec!["mcp-text-editor".to_string()],
-            url: None,
-        },
-    );
-
-    servers.insert(
-        "grep".to_string(),
-        McpServerConfig {
-            command: "npx".to_string(),
-            args: vec!["-y".to_string(), "mcp-ripgrep@latest".to_string()],
-            url: None,
-        },
-    );
-
-    servers.insert(
-        "memory".to_string(),
-        McpServerConfig {
-            command: "npx".to_string(),
-            args: vec![
-                "-y".to_string(),
-                "@modelcontextprotocol/server-memory".to_string(),
-                "~/.eunice".to_string(),
-            ],
-            url: None,
-        },
-    );
-
-    servers.insert(
-        "web".to_string(),
-        McpServerConfig {
-            command: "npx".to_string(),
-            args: vec!["-y".to_string(), "@brave/brave-search-mcp-server".to_string()],
-            url: None,
         },
     );
 

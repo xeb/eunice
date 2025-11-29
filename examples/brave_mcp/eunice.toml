@@ -1,0 +1,7 @@
+# Brave Web Search Example
+# Demonstrates using the Brave Search MCP server for web searches.
+# Requires: BRAVE_API_KEY environment variable
+
+[mcpServers.web]
+command = "npx"
+args = ["-y", "@anthropic-ai/mcp-server-brave-search"]

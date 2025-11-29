@@ -226,6 +226,59 @@ chmod +x "$MULTI_SCRIPT"
 record_demo "demo_multiagent" 105 32 14 "$MULTI_SCRIPT"
 
 # =============================================================================
+# Demo 4: Image Interpretation
+# =============================================================================
+IMAGE_EXAMPLE="$PROJECT_DIR/examples/image_understanding"
+
+IMAGE_SCRIPT="/tmp/demo_images.sh"
+cat > "$IMAGE_SCRIPT" << SCRIPT
+#!/bin/bash
+
+show() {
+    echo -e "\033[32m\\\$\033[0m \$1"
+    sleep 0.5
+}
+
+run() {
+    echo -e "\033[32m\\\$\033[0m \$1"
+    sleep 0.3
+    eval "\$1"
+    sleep 0.8
+}
+
+echo ""
+echo -e "\033[1;36m# Image Interpretation - Multimodal Analysis\033[0m"
+sleep 0.5
+
+run "cd $IMAGE_EXAMPLE && ls"
+sleep 0.5
+
+echo ""
+echo -e "\033[1;36m# Method 1: Using --images flag (standalone, no MCP)\033[0m"
+sleep 0.5
+
+show 'eunice --images --no-mcp "Describe what you see in sample.jpg"'
+sleep 0.3
+cd "$IMAGE_EXAMPLE"
+eunice --images --no-mcp "Describe what you see in sample.jpg" 2>&1
+sleep 1.5
+
+echo ""
+echo -e "\033[1;36m# Method 2: Using --dmn mode (with all MCP tools)\033[0m"
+sleep 0.5
+
+show 'eunice --dmn "What text is visible in sample.jpg?"'
+sleep 0.3
+eunice --dmn "What text is visible in sample.jpg?" 2>&1
+sleep 1
+
+echo ""
+SCRIPT
+chmod +x "$IMAGE_SCRIPT"
+
+record_demo "demo_images" 110 35 14 "$IMAGE_SCRIPT"
+
+# =============================================================================
 # Summary
 # =============================================================================
 echo ""
@@ -237,3 +290,4 @@ echo "Add to README.md:"
 echo '  ![Basic Usage](assets/demo_basic.gif)'
 echo '  ![DMN Mode](assets/demo_dmn.gif)'
 echo '  ![Multi-Agent Mode](assets/demo_multiagent.gif)'
+echo '  ![Image Interpretation](assets/demo_images.gif)'
