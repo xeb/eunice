@@ -91,19 +91,21 @@ sleep 0.5
 run "eunice --version"
 
 echo ""
-echo -e "\033[1;36m# Ask a simple question\033[0m"
+echo -e "\033[1;36m# Ask a simple question (no MCP tools)\033[0m"
 sleep 0.5
 
-show 'eunice "What is 2 + 2?"'
+show 'eunice --no-mcp "What is 2 + 2?"'
 sleep 0.3
-eunice "What is 2 + 2?" 2>&1
+eunice --no-mcp "What is 2 + 2?" 2>&1
 sleep 1.5
 
 echo ""
 echo -e "\033[1;36m# List available models\033[0m"
 sleep 0.5
 
-run "eunice --list-models | head -12"
+show "eunice --list-models | head -12"
+sleep 0.3
+eunice --list-models 2>/dev/null | head -12
 
 echo ""
 sleep 0.5
@@ -156,7 +158,7 @@ sleep 0.5
 show 'eunice --dmn "What files are here? Give a 1-line summary"'
 sleep 0.3
 cd "$DMN_EXAMPLE"
-timeout 45 eunice --dmn "What files are here? Give a 1-line summary" 2>&1 | head -40 || true
+eunice --dmn "What files are here? Give a 1-line summary" 2>&1
 sleep 1
 
 echo ""
@@ -208,7 +210,7 @@ sleep 0.5
 show 'eunice "I would like a cheeseburger please"'
 sleep 0.3
 cd "$PROJECT_DIR/examples/real_multi_agent"
-timeout 60 eunice "I would like a cheeseburger please" 2>&1 | head -50 || true
+eunice "I would like a cheeseburger please" 2>&1
 sleep 1
 
 echo ""
