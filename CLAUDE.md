@@ -188,9 +188,9 @@ eunice --agent worker "task"     # Use specific agent
 eunice --list-agents             # Show configured agents
 ```
 
-## Image Interpretation
+## Image and PDF Interpretation
 
-Eunice includes a built-in `interpret_image` tool for multimodal image analysis.
+Eunice includes a built-in `interpret_image` tool for multimodal analysis of images and PDF documents.
 
 ### Enabling
 
@@ -209,11 +209,17 @@ Eunice includes a built-in `interpret_image` tool for multimodal image analysis.
   - Native Gemini API (via `inlineData`)
   - OpenAI-compatible API (via `image_url` content blocks)
 
+### Supported Formats
+
+- Images: PNG, JPEG, GIF, WebP
+- Documents: PDF
+
 ### CLI Usage
 
 ```bash
 eunice --images "Describe screenshot.png"
 eunice --dmn "Analyze diagram.jpg and summarize it"
+eunice --dmn "Extract text from document.pdf"
 ```
 
 ## Key Design Decisions
