@@ -14,7 +14,7 @@ fn get_interpret_image_tool_spec() -> Tool {
         tool_type: "function".to_string(),
         function: FunctionSpec {
             name: INTERPRET_IMAGE_TOOL_NAME.to_string(),
-            description: "Analyzes an image file and returns a text description. The user's request will be used to guide the analysis.".to_string(),
+            description: "Analyzes an image or PDF file and returns a text description. Supports PNG, JPEG, GIF, WebP images and PDF documents. The user's request will be used to guide the analysis.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -53,11 +53,14 @@ async fn execute_interpret_image(
     let mime_type = match std::path::Path::new(file_path)
         .extension()
         .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase())
+        .as_deref()
     {
         Some("png") => "image/png",
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
+        Some("pdf") => "application/pdf",
         _ => "application/octet-stream", // Default
     };
 
