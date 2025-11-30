@@ -25,3 +25,6 @@ test_prompt.txt
 test_mcp_config.json
 test_underscore_server.json
 *.cast
+
+# Example logs
+examples/**/*_log.txt
