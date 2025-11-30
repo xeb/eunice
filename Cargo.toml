@@ -10,6 +10,7 @@ homepage = "https://longrunningagents.com"
 readme = "README.md"
 keywords = ["ai", "cli", "llm", "gemini", "openai"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = ["examples/**/*.pdf", "examples/**/*.jpg", "examples/**/*.png", "assets/"]
 
 [[bin]]
 name = "eunice"
