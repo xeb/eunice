@@ -130,10 +130,14 @@ pub struct McpConfig {
     pub mcp_servers: HashMap<String, McpServerConfig>,
     #[serde(default)]
     pub agents: HashMap<String, AgentConfig>,
-    /// Optional list of allowed tool names (full sanitized names like "server_toolname")
+    /// Optional list of allowed tool patterns (supports * wildcard)
     /// If empty or not specified, all tools are allowed
     #[serde(rename = "allowedTools", default)]
     pub allowed_tools: Vec<String>,
+    /// Optional list of denied tool patterns (supports * wildcard)
+    /// Tools matching these patterns are excluded from the model
+    #[serde(rename = "deniedTools", default)]
+    pub denied_tools: Vec<String>,
 }
 
 /// Configuration for a single agent

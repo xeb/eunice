@@ -313,10 +313,21 @@ async fn main() -> Result<()> {
 
     // Handle --list-mcp-servers
     if args.list_mcp_servers {
+        let enable_image_tool = args.dmn || args.images;
+        let mut has_output = false;
+
+        // Show built-in tools section
+        if enable_image_tool {
+            println!("Built-in tools:\n");
+            println!("  interpret_image");
+            println!("    Analyzes images (PNG, JPEG, GIF, WebP) and PDF documents");
+            println!();
+            has_output = true;
+        }
+
+        // Show MCP servers
         if let Some(ref config) = mcp_config {
-            if config.mcp_servers.is_empty() {
-                println!("No MCP servers configured.");
-            } else {
+            if !config.mcp_servers.is_empty() {
                 println!("MCP servers ({}):\n", config.mcp_servers.len());
                 let mut names: Vec<_> = config.mcp_servers.keys().collect();
                 names.sort();
@@ -341,97 +352,136 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+                has_output = true;
             }
-        } else {
-            println!("No configuration loaded. Use --config or --dmn to load MCP servers.");
+        }
+
+        if !has_output {
+            println!("No tools configured. Use --config, --dmn, or --images to enable tools.");
         }
         return Ok(());
     }
 
     // Handle --list-tools
     if args.list_tools {
+        let enable_image_tool = args.dmn || args.images;
+        let mut all_tool_names: Vec<String> = Vec::new();
+
+        // Add built-in tools
+        if enable_image_tool {
+            all_tool_names.push(agent::INTERPRET_IMAGE_TOOL_NAME.to_string());
+        }
+
+        // Get MCP tools if config exists
+        let mut manager_opt: Option<McpManager> = None;
         if let Some(ref config) = mcp_config {
-            if config.mcp_servers.is_empty() {
-                println!("No MCP servers configured.");
-            } else {
+            if !config.mcp_servers.is_empty() {
                 let mut manager = McpManager::new();
-                manager.start_servers_background(config, true, args.verbose); // silent=true to suppress status
+                manager.start_servers_background(config, true, args.verbose);
                 manager.await_all_servers().await;
 
-                // Get ALL tools (unfiltered)
                 let tools = manager.get_tools();
-                if tools.is_empty() {
-                    println!("No tools discovered from MCP servers.");
+                for tool in &tools {
+                    all_tool_names.push(tool.function.name.clone());
+                }
+                manager_opt = Some(manager);
+            }
+        }
+
+        if all_tool_names.is_empty() {
+            println!("No tools available. Use --config, --dmn, or --images to enable tools.");
+        } else {
+            all_tool_names.sort();
+            println!("Discovered tools ({}):\n", all_tool_names.len());
+
+            for name in &all_tool_names {
+                let is_builtin = name == agent::INTERPRET_IMAGE_TOOL_NAME;
+
+                if is_builtin {
+                    println!("  {} [built-in]", name);
+                } else if let Some(ref config) = mcp_config {
+                    // Check allowedTools filter (whitelist)
+                    let passes_allowed = config.allowed_tools.is_empty() ||
+                        config.allowed_tools.iter().any(|p| crate::mcp::tool_matches_pattern(name, p));
+
+                    // Check deniedTools filter (blacklist)
+                    let is_denied = !config.denied_tools.is_empty() &&
+                        config.denied_tools.iter().any(|p| crate::mcp::tool_matches_pattern(name, p));
+
+                    // Check which agents have access to this tool
+                    let mut agent_access: Vec<&str> = Vec::new();
+                    for (agent_name, agent_config) in &config.agents {
+                        if agent_config.tools.iter().any(|p| crate::mcp::tool_matches_pattern(name, p)) {
+                            agent_access.push(agent_name);
+                        }
+                    }
+                    agent_access.sort();
+
+                    // Build display string
+                    let filter_status = if is_denied {
+                        Some("denied")
+                    } else if !config.allowed_tools.is_empty() {
+                        Some(if passes_allowed { "allowed" } else { "filtered" })
+                    } else {
+                        None
+                    };
+
+                    let agents_str = if !agent_access.is_empty() {
+                        Some(format!("agents: {}", agent_access.join(", ")))
+                    } else {
+                        None
+                    };
+
+                    match (filter_status, &agents_str) {
+                        (None, None) => println!("  {}", name),
+                        (Some(f), None) => println!("  {} [{}]", name, f),
+                        (None, Some(a)) => println!("  {} [{}]", name, a),
+                        (Some(f), Some(a)) => println!("  {} [{}, {}]", name, f, a),
+                    }
                 } else {
-                    println!("Discovered tools ({}):\n", tools.len());
-                    let mut tool_names: Vec<_> = tools.iter().map(|t| &t.function.name).collect();
-                    tool_names.sort();
+                    println!("  {}", name);
+                }
+            }
 
-                    for name in &tool_names {
-                        // Check allowedTools filter
-                        let globally_allowed = config.allowed_tools.is_empty() ||
-                            config.allowed_tools.iter().any(|p| crate::mcp::tool_matches_pattern(name, p));
+            // Summary
+            if let Some(ref config) = mcp_config {
+                println!();
+                if !config.allowed_tools.is_empty() {
+                    let allowed_count = all_tool_names.iter().filter(|n| {
+                        *n == agent::INTERPRET_IMAGE_TOOL_NAME ||
+                        config.allowed_tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
+                    }).count();
+                    println!("allowedTools: {:?}", config.allowed_tools);
+                    println!("  {} of {} tools pass whitelist\n", allowed_count, all_tool_names.len());
+                }
 
-                        // Check which agents have access to this tool
-                        let mut agent_access: Vec<&str> = Vec::new();
-                        for (agent_name, agent_config) in &config.agents {
-                            if agent_config.tools.iter().any(|p| crate::mcp::tool_matches_pattern(name, p)) {
-                                agent_access.push(agent_name);
-                            }
-                        }
-                        agent_access.sort();
+                if !config.denied_tools.is_empty() {
+                    let denied_count = all_tool_names.iter().filter(|n| {
+                        config.denied_tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
+                    }).count();
+                    println!("deniedTools: {:?}", config.denied_tools);
+                    println!("  {} of {} tools blocked by blacklist\n", denied_count, all_tool_names.len());
+                }
 
-                        // Build display string
-                        let filter_status = if !config.allowed_tools.is_empty() {
-                            Some(if globally_allowed { "allowed" } else { "filtered" })
-                        } else {
-                            None
-                        };
-
-                        let agents_str = if !agent_access.is_empty() {
-                            Some(format!("agents: {}", agent_access.join(", ")))
-                        } else {
-                            None
-                        };
-
-                        match (filter_status, &agents_str) {
-                            (None, None) => println!("  {}", name),
-                            (Some(f), None) => println!("  {} [{}]", name, f),
-                            (None, Some(a)) => println!("  {} [{}]", name, a),
-                            (Some(f), Some(a)) => println!("  {} [{}, {}]", name, f, a),
-                        }
-                    }
-
-                    // Summary
-                    println!();
-                    if !config.allowed_tools.is_empty() {
-                        let allowed_count = tool_names.iter().filter(|n| {
-                            config.allowed_tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
-                        }).count();
-                        println!("allowedTools: {:?}", config.allowed_tools);
-                        println!("  {} of {} tools pass filter\n", allowed_count, tool_names.len());
-                    }
-
-                    if !config.agents.is_empty() {
-                        println!("Agents:");
-                        let mut agent_names: Vec<_> = config.agents.keys().collect();
-                        agent_names.sort();
-                        for agent_name in agent_names {
-                            if let Some(agent) = config.agents.get(agent_name) {
-                                let tool_count = tool_names.iter().filter(|n| {
-                                    agent.tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
-                                }).count();
-                                println!("  {}: {} tools (patterns: {:?})", agent_name, tool_count, agent.tools);
-                            }
+                if !config.agents.is_empty() {
+                    println!("Agents:");
+                    let mut agent_names: Vec<_> = config.agents.keys().collect();
+                    agent_names.sort();
+                    for agent_name in agent_names {
+                        if let Some(agent_cfg) = config.agents.get(agent_name) {
+                            let tool_count = all_tool_names.iter().filter(|n| {
+                                agent_cfg.tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
+                            }).count();
+                            println!("  {}: {} tools (patterns: {:?})", agent_name, tool_count, agent_cfg.tools);
                         }
                     }
                 }
-
-                // Shutdown servers
-                manager.shutdown().await?;
             }
-        } else {
-            println!("No configuration loaded.");
+        }
+
+        // Shutdown MCP servers if started
+        if let Some(mut manager) = manager_opt {
+            manager.shutdown().await?;
         }
         return Ok(());
     }
@@ -461,6 +511,11 @@ async fn main() -> Result<()> {
         // Set allowed tools filter if configured
         if !config.allowed_tools.is_empty() {
             manager.set_allowed_tools(config.allowed_tools.clone());
+        }
+
+        // Set denied tools filter if configured
+        if !config.denied_tools.is_empty() {
+            manager.set_denied_tools(config.denied_tools.clone());
         }
 
         // Create orchestrator if agents are configured
@@ -701,6 +756,7 @@ mod tests {
             mcp_servers: std::collections::HashMap::new(),
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
         };
         let result = format_agents(&config);
         assert!(result.is_empty());
@@ -713,6 +769,7 @@ mod tests {
             mcp_servers: std::collections::HashMap::new(),
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
         };
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "You are root".to_string(),
@@ -737,6 +794,7 @@ mod tests {
             mcp_servers: std::collections::HashMap::new(),
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
         };
         config.mcp_servers.insert("shell".to_string(), McpServerConfig {
             command: "mcpz".to_string(),
@@ -756,6 +814,7 @@ mod tests {
             mcp_servers: std::collections::HashMap::new(),
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
         };
         config.mcp_servers.insert("remote".to_string(), McpServerConfig {
             command: String::new(),

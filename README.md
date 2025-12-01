@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**4,328 lines of Rust** • **4.4MB binary** - Emphasizing "sophisticated simplicity".
+**4,394 lines of Rust** • **4.3MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -389,16 +389,25 @@ The `tools` array in agent configs uses tool name patterns with wildcard support
 
 ### Global Tool Filtering
 
-Use `allowedTools` to restrict which tools are available globally:
+Use `allowedTools` (whitelist) and `deniedTools` (blacklist) to control which tools are available:
 
 ```toml
 [mcpServers.fs]
 command = "mcpz"
 args = ["server", "filesystem"]
 
-# Only expose read operations to the model
-allowedTools = ["fs_read_*", "fs_list_*", "fs_search_*"]
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+
+# Whitelist: Only allow these tool patterns
+allowedTools = ["fs_*", "shell_execute"]
+
+# Blacklist: Exclude dangerous tools (applied after whitelist)
+deniedTools = ["shell_*_background", "*_delete*", "*_move*"]
 ```
+
+Both support wildcard patterns (`*`). The blacklist is applied after the whitelist, so you can allow a broad set and then deny specific dangerous tools.
 
 ### Listing Agents
 

@@ -36,6 +36,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         mcp_servers: servers,
         agents: HashMap::new(),
         allowed_tools: Vec::new(),
+        denied_tools: Vec::new(),
     }
 }
 

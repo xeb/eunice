@@ -7,9 +7,10 @@ use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 // --- Built-in interpret_image tool ---
-const INTERPRET_IMAGE_TOOL_NAME: &str = "interpret_image";
+pub const INTERPRET_IMAGE_TOOL_NAME: &str = "interpret_image";
 
-fn get_interpret_image_tool_spec() -> Tool {
+/// Get the tool spec for the built-in interpret_image tool
+pub fn get_interpret_image_tool_spec() -> Tool {
     Tool {
         tool_type: "function".to_string(),
         function: FunctionSpec {

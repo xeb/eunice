@@ -267,6 +267,10 @@ args = ["server", "shell"]
 command = "mcpz"
 args = ["server", "filesystem"]
 
+# Global tool filtering (optional)
+allowedTools = ["shell_*", "fs_*"]   # Whitelist: only these patterns
+deniedTools = ["*_delete*"]          # Blacklist: exclude these patterns
+
 [agents.root]
 prompt = "You are the coordinator. Delegate tasks to workers."
 tools = []
@@ -274,7 +278,7 @@ can_invoke = ["worker"]
 
 [agents.worker]
 prompt = "agents/worker.md"  # Can be file path
-tools = ["shell", "filesystem"]
+tools = ["shell_*", "fs_read_*"]     # Tool patterns with wildcards
 can_invoke = []
 ```
 
@@ -296,8 +300,9 @@ eunice --list-agents
 1. When `[agents]` section exists in config, multi-agent mode auto-enables
 2. Each agent gets `invoke_*` tools for agents in their `can_invoke` list
 3. Agent prompts can be inline strings or file paths (`.md`, `.txt`)
-4. MCP tools are filtered per-agent based on `tools` list
-5. Agents can invoke other agents recursively with depth tracking
+4. MCP tools are filtered globally via `allowedTools` (whitelist) and `deniedTools` (blacklist)
+5. MCP tools are filtered per-agent based on `tools` list patterns
+6. Agents can invoke other agents recursively with depth tracking
 
 ### Example: Restaurant Simulation
 

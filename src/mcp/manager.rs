@@ -51,8 +51,10 @@ pub struct McpManager {
     silent: bool,
     /// Whether to print verbose debug messages
     verbose: bool,
-    /// Optional list of allowed tool names (if empty, all tools are allowed)
+    /// Optional list of allowed tool patterns (if empty, all tools are allowed)
     allowed_tools: Vec<String>,
+    /// Optional list of denied tool patterns (tools matching these are excluded)
+    denied_tools: Vec<String>,
 }
 
 impl McpManager {
@@ -63,12 +65,18 @@ impl McpManager {
             silent: false,
             verbose: false,
             allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
         }
     }
 
     /// Set the allowed tools filter
     pub fn set_allowed_tools(&mut self, allowed: Vec<String>) {
         self.allowed_tools = allowed;
+    }
+
+    /// Set the denied tools filter
+    pub fn set_denied_tools(&mut self, denied: Vec<String>) {
+        self.denied_tools = denied;
     }
 
     /// Start all MCP servers from configuration in the background (non-blocking)
@@ -117,15 +125,9 @@ impl McpManager {
                 match &result {
                     Ok(server) => {
                         eprintln!(
-                            "  {} ready (HTTP): {} tools ({})",
+                            "  {} ready (HTTP): {} tools",
                             server_name,
-                            server.tools.len(),
-                            server
-                                .tools
-                                .iter()
-                                .map(|t| t.function.name.clone())
-                                .collect::<Vec<_>>()
-                                .join(", ")
+                            server.tools.len()
                         );
                     }
                     Err(e) => {
@@ -170,15 +172,9 @@ impl McpManager {
                         match &result {
                             Ok(server) => {
                                 eprintln!(
-                                    "  {} ready: {} tools ({})",
+                                    "  {} ready: {} tools",
                                     server_name,
-                                    server.tools.len(),
-                                    server
-                                        .tools
-                                        .iter()
-                                        .map(|t| t.function.name.clone())
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
+                                    server.tools.len()
                                 );
                             }
                             Err(e) => {
@@ -253,7 +249,7 @@ impl McpManager {
 
     /// Get all available tools from ready servers
     /// Note: This only returns tools from servers that have finished initializing
-    /// If allowed_tools is set, only returns tools matching those patterns
+    /// Applies allowed_tools filter (whitelist) and denied_tools filter (blacklist)
     pub fn get_tools(&self) -> Vec<Tool> {
         let mut tools = Vec::new();
         for state in self.servers.values() {
@@ -262,10 +258,19 @@ impl McpManager {
             }
         }
 
-        // Filter by allowed_tools patterns if set
+        // Filter by allowed_tools patterns if set (whitelist)
         if !self.allowed_tools.is_empty() {
             tools.retain(|t| {
                 self.allowed_tools.iter().any(|pattern| {
+                    crate::mcp::tool_matches_pattern(&t.function.name, pattern)
+                })
+            });
+        }
+
+        // Filter out denied_tools patterns (blacklist)
+        if !self.denied_tools.is_empty() {
+            tools.retain(|t| {
+                !self.denied_tools.iter().any(|pattern| {
                     crate::mcp::tool_matches_pattern(&t.function.name, pattern)
                 })
             });

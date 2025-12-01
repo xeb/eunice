@@ -161,14 +161,18 @@ Agents are defined in `eunice.toml`:
 command = "mcpz"
 args = ["server", "shell"]
 
+# Global tool filtering (optional)
+allowedTools = ["shell_*"]           # Whitelist: only these patterns
+deniedTools = ["*_background"]       # Blacklist: exclude these patterns
+
 [agents.root]
 prompt = "You are the coordinator..."
-tools = []                           # MCP servers this agent can use
+tools = []                           # Tool patterns this agent can use
 can_invoke = ["worker"]              # Agents this agent can call
 
 [agents.worker]
 prompt = "agents/worker.md"          # Can be file path
-tools = ["shell"]
+tools = ["shell_*"]                  # Supports wildcards: shell_*, *_read, etc.
 can_invoke = []
 ```
 

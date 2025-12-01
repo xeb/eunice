@@ -18,6 +18,7 @@ Eunice provides a single CLI for multiple AI providers with automatic model dete
 
 - [examples/real_multi_agent/](examples/real_multi_agent/): Restaurant simulation demonstrating multi-agent orchestration
 - [examples/real_multi_agent/eunice.toml](examples/real_multi_agent/eunice.toml): Example multi-agent configuration with 4 cooperating agents
+- [examples/tool_filtering/](examples/tool_filtering/): Fine-grained tool access control with reader/writer agents
 - [examples/just_shell_inspection/](examples/just_shell_inspection/): Simple MCP shell server example
 
 ## Source Structure
