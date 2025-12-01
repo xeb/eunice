@@ -1,0 +1,50 @@
+# Tool Filtering Example
+#
+# Demonstrates fine-grained tool access control using patterns with wildcards.
+#
+# This example has three agents:
+# - root: Coordinator that delegates to reader/writer
+# - reader: Can ONLY read files (no write access)
+# - writer: Can ONLY write/edit files (no read access)
+#
+# Usage:
+#   eunice --list-tools                    # See all tools and agent access
+#   eunice "Read notes.txt"                # Root delegates to reader
+#   eunice "Write 'hello' to output.txt"   # Root delegates to writer
+#
+# Tool patterns support wildcards:
+#   - "fs_read_file"     - exact match
+#   - "fs_*"             - all tools starting with "fs_"
+#   - "*_file"           - all tools ending with "_file"
+#   - "fs_*_file"        - tools starting with "fs_" and ending with "_file"
+
+[mcpServers.fs]
+command = "mcpz"
+args = ["server", "filesystem"]
+
+# Root agent - coordinator (no direct tool access)
+[agents.root]
+prompt = """You are a task coordinator. You delegate file operations to specialized agents:
+- Use invoke_reader for ANY read operations (reading files, listing directories, searching)
+- Use invoke_writer for ANY write operations (writing, editing, creating files)
+
+You cannot access files directly. Always delegate to the appropriate agent.
+When asked to read something, invoke the reader. When asked to write something, invoke the writer."""
+tools = []
+can_invoke = ["reader", "writer"]
+
+# Reader agent - read-only access
+[agents.reader]
+prompt = """You are a file reader. You can ONLY read files and list directories.
+You cannot write, edit, create, or delete files.
+Use your tools to help the user read file contents."""
+tools = ["fs_read_file", "fs_read_multiple_files", "fs_list_directory", "fs_directory_tree", "fs_search_files", "fs_get_file_info"]
+can_invoke = []
+
+# Writer agent - write-only access
+[agents.writer]
+prompt = """You are a file writer. You can ONLY write and edit files.
+You cannot read file contents (use the reader agent for that).
+Use your tools to help the user write or edit files."""
+tools = ["fs_write_file", "fs_edit_file", "fs_create_directory", "fs_move_file"]
+can_invoke = []

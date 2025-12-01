@@ -47,14 +47,12 @@ pub enum ServerState {
 /// Manages multiple MCP servers and routes tool calls with lazy loading
 pub struct McpManager {
     servers: HashMap<String, ServerState>,
-    /// Maps short prefix (e.g., "m0") to full server name for tool routing
-    prefix_to_server: HashMap<String, String>,
-    /// Counter for generating short prefixes
-    prefix_counter: usize,
     /// Whether to print status messages
     silent: bool,
     /// Whether to print verbose debug messages
     verbose: bool,
+    /// Optional list of allowed tool names (if empty, all tools are allowed)
+    allowed_tools: Vec<String>,
 }
 
 impl McpManager {
@@ -62,18 +60,15 @@ impl McpManager {
     pub fn new() -> Self {
         Self {
             servers: HashMap::new(),
-            prefix_to_server: HashMap::new(),
-            prefix_counter: 0,
             silent: false,
             verbose: false,
+            allowed_tools: Vec::new(),
         }
     }
 
-    /// Generate a short prefix for a server (e.g., "m0", "m1", ...)
-    fn next_prefix(&mut self) -> String {
-        let prefix = format!("m{}", self.prefix_counter);
-        self.prefix_counter += 1;
-        prefix
+    /// Set the allowed tools filter
+    pub fn set_allowed_tools(&mut self, allowed: Vec<String>) {
+        self.allowed_tools = allowed;
     }
 
     /// Start all MCP servers from configuration in the background (non-blocking)
@@ -83,32 +78,23 @@ impl McpManager {
         self.verbose = verbose;
 
         for (name, server_config) in &config.mcp_servers {
-            // Generate a short prefix for this server
-            let prefix = self.next_prefix();
-            self.prefix_to_server.insert(prefix.clone(), name.clone());
-
-            if verbose {
-                eprintln!("  [verbose] Server '{}' assigned prefix '{}'", name, prefix);
-            }
-
             // Check if this is an HTTP server or stdio server
             if server_config.is_http() {
-                self.start_http_server(name, &prefix, server_config.url.as_ref().unwrap(), server_config.timeout, silent, verbose);
+                self.start_http_server(name, server_config.url.as_ref().unwrap(), server_config.timeout, silent, verbose);
             } else {
-                self.start_stdio_server(name, &prefix, &server_config.command, &server_config.args, server_config.timeout, silent, verbose);
+                self.start_stdio_server(name, &server_config.command, &server_config.args, server_config.timeout, silent, verbose);
             }
         }
     }
 
     /// Start an HTTP-based MCP server in the background
-    fn start_http_server(&mut self, name: &str, prefix: &str, url: &str, timeout: Option<u64>, silent: bool, verbose: bool) {
+    fn start_http_server(&mut self, name: &str, url: &str, timeout: Option<u64>, silent: bool, verbose: bool) {
         if !silent {
             eprintln!("Connecting to HTTP MCP server: {} at {}", name, url);
         }
 
         if verbose {
             eprintln!("  [verbose] HTTP MCP server '{}' config:", name);
-            eprintln!("    prefix: '{}'", prefix);
             eprintln!("    url: '{}'", url);
             if let Some(t) = timeout {
                 eprintln!("    timeout: {}s", t);
@@ -116,7 +102,6 @@ impl McpManager {
         }
 
         let server_name = name.to_string();
-        let server_prefix = prefix.to_string();
         let server_url = url.to_string();
         let server_timeout = timeout;
         let is_silent = silent;
@@ -126,7 +111,7 @@ impl McpManager {
             if is_verbose {
                 eprintln!("  [verbose] Connecting to HTTP MCP server '{}'...", server_name);
             }
-            let result = HttpMcpServer::connect(&server_name, &server_prefix, &server_url, server_timeout, is_verbose).await;
+            let result = HttpMcpServer::connect(&server_name, &server_url, server_timeout, is_verbose).await;
 
             if !is_silent {
                 match &result {
@@ -157,14 +142,13 @@ impl McpManager {
     }
 
     /// Start a stdio-based MCP server in the background
-    fn start_stdio_server(&mut self, name: &str, prefix: &str, command: &str, args: &[String], timeout: Option<u64>, silent: bool, verbose: bool) {
+    fn start_stdio_server(&mut self, name: &str, command: &str, args: &[String], timeout: Option<u64>, silent: bool, verbose: bool) {
         if !silent {
             eprintln!("Starting MCP server: {} (background)", name);
         }
 
         if verbose {
             eprintln!("  [verbose] MCP server '{}' spawn config:", name);
-            eprintln!("    prefix: '{}'", prefix);
             eprintln!("    command: '{}'", command);
             eprintln!("    args: {:?}", args);
             if let Some(t) = timeout {
@@ -173,7 +157,7 @@ impl McpManager {
         }
 
         // Spawn the process synchronously (fast, doesn't block)
-        match SpawnedServer::spawn(name, prefix, command, args, timeout, verbose) {
+        match SpawnedServer::spawn(name, command, args, timeout, verbose) {
             Ok(spawned) => {
                 let server_name = name.to_string();
                 let is_silent = silent;
@@ -269,6 +253,7 @@ impl McpManager {
 
     /// Get all available tools from ready servers
     /// Note: This only returns tools from servers that have finished initializing
+    /// If allowed_tools is set, only returns tools matching those patterns
     pub fn get_tools(&self) -> Vec<Tool> {
         let mut tools = Vec::new();
         for state in self.servers.values() {
@@ -276,6 +261,16 @@ impl McpManager {
                 tools.extend(server.tools().iter().cloned());
             }
         }
+
+        // Filter by allowed_tools patterns if set
+        if !self.allowed_tools.is_empty() {
+            tools.retain(|t| {
+                self.allowed_tools.iter().any(|pattern| {
+                    crate::mcp::tool_matches_pattern(&t.function.name, pattern)
+                })
+            });
+        }
+
         tools
     }
 
@@ -286,17 +281,17 @@ impl McpManager {
         tool_name: &str,
         arguments: serde_json::Value,
     ) -> Result<String> {
-        // Find the server that owns this tool using short prefix (m0_, m1_, etc.)
+        // Find the server that owns this tool by checking server name prefix
         let best_match = self
-            .prefix_to_server
-            .iter()
-            .filter_map(|(prefix, server_name)| {
-                let full_prefix = format!("{}_", prefix);
+            .servers
+            .keys()
+            .filter_map(|server_name| {
+                let full_prefix = format!("{}_", server_name);
                 tool_name
                     .strip_prefix(&full_prefix)
                     .map(|actual_tool_name| (server_name.clone(), actual_tool_name.to_string()))
             })
-            .next(); // Prefixes are unique, so first match is correct
+            .next();
 
         let Some((server_name, actual_tool_name)) = best_match else {
             return Err(anyhow!("No server found for tool '{}'", tool_name));
@@ -449,8 +444,6 @@ mod tests {
     #[tokio::test]
     async fn test_failed_server_state() {
         let mut manager = McpManager::new();
-        // Set up the prefix mapping
-        manager.prefix_to_server.insert("m0".to_string(), "test_server".to_string());
         manager.servers.insert(
             "test_server".to_string(),
             ServerState::Failed("spawn error".to_string()),
@@ -459,9 +452,9 @@ mod tests {
         assert_eq!(manager.server_count(), 1);
         assert_eq!(manager.ready_count(), 0);
 
-        // Tool execution should fail with descriptive error (using short prefix)
+        // Tool execution should fail with descriptive error
         let result = manager
-            .execute_tool("m0_sometool", serde_json::json!({}))
+            .execute_tool("test_server_sometool", serde_json::json!({}))
             .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("failed to start"));

@@ -170,7 +170,7 @@ impl AgentOrchestrator {
         })
     }
 
-    /// Get MCP tools filtered by agent's allowed tools
+    /// Get MCP tools filtered by agent's allowed tool patterns
     fn get_filtered_tools(&self, agent: &AgentConfig, mcp_manager: &McpManager) -> Vec<Tool> {
         if agent.tools.is_empty() {
             return Vec::new();
@@ -178,10 +178,9 @@ impl AgentOrchestrator {
 
         let all_tools = mcp_manager.get_tools();
         all_tools.into_iter().filter(|tool| {
-            // Check if tool belongs to any allowed server
-            agent.tools.iter().any(|allowed| {
-                let prefix = format!("{}_", allowed);
-                tool.function.name.starts_with(&prefix)
+            // Check if tool matches any allowed pattern
+            agent.tools.iter().any(|pattern| {
+                crate::mcp::tool_matches_pattern(&tool.function.name, pattern)
             })
         }).collect()
     }

@@ -23,73 +23,86 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Parser)]
 #[command(name = "eunice", about = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support", version = VERSION)]
 struct Args {
+    // === Main Options ===
     /// AI model to use
-    #[arg(long)]
+    #[arg(long, help_heading = "Main Options")]
     model: Option<String>,
 
     /// Prompt as file path or string
-    #[arg(long)]
+    #[arg(long, help_heading = "Main Options")]
     prompt: Option<String>,
 
-    /// Limit tool output display (0=unlimited)
-    #[arg(long, default_value = "50")]
-    tool_output_limit: usize,
-
-    /// Show all available models
-    #[arg(long)]
-    list_models: bool,
-
-    /// Output llms.txt (LLM context index)
-    #[arg(long = "llms-txt")]
-    llms_txt: bool,
-
-    /// Output llms-full.txt (full LLM context)
-    #[arg(long = "llms-full-txt")]
-    llms_full_txt: bool,
-
-    /// Path to MCP configuration JSON
-    #[arg(long)]
+    /// Path to MCP configuration (TOML or JSON)
+    #[arg(long, help_heading = "Main Options")]
     config: Option<String>,
 
-    /// Disable MCP even if eunice.json exists
-    #[arg(long)]
-    no_mcp: bool,
+    /// Positional prompt argument
+    #[arg(help_heading = "Main Options")]
+    prompt_positional: Option<String>,
+
+    // === Discovery ===
+    /// List available AI models
+    #[arg(long, help_heading = "Discovery")]
+    list_models: bool,
+
+    /// List configured agents
+    #[arg(long, help_heading = "Discovery")]
+    list_agents: bool,
+
+    /// List discovered MCP tools with sanitized names
+    #[arg(long, help_heading = "Discovery")]
+    list_tools: bool,
+
+    /// List configured MCP servers
+    #[arg(long, help_heading = "Discovery")]
+    list_mcp_servers: bool,
+
+    // === Modes ===
+    /// Interactive mode for multi-turn conversations
+    #[arg(long, short = 'i', help_heading = "Modes")]
+    interact: bool,
 
     /// Enable DMN (Default Mode Network) with auto-loaded MCP tools
-    #[arg(long = "default-mode-network", visible_alias = "dmn")]
+    #[arg(long = "default-mode-network", visible_alias = "dmn", help_heading = "Modes")]
     dmn: bool,
 
     /// Run as a specific agent (uses 'root' by default if agents configured)
-    #[arg(long)]
+    #[arg(long, help_heading = "Modes")]
     agent: Option<String>,
 
-    /// List configured agents
-    #[arg(long)]
-    list_agents: bool,
+    /// Enable built-in image interpretation tool
+    #[arg(long, help_heading = "Modes")]
+    images: bool,
 
-    /// Interactive mode for multi-turn conversations
-    #[arg(long, short = 'i')]
-    interact: bool,
-
+    // === Output ===
     /// Suppress all output except AI responses
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     silent: bool,
 
     /// Enable verbose debug output
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     verbose: bool,
 
     /// Output JSON-RPC events to stdout
-    #[arg(long)]
+    #[arg(long, help_heading = "Output")]
     events: bool,
 
-    /// Enable built-in image interpretation tool
-    #[arg(long)]
-    images: bool,
+    /// Limit tool output display (0=unlimited)
+    #[arg(long, default_value = "50", help_heading = "Output")]
+    tool_output_limit: usize,
 
-    /// Positional prompt argument
-    #[arg()]
-    prompt_positional: Option<String>,
+    /// Output llms.txt (LLM context index)
+    #[arg(long = "llms-txt", help_heading = "Output")]
+    llms_txt: bool,
+
+    /// Output llms-full.txt (full LLM context)
+    #[arg(long = "llms-full-txt", help_heading = "Output")]
+    llms_full_txt: bool,
+
+    // === Advanced ===
+    /// Disable MCP even if eunice.json exists
+    #[arg(long, help_heading = "Advanced")]
+    no_mcp: bool,
 }
 
 /// Print MCP server info for help output
@@ -298,6 +311,131 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Handle --list-mcp-servers
+    if args.list_mcp_servers {
+        if let Some(ref config) = mcp_config {
+            if config.mcp_servers.is_empty() {
+                println!("No MCP servers configured.");
+            } else {
+                println!("MCP servers ({}):\n", config.mcp_servers.len());
+                let mut names: Vec<_> = config.mcp_servers.keys().collect();
+                names.sort();
+                for name in names {
+                    if let Some(server) = config.mcp_servers.get(name) {
+                        if let Some(ref url) = server.url {
+                            // HTTP transport
+                            println!("  {} [http]", name);
+                            println!("    url: {}", url);
+                        } else {
+                            // stdio transport
+                            let args_str = if server.args.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" {}", server.args.join(" "))
+                            };
+                            println!("  {} [stdio]", name);
+                            println!("    command: {}{}", server.command, args_str);
+                        }
+                        if let Some(timeout) = server.timeout {
+                            println!("    timeout: {}s", timeout);
+                        }
+                    }
+                }
+            }
+        } else {
+            println!("No configuration loaded. Use --config or --dmn to load MCP servers.");
+        }
+        return Ok(());
+    }
+
+    // Handle --list-tools
+    if args.list_tools {
+        if let Some(ref config) = mcp_config {
+            if config.mcp_servers.is_empty() {
+                println!("No MCP servers configured.");
+            } else {
+                let mut manager = McpManager::new();
+                manager.start_servers_background(config, true, args.verbose); // silent=true to suppress status
+                manager.await_all_servers().await;
+
+                // Get ALL tools (unfiltered)
+                let tools = manager.get_tools();
+                if tools.is_empty() {
+                    println!("No tools discovered from MCP servers.");
+                } else {
+                    println!("Discovered tools ({}):\n", tools.len());
+                    let mut tool_names: Vec<_> = tools.iter().map(|t| &t.function.name).collect();
+                    tool_names.sort();
+
+                    for name in &tool_names {
+                        // Check allowedTools filter
+                        let globally_allowed = config.allowed_tools.is_empty() ||
+                            config.allowed_tools.iter().any(|p| crate::mcp::tool_matches_pattern(name, p));
+
+                        // Check which agents have access to this tool
+                        let mut agent_access: Vec<&str> = Vec::new();
+                        for (agent_name, agent_config) in &config.agents {
+                            if agent_config.tools.iter().any(|p| crate::mcp::tool_matches_pattern(name, p)) {
+                                agent_access.push(agent_name);
+                            }
+                        }
+                        agent_access.sort();
+
+                        // Build display string
+                        let filter_status = if !config.allowed_tools.is_empty() {
+                            Some(if globally_allowed { "allowed" } else { "filtered" })
+                        } else {
+                            None
+                        };
+
+                        let agents_str = if !agent_access.is_empty() {
+                            Some(format!("agents: {}", agent_access.join(", ")))
+                        } else {
+                            None
+                        };
+
+                        match (filter_status, &agents_str) {
+                            (None, None) => println!("  {}", name),
+                            (Some(f), None) => println!("  {} [{}]", name, f),
+                            (None, Some(a)) => println!("  {} [{}]", name, a),
+                            (Some(f), Some(a)) => println!("  {} [{}, {}]", name, f, a),
+                        }
+                    }
+
+                    // Summary
+                    println!();
+                    if !config.allowed_tools.is_empty() {
+                        let allowed_count = tool_names.iter().filter(|n| {
+                            config.allowed_tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
+                        }).count();
+                        println!("allowedTools: {:?}", config.allowed_tools);
+                        println!("  {} of {} tools pass filter\n", allowed_count, tool_names.len());
+                    }
+
+                    if !config.agents.is_empty() {
+                        println!("Agents:");
+                        let mut agent_names: Vec<_> = config.agents.keys().collect();
+                        agent_names.sort();
+                        for agent_name in agent_names {
+                            if let Some(agent) = config.agents.get(agent_name) {
+                                let tool_count = tool_names.iter().filter(|n| {
+                                    agent.tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
+                                }).count();
+                                println!("  {}: {} tools (patterns: {:?})", agent_name, tool_count, agent.tools);
+                            }
+                        }
+                    }
+                }
+
+                // Shutdown servers
+                manager.shutdown().await?;
+            }
+        } else {
+            println!("No configuration loaded.");
+        }
+        return Ok(());
+    }
+
     // Resolve prompt
     let prompt = resolve_prompt(&args)?;
 
@@ -319,6 +457,11 @@ async fn main() -> Result<()> {
         let mut manager = McpManager::new();
         // Start servers in background - they'll be awaited when tools are called
         manager.start_servers_background(config, args.silent, args.verbose);
+
+        // Set allowed tools filter if configured
+        if !config.allowed_tools.is_empty() {
+            manager.set_allowed_tools(config.allowed_tools.clone());
+        }
 
         // Create orchestrator if agents are configured
         let orch = if !config.agents.is_empty() {
@@ -443,4 +586,176 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Format agents for display (testable helper)
+pub fn format_agents(config: &McpConfig) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut names: Vec<_> = config.agents.keys().collect();
+    names.sort();
+    for name in names {
+        if let Some(agent) = config.agents.get(name) {
+            let tools_str = if agent.tools.is_empty() {
+                "no tools".to_string()
+            } else {
+                agent.tools.join(", ")
+            };
+            let invoke_str = if agent.can_invoke.is_empty() {
+                "".to_string()
+            } else {
+                format!(" → can invoke: {}", agent.can_invoke.join(", "))
+            };
+            result.push(format!("{}: [{}]{}", name, tools_str, invoke_str));
+        }
+    }
+    result
+}
+
+/// Format MCP servers for display (testable helper)
+pub fn format_mcp_servers(config: &McpConfig) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut names: Vec<_> = config.mcp_servers.keys().collect();
+    names.sort();
+    for name in names {
+        if let Some(server) = config.mcp_servers.get(name) {
+            if let Some(ref url) = server.url {
+                result.push(format!("{} [http] url: {}", name, url));
+            } else {
+                let args_str = if server.args.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", server.args.join(" "))
+                };
+                result.push(format!("{} [stdio] command: {}{}", name, server.command, args_str));
+            }
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_args_list_models() {
+        let args = Args::try_parse_from(["eunice", "--list-models"]).unwrap();
+        assert!(args.list_models);
+        assert!(!args.list_agents);
+        assert!(!args.list_tools);
+        assert!(!args.list_mcp_servers);
+    }
+
+    #[test]
+    fn test_args_list_agents() {
+        let args = Args::try_parse_from(["eunice", "--list-agents"]).unwrap();
+        assert!(args.list_agents);
+        assert!(!args.list_models);
+        assert!(!args.list_tools);
+        assert!(!args.list_mcp_servers);
+    }
+
+    #[test]
+    fn test_args_list_tools() {
+        let args = Args::try_parse_from(["eunice", "--list-tools"]).unwrap();
+        assert!(args.list_tools);
+        assert!(!args.list_models);
+        assert!(!args.list_agents);
+        assert!(!args.list_mcp_servers);
+    }
+
+    #[test]
+    fn test_args_list_mcp_servers() {
+        let args = Args::try_parse_from(["eunice", "--list-mcp-servers"]).unwrap();
+        assert!(args.list_mcp_servers);
+        assert!(!args.list_models);
+        assert!(!args.list_agents);
+        assert!(!args.list_tools);
+    }
+
+    #[test]
+    fn test_args_dmn_alias() {
+        let args = Args::try_parse_from(["eunice", "--dmn"]).unwrap();
+        assert!(args.dmn);
+    }
+
+    #[test]
+    fn test_args_default_tool_output_limit() {
+        let args = Args::try_parse_from(["eunice", "hello"]).unwrap();
+        assert_eq!(args.tool_output_limit, 50);
+    }
+
+    #[test]
+    fn test_format_agents_empty() {
+        let config = McpConfig {
+            mcp_servers: std::collections::HashMap::new(),
+            agents: std::collections::HashMap::new(),
+            allowed_tools: Vec::new(),
+        };
+        let result = format_agents(&config);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_format_agents_with_config() {
+        use crate::models::AgentConfig;
+        let mut config = McpConfig {
+            mcp_servers: std::collections::HashMap::new(),
+            agents: std::collections::HashMap::new(),
+            allowed_tools: Vec::new(),
+        };
+        config.agents.insert("root".to_string(), AgentConfig {
+            prompt: "You are root".to_string(),
+            tools: vec!["tool1".to_string()],
+            can_invoke: vec!["worker".to_string()],
+        });
+        config.agents.insert("worker".to_string(), AgentConfig {
+            prompt: "You are worker".to_string(),
+            tools: vec!["tool2".to_string(), "tool3".to_string()],
+            can_invoke: Vec::new(),
+        });
+        let result = format_agents(&config);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "root: [tool1] → can invoke: worker");
+        assert_eq!(result[1], "worker: [tool2, tool3]");
+    }
+
+    #[test]
+    fn test_format_mcp_servers_stdio() {
+        use crate::models::McpServerConfig;
+        let mut config = McpConfig {
+            mcp_servers: std::collections::HashMap::new(),
+            agents: std::collections::HashMap::new(),
+            allowed_tools: Vec::new(),
+        };
+        config.mcp_servers.insert("shell".to_string(), McpServerConfig {
+            command: "mcpz".to_string(),
+            args: vec!["server".to_string(), "shell".to_string()],
+            url: None,
+            timeout: None,
+        });
+        let result = format_mcp_servers(&config);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "shell [stdio] command: mcpz server shell");
+    }
+
+    #[test]
+    fn test_format_mcp_servers_http() {
+        use crate::models::McpServerConfig;
+        let mut config = McpConfig {
+            mcp_servers: std::collections::HashMap::new(),
+            agents: std::collections::HashMap::new(),
+            allowed_tools: Vec::new(),
+        };
+        config.mcp_servers.insert("remote".to_string(), McpServerConfig {
+            command: String::new(),
+            args: Vec::new(),
+            url: Some("http://localhost:3323/mcp".to_string()),
+            timeout: None,
+        });
+        let result = format_mcp_servers(&config);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "remote [http] url: http://localhost:3323/mcp");
+    }
 }

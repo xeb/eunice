@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**3,995 lines of Rust** • **4.3MB binary** - Emphasizing "sophisticated simplicity".
+**4,271 lines of Rust** • **4.4MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -25,7 +25,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 
 Eunice is designed with these principles:
 
-1. **Minimal**: Small codebase (~3,900 lines), few dependencies, fast startup. No bloat.
+1. **Minimal**: Small codebase (~4,200 lines), few dependencies, fast startup. No bloat.
 
 2. **Multi-Backend**: Support multiple LLM providers (OpenAI, Gemini, Claude, Ollama) through a unified interface. Switch models with a flag.
 
@@ -98,11 +98,12 @@ Options:
       --prompt <PROMPT>         Prompt as file path or string
       --tool-output-limit <N>   Limit tool output display (default: 50, 0=unlimited)
       --list-models             Show all available models
+      --list-tools              List all MCP tools with agent access info
+      --list-agents             List configured agents
       --config <FILE>           Path to MCP configuration JSON/TOML
       --no-mcp                  Disable MCP even if eunice.json exists
       --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
       --agent <NAME>            Run as specific agent (default: root if agents configured)
-      --list-agents             List configured agents
   -i, --interact                Interactive mode for multi-turn conversations
       --silent                  Suppress all output except AI responses
       --verbose                 Enable verbose debug output
@@ -294,7 +295,7 @@ Add an `[agents]` section to your `eunice.toml`:
 command = "mcpz"
 args = ["server", "shell"]
 
-[mcpServers.filesystem]
+[mcpServers.fs]
 command = "mcpz"
 args = ["server", "filesystem"]
 
@@ -305,7 +306,7 @@ can_invoke = ["worker"]
 
 [agents.worker]
 prompt = "agents/worker.md"  # Can be file path
-tools = ["shell", "filesystem"]
+tools = ["shell_*", "fs_read_file", "fs_write_file"]  # Tool name patterns
 can_invoke = []
 ```
 
@@ -320,6 +321,9 @@ eunice --agent worker "Run the tests"
 
 # List configured agents
 eunice --list-agents
+
+# List all tools and which agents can access them
+eunice --list-tools
 ```
 
 ### How It Works
@@ -327,16 +331,89 @@ eunice --list-agents
 1. When `[agents]` section exists in config, multi-agent mode auto-enables
 2. Each agent gets `invoke_*` tools for agents in their `can_invoke` list
 3. Agent prompts can be inline strings or file paths (`.md`, `.txt`)
-4. MCP tools are filtered per-agent based on `tools` list
+4. MCP tools are filtered per-agent based on `tools` patterns
 5. Agents can invoke other agents recursively with depth tracking
 
 ### Example: Restaurant Simulation
 
 See [examples/real_multi_agent](examples/real_multi_agent) for a complete example simulating a restaurant with counter, chef, cook, and supplier agents.
 
+### Example: Tool Filtering
+
+See [examples/tool_filtering](examples/tool_filtering) for fine-grained tool access control with reader/writer agents.
+
 ### Example: Remote MCP Server
 
 See [examples/remote_mcp](examples/remote_mcp) for connecting to a remote MCP server via HTTP transport.
+
+## Tool Discovery & Filtering
+
+Eunice provides commands to discover available tools and control which tools are exposed to the model or specific agents.
+
+### Listing Tools
+
+```bash
+# List all tools from configured MCP servers
+eunice --list-tools
+```
+
+Example output:
+```
+Discovered tools (13):
+
+  fs_create_directory [agents: worker]
+  fs_edit_file [agents: worker]
+  fs_list_directory [agents: reader, worker]
+  fs_read_file [agents: reader, worker]
+  fs_write_file [agents: worker]
+  shell_execute_command [agents: worker]
+  ...
+
+Agents:
+  reader: 2 tools (patterns: ["fs_read_file", "fs_list_directory"])
+  root: 0 tools (patterns: [])
+  worker: 6 tools (patterns: ["shell_*", "fs_*"])
+```
+
+### Tool Name Patterns
+
+The `tools` array in agent configs uses tool name patterns with wildcard support:
+
+| Pattern | Matches |
+|---------|---------|
+| `fs_read_file` | Exact match |
+| `fs_*` | All tools starting with `fs_` |
+| `*_file` | All tools ending with `_file` |
+| `fs_*_file` | Tools starting with `fs_` AND ending with `_file` |
+| `*` | All tools |
+
+### Global Tool Filtering
+
+Use `allowedTools` to restrict which tools are available globally:
+
+```toml
+[mcpServers.fs]
+command = "mcpz"
+args = ["server", "filesystem"]
+
+# Only expose read operations to the model
+allowedTools = ["fs_read_*", "fs_list_*", "fs_search_*"]
+```
+
+### Listing Agents
+
+```bash
+# List configured agents and their tool access
+eunice --list-agents
+```
+
+Example output:
+```
+Configured agents:
+  reader: [fs_read_file, fs_list_directory]
+  root: [no tools] → can invoke: reader, writer
+  writer: [fs_write_file, fs_edit_file]
+```
 
 ## Image Interpretation
 

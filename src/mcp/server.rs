@@ -1,4 +1,4 @@
-use crate::mcp::{sanitize_schema, sanitize_tool_name};
+use crate::mcp::{sanitize_schema, sanitize_tool_name, warn_if_tool_name_too_long};
 use crate::models::{
     FunctionSpec, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     McpToolResult, McpToolsResult, Tool,
@@ -15,8 +15,6 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
 /// Represents a spawned but not yet initialized MCP server
 pub struct SpawnedServer {
     name: String,
-    /// Short prefix for tool names (e.g., "m0")
-    prefix: String,
     process: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
@@ -26,7 +24,7 @@ pub struct SpawnedServer {
 impl SpawnedServer {
     /// Spawn a server process without initializing it
     /// Note: This is synchronous but fast - it just spawns the process
-    pub fn spawn(name: &str, prefix: &str, command: &str, args: &[String], timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
+    pub fn spawn(name: &str, command: &str, args: &[String], timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
         // Validate command is not empty
         if command.is_empty() {
             return Err(anyhow!(
@@ -97,7 +95,6 @@ impl SpawnedServer {
 
         Ok(Self {
             name: name.to_string(),
-            prefix: prefix.to_string(),
             process,
             stdin,
             stdout: BufReader::new(stdout),
@@ -110,7 +107,6 @@ impl SpawnedServer {
     pub async fn initialize(self, verbose: bool) -> Result<McpServer> {
         let mut server = McpServer {
             name: self.name,
-            prefix: self.prefix,
             process: self.process,
             stdin: self.stdin,
             stdout: self.stdout,
@@ -146,8 +142,6 @@ impl SpawnedServer {
 /// Represents a single MCP server process
 pub struct McpServer {
     pub name: String,
-    /// Short prefix for tool names (e.g., "m0")
-    prefix: String,
     process: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
@@ -206,9 +200,12 @@ impl McpServer {
             let tools_result: McpToolsResult = serde_json::from_value(result)?;
 
             for mcp_tool in tools_result.tools {
-                // Use short prefix (m0, m1, etc.) instead of full server name to keep tool names short
-                let prefixed_name = format!("{}_{}", self.prefix, mcp_tool.name);
+                // Prefix tool name with server name for routing
+                let prefixed_name = format!("{}_{}", self.name, mcp_tool.name);
                 let (sanitized_name, was_modified) = sanitize_tool_name(&prefixed_name);
+
+                // Warn if tool name exceeds Gemini's limit
+                warn_if_tool_name_too_long(&sanitized_name, &self.name);
 
                 let mut parameters = mcp_tool.input_schema.unwrap_or(serde_json::json!({
                     "type": "object",

@@ -130,6 +130,10 @@ pub struct McpConfig {
     pub mcp_servers: HashMap<String, McpServerConfig>,
     #[serde(default)]
     pub agents: HashMap<String, AgentConfig>,
+    /// Optional list of allowed tool names (full sanitized names like "server_toolname")
+    /// If empty or not specified, all tools are allowed
+    #[serde(rename = "allowedTools", default)]
+    pub allowed_tools: Vec<String>,
 }
 
 /// Configuration for a single agent
@@ -137,7 +141,8 @@ pub struct McpConfig {
 pub struct AgentConfig {
     /// System prompt (inline string or file path)
     pub prompt: String,
-    /// MCP server names this agent can access
+    /// Tool name patterns this agent can access (supports * wildcard)
+    /// Examples: "eng_file_read" (exact), "eng_*" (all eng tools), "*_read" (all read tools)
     #[serde(default)]
     pub tools: Vec<String>,
     /// Agent names this agent can invoke

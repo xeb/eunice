@@ -57,6 +57,24 @@ cat pantry.txt
 - `kitchen_log.txt` - Kitchen activity log
 - `pantry.txt` - Ingredient inventory
 
+## Tool Access Control
+
+Each agent has specific tool access using pattern matching:
+
+```bash
+# See what tools each agent can access
+eunice --list-tools
+```
+
+| Agent | Tools | Purpose |
+|-------|-------|---------|
+| counter (root) | `filesystem_read_file`, `filesystem_list_directory` | Read-only (menus, orders) |
+| head_chef | `filesystem_read_file`, `filesystem_write_file`, `filesystem_edit_file` | Coordinate orders |
+| line_cook | `filesystem_*`, `shell_*` | Full access for cooking |
+| supplier | `filesystem_read_file`, `filesystem_write_file`, `filesystem_edit_file` | Manage inventory |
+
+Tool patterns support wildcards: `filesystem_*` matches all filesystem tools.
+
 ## Customization
 
 Edit the agent prompts in `agents/` to change behavior:
