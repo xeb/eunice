@@ -1,4 +1,4 @@
-use crate::mcp::sanitize_tool_name;
+use crate::mcp::{sanitize_schema, sanitize_tool_name};
 use crate::models::{
     FunctionSpec, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     McpToolResult, McpToolsResult, Tool,
@@ -203,10 +203,12 @@ impl McpServer {
                 let prefixed_name = format!("{}_{}", self.name, mcp_tool.name);
                 let (sanitized_name, was_modified) = sanitize_tool_name(&prefixed_name);
 
-                let parameters = mcp_tool.input_schema.unwrap_or(serde_json::json!({
+                let mut parameters = mcp_tool.input_schema.unwrap_or(serde_json::json!({
                     "type": "object",
                     "properties": {}
                 }));
+                // Remove x-* extension fields that Gemini doesn't support
+                sanitize_schema(&mut parameters);
 
                 if verbose {
                     if was_modified {
