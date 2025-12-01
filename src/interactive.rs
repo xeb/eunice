@@ -146,6 +146,7 @@ async fn run_prompt(
             silent,
             verbose,
             0,
+            None, // No caller for root agent
         )
         .await?;
     } else {

@@ -531,8 +531,16 @@ async fn main() -> Result<()> {
                 display::print_dmn_mode();
             }
 
-            if let Some(ref name) = agent_name {
-                eprintln!("🤖 Multi-Agent Mode: starting as '{}'", name);
+            // Show agent info if in multi-agent mode
+            if let (Some(ref orch), Some(ref name), Some(ref manager)) = (&orchestrator, &agent_name, &mcp_manager) {
+                if let Some(agent) = orch.get_agent(name) {
+                    // Count tools this agent has access to
+                    let all_tools = manager.get_tools();
+                    let tools_count = all_tools.iter().filter(|t| {
+                        agent.tools.iter().any(|p| crate::mcp::tool_matches_pattern(&t.function.name, p))
+                    }).count();
+                    display::print_agent_info(name, tools_count, &agent.can_invoke);
+                }
             }
         }
 
@@ -550,6 +558,7 @@ async fn main() -> Result<()> {
                 args.silent,
                 args.verbose,
                 0,
+                None, // No caller for root agent
             ).await?;
         } else {
             // Single-agent mode (original behavior)

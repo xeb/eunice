@@ -110,26 +110,69 @@ pub fn print_model_info(model: &str, provider: &Provider) {
     );
 }
 
-/// Print MCP server information
+/// Print MCP server information (simplified - just server names and tool counts)
 pub fn print_mcp_info(servers: &[(String, usize, Vec<String>)]) {
     if servers.is_empty() {
         return;
     }
 
-    println!("{} {}", "🔌", "MCP Servers".yellow().bold());
+    let total_tools: usize = servers.iter().map(|(_, count, _)| count).sum();
+    let server_names: Vec<&str> = servers.iter().map(|(name, _, _)| name.as_str()).collect();
 
-    for (name, count, tools) in servers {
-        println!("  {} {} ({} tools)", "📡".dimmed(), name.yellow(), count);
+    println!(
+        "{} {} ({} tools from {})",
+        "🔌",
+        "MCP".yellow().bold(),
+        total_tools.to_string().yellow(),
+        server_names.join(", ").dimmed()
+    );
+}
 
-        // Show up to 4 tools
-        for tool in tools.iter().take(4) {
-            println!("     {} {}", "•".dimmed(), tool.dimmed());
-        }
+/// Print agent startup information
+pub fn print_agent_info(agent_name: &str, tools_count: usize, subagents: &[String]) {
+    let subagents_str = if subagents.is_empty() {
+        "no subagents".dimmed().to_string()
+    } else {
+        format!("{} subagents", subagents.len()).to_string()
+    };
 
-        if tools.len() > 4 {
-            println!("     {} {}", "•".dimmed(), format!("...{} more", tools.len() - 4).dimmed());
-        }
-    }
+    println!(
+        "{} Agent {} ({} tools, {})",
+        "🤖",
+        agent_name.yellow().bold(),
+        tools_count.to_string().yellow(),
+        subagents_str.dimmed()
+    );
+}
+
+/// Print agent invocation (when one agent calls another)
+pub fn print_agent_invoke(from_agent: &str, to_agent: &str, task: &str, depth: usize) {
+    let indent = "  ".repeat(depth);
+    let task_preview = if task.len() > 60 {
+        format!("{}...", &task[..57])
+    } else {
+        task.to_string()
+    };
+
+    println!(
+        "{}{}→{} {}",
+        indent,
+        from_agent.blue(),
+        to_agent.yellow().bold(),
+        task_preview.dimmed()
+    );
+}
+
+/// Print agent completion
+pub fn print_agent_complete(agent_name: &str, depth: usize) {
+    let indent = "  ".repeat(depth);
+    println!(
+        "{}{}←{} {}",
+        indent,
+        "".green(),
+        agent_name.yellow(),
+        "done".dimmed()
+    );
 }
 
 /// Print DMN mode indicator

@@ -117,6 +117,7 @@ impl AgentOrchestrator {
         silent: bool,
         verbose: bool,
         depth: usize,
+        caller_agent: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
         Box::pin(async move {
             let agent = self.agents.get(agent_name)
@@ -135,10 +136,11 @@ impl AgentOrchestrator {
                 format!("{}\n\n# TASK\n{}", system_prompt, task)
             };
 
-            // Display agent invocation
-            if !silent {
-                let indent = "  ".repeat(depth);
-                eprintln!("{}🤖 Agent '{}' starting task: {}", indent, agent_name, truncate_prompt(task, 60));
+            // Display agent invocation (only for subagent calls, not root)
+            if !silent && depth > 0 {
+                if let Some(caller) = caller_agent {
+                    display::print_agent_invoke(caller, agent_name, task, depth);
+                }
             }
 
             // Get tools for this agent
@@ -161,9 +163,9 @@ impl AgentOrchestrator {
                 depth,
             ).await?;
 
-            if !silent {
-                let indent = "  ".repeat(depth);
-                eprintln!("{}✅ Agent '{}' completed", indent, agent_name);
+            // Show completion for subagent calls
+            if !silent && depth > 0 {
+                display::print_agent_complete(agent_name, depth);
             }
 
             Ok(result)
@@ -284,7 +286,8 @@ impl AgentOrchestrator {
                 let tool_name = &tool_call.function.name;
                 let arguments = &tool_call.function.arguments;
 
-                if !silent {
+                // Only show tool icon for MCP tools, not invoke calls
+                if !silent && !self.is_invoke_tool(tool_name) {
                     eprintln!("{}🔧 {}", indent, tool_name);
                 }
 
@@ -294,7 +297,7 @@ impl AgentOrchestrator {
                     // Handle agent invocation
                     self.handle_invoke(
                         client, model, tool_name, &args, mcp_manager,
-                        tool_output_limit, silent, verbose, depth,
+                        tool_output_limit, silent, verbose, depth, agent_name,
                     ).await
                 } else {
                     // Regular MCP tool
@@ -340,6 +343,7 @@ impl AgentOrchestrator {
         silent: bool,
         verbose: bool,
         depth: usize,
+        caller_agent: &str,
     ) -> String {
         let Some(target_agent) = self.get_invoke_target(tool_name) else {
             return format!("Error: Invalid invoke tool name: {}", tool_name);
@@ -354,7 +358,7 @@ impl AgentOrchestrator {
 
         match self.run_agent(
             client, model, target_agent, task, context,
-            mcp_manager, tool_output_limit, silent, verbose, depth + 1,
+            mcp_manager, tool_output_limit, silent, verbose, depth + 1, Some(caller_agent),
         ).await {
             Ok(result) => result,
             Err(e) => format!("Agent '{}' failed: {}", target_agent, e),
