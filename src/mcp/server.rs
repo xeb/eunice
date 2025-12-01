@@ -1,3 +1,4 @@
+use crate::mcp::sanitize_tool_name;
 use crate::models::{
     FunctionSpec, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     McpToolResult, McpToolsResult, Tool,
@@ -19,17 +20,62 @@ pub struct SpawnedServer {
 impl SpawnedServer {
     /// Spawn a server process without initializing it
     /// Note: This is synchronous but fast - it just spawns the process
-    pub fn spawn(name: &str, command: &str, args: &[String]) -> Result<Self> {
+    pub fn spawn(name: &str, command: &str, args: &[String], verbose: bool) -> Result<Self> {
+        // Validate command is not empty
+        if command.is_empty() {
+            return Err(anyhow!(
+                "MCP server '{}' has empty command - check your eunice.toml configuration",
+                name
+            ));
+        }
+
+        if verbose {
+            eprintln!("  [verbose] Spawning process: {} {:?}", command, args);
+        }
+
         // Note: stderr is set to null to prevent deadlock - if the MCP server
         // writes too much to stderr and we don't read it, the buffer fills up
         // and the server blocks on write, causing a timeout.
-        let mut process = tokio::process::Command::new(command)
+        let spawn_result = tokio::process::Command::new(command)
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .spawn()
-            .with_context(|| format!("Failed to start MCP server '{}': {} {:?}", name, command, args))?;
+            .spawn();
+
+        let mut process = match spawn_result {
+            Ok(p) => p,
+            Err(e) => {
+                let error_msg = match e.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        format!(
+                            "Command '{}' not found. Is it installed and in your PATH?",
+                            command
+                        )
+                    }
+                    std::io::ErrorKind::PermissionDenied => {
+                        format!(
+                            "Permission denied executing '{}'. Check file permissions.",
+                            command
+                        )
+                    }
+                    _ => format!("{}", e),
+                };
+                if verbose {
+                    eprintln!("  [verbose] Spawn failed: {} (kind: {:?})", e, e.kind());
+                }
+                return Err(anyhow!(
+                    "Failed to start MCP server '{}': {} - {}",
+                    name,
+                    error_msg,
+                    format!("command: '{}', args: {:?}", command, args)
+                ));
+            }
+        };
+
+        if verbose {
+            eprintln!("  [verbose] Process spawned successfully");
+        }
 
         let stdin = process
             .stdin
@@ -51,7 +97,7 @@ impl SpawnedServer {
 
     /// Initialize the spawned server and convert to ready McpServer
     /// Uses retry with exponential backoff for servers that need startup time
-    pub async fn initialize(self) -> Result<McpServer> {
+    pub async fn initialize(self, verbose: bool) -> Result<McpServer> {
         let mut server = McpServer {
             name: self.name,
             process: self.process,
@@ -69,7 +115,7 @@ impl SpawnedServer {
             match server.initialize_protocol().await {
                 Ok(()) => {
                     // Success - discover tools and return
-                    server.discover_tools().await?;
+                    server.discover_tools(verbose).await?;
                     return Ok(server);
                 }
                 Err(_) if attempt < max_retries => {
@@ -128,7 +174,7 @@ impl McpServer {
     }
 
     /// Discover available tools from the server
-    async fn discover_tools(&mut self) -> Result<()> {
+    async fn discover_tools(&mut self, verbose: bool) -> Result<()> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: self.next_id(),
@@ -146,10 +192,26 @@ impl McpServer {
 
             for mcp_tool in tools_result.tools {
                 let prefixed_name = format!("{}_{}", self.name, mcp_tool.name);
+                let (sanitized_name, was_modified) = sanitize_tool_name(&prefixed_name);
+
+                if verbose {
+                    if was_modified {
+                        eprintln!(
+                            "  [verbose] MCP tool registered: '{}' -> '{}' (sanitized)",
+                            prefixed_name, sanitized_name
+                        );
+                    } else {
+                        eprintln!(
+                            "  [verbose] MCP tool registered: '{}'",
+                            sanitized_name
+                        );
+                    }
+                }
+
                 let tool = Tool {
                     tool_type: "function".to_string(),
                     function: FunctionSpec {
-                        name: prefixed_name,
+                        name: sanitized_name,
                         description: mcp_tool.description.unwrap_or_default(),
                         parameters: mcp_tool.input_schema.unwrap_or(serde_json::json!({
                             "type": "object",

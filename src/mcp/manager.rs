@@ -49,6 +49,8 @@ pub struct McpManager {
     servers: HashMap<String, ServerState>,
     /// Whether to print status messages
     silent: bool,
+    /// Whether to print verbose debug messages
+    verbose: bool,
 }
 
 impl McpManager {
@@ -57,36 +59,47 @@ impl McpManager {
         Self {
             servers: HashMap::new(),
             silent: false,
+            verbose: false,
         }
     }
 
     /// Start all MCP servers from configuration in the background (non-blocking)
     /// Returns immediately - servers initialize in parallel background tasks
-    pub fn start_servers_background(&mut self, config: &McpConfig, silent: bool) {
+    pub fn start_servers_background(&mut self, config: &McpConfig, silent: bool, verbose: bool) {
         self.silent = silent;
+        self.verbose = verbose;
 
         for (name, server_config) in &config.mcp_servers {
             // Check if this is an HTTP server or stdio server
             if server_config.is_http() {
-                self.start_http_server(name, server_config.url.as_ref().unwrap(), silent);
+                self.start_http_server(name, server_config.url.as_ref().unwrap(), silent, verbose);
             } else {
-                self.start_stdio_server(name, &server_config.command, &server_config.args, silent);
+                self.start_stdio_server(name, &server_config.command, &server_config.args, silent, verbose);
             }
         }
     }
 
     /// Start an HTTP-based MCP server in the background
-    fn start_http_server(&mut self, name: &str, url: &str, silent: bool) {
+    fn start_http_server(&mut self, name: &str, url: &str, silent: bool, verbose: bool) {
         if !silent {
             eprintln!("Connecting to HTTP MCP server: {} at {}", name, url);
+        }
+
+        if verbose {
+            eprintln!("  [verbose] HTTP MCP server '{}' config:", name);
+            eprintln!("    url: '{}'", url);
         }
 
         let server_name = name.to_string();
         let server_url = url.to_string();
         let is_silent = silent;
+        let is_verbose = verbose;
 
         let handle = tokio::spawn(async move {
-            let result = HttpMcpServer::connect(&server_name, &server_url).await;
+            if is_verbose {
+                eprintln!("  [verbose] Connecting to HTTP MCP server '{}'...", server_name);
+            }
+            let result = HttpMcpServer::connect(&server_name, &server_url, is_verbose).await;
 
             if !is_silent {
                 match &result {
@@ -117,20 +130,27 @@ impl McpManager {
     }
 
     /// Start a stdio-based MCP server in the background
-    fn start_stdio_server(&mut self, name: &str, command: &str, args: &[String], silent: bool) {
+    fn start_stdio_server(&mut self, name: &str, command: &str, args: &[String], silent: bool, verbose: bool) {
         if !silent {
             eprintln!("Starting MCP server: {} (background)", name);
         }
 
+        if verbose {
+            eprintln!("  [verbose] MCP server '{}' spawn config:", name);
+            eprintln!("    command: '{}'", command);
+            eprintln!("    args: {:?}", args);
+        }
+
         // Spawn the process synchronously (fast, doesn't block)
-        match SpawnedServer::spawn(name, command, args) {
+        match SpawnedServer::spawn(name, command, args, verbose) {
             Ok(spawned) => {
                 let server_name = name.to_string();
                 let is_silent = silent;
+                let is_verbose = verbose;
 
                 // Spawn async initialization in background
                 let handle = tokio::spawn(async move {
-                    let result = spawned.initialize().await;
+                    let result = spawned.initialize(is_verbose).await;
                     if !is_silent {
                         match &result {
                             Ok(server) => {

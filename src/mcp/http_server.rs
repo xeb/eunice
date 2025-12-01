@@ -1,3 +1,4 @@
+use crate::mcp::sanitize_tool_name;
 use crate::models::{
     FunctionSpec, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, McpToolResult,
     McpToolsResult, Tool,
@@ -19,7 +20,7 @@ pub struct HttpMcpServer {
 
 impl HttpMcpServer {
     /// Connect to an HTTP MCP server and initialize it
-    pub async fn connect(name: &str, url: &str) -> Result<Self> {
+    pub async fn connect(name: &str, url: &str, verbose: bool) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
@@ -48,7 +49,7 @@ impl HttpMcpServer {
 
         // Discover available tools
         server
-            .discover_tools()
+            .discover_tools(verbose)
             .await
             .with_context(|| format!("Failed to discover tools from HTTP MCP server '{}'", name))?;
 
@@ -94,7 +95,7 @@ impl HttpMcpServer {
     }
 
     /// Discover available tools from the server
-    async fn discover_tools(&mut self) -> Result<()> {
+    async fn discover_tools(&mut self, verbose: bool) -> Result<()> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: self.next_id(),
@@ -118,10 +119,26 @@ impl HttpMcpServer {
 
             for mcp_tool in tools_result.tools {
                 let prefixed_name = format!("{}_{}", self.name, mcp_tool.name);
+                let (sanitized_name, was_modified) = sanitize_tool_name(&prefixed_name);
+
+                if verbose {
+                    if was_modified {
+                        eprintln!(
+                            "  [verbose] HTTP MCP tool registered: '{}' -> '{}' (sanitized)",
+                            prefixed_name, sanitized_name
+                        );
+                    } else {
+                        eprintln!(
+                            "  [verbose] HTTP MCP tool registered: '{}'",
+                            sanitized_name
+                        );
+                    }
+                }
+
                 let tool = Tool {
                     tool_type: "function".to_string(),
                     function: FunctionSpec {
-                        name: prefixed_name,
+                        name: sanitized_name,
                         description: mcp_tool.description.unwrap_or_default(),
                         parameters: mcp_tool.input_schema.unwrap_or(serde_json::json!({
                             "type": "object",

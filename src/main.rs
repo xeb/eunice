@@ -318,7 +318,7 @@ async fn main() -> Result<()> {
     let (mut mcp_manager, orchestrator) = if let Some(ref config) = mcp_config {
         let mut manager = McpManager::new();
         // Start servers in background - they'll be awaited when tools are called
-        manager.start_servers_background(config, args.silent);
+        manager.start_servers_background(config, args.silent, args.verbose);
 
         // Create orchestrator if agents are configured
         let orch = if !config.agents.is_empty() {

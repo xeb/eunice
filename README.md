@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**3,764 lines of Rust** • **4.3MB binary** - Emphasizing "sophisticated simplicity".
+**3,890 lines of Rust** • **4.3MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -25,7 +25,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 
 Eunice is designed with these principles:
 
-1. **Minimal**: Small codebase (~3,800 lines), few dependencies, fast startup. No bloat.
+1. **Minimal**: Small codebase (~3,900 lines), few dependencies, fast startup. No bloat.
 
 2. **Multi-Backend**: Support multiple LLM providers (OpenAI, Gemini, Claude, Ollama) through a unified interface. Switch models with a flag.
 
