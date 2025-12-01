@@ -284,6 +284,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.6**: Documentation updates for PDF support
 - **0.2.5**: PDF understanding support via `interpret_image` tool
 - **0.2.4**: Minimal DMN (shell + filesystem only), Design Goals section, curl/wget for web
 - **0.2.3**: Image interpretation via `--images` flag and `interpret_image` built-in tool
