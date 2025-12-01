@@ -203,6 +203,11 @@ impl McpServer {
                 let prefixed_name = format!("{}_{}", self.name, mcp_tool.name);
                 let (sanitized_name, was_modified) = sanitize_tool_name(&prefixed_name);
 
+                let parameters = mcp_tool.input_schema.unwrap_or(serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }));
+
                 if verbose {
                     if was_modified {
                         eprintln!(
@@ -215,6 +220,10 @@ impl McpServer {
                             sanitized_name
                         );
                     }
+                    eprintln!(
+                        "  [verbose]   schema: {}",
+                        serde_json::to_string(&parameters).unwrap_or_default()
+                    );
                 }
 
                 let tool = Tool {
@@ -222,10 +231,7 @@ impl McpServer {
                     function: FunctionSpec {
                         name: sanitized_name,
                         description: mcp_tool.description.unwrap_or_default(),
-                        parameters: mcp_tool.input_schema.unwrap_or(serde_json::json!({
-                            "type": "object",
-                            "properties": {}
-                        })),
+                        parameters,
                     },
                 };
                 self.tools.push(tool);
