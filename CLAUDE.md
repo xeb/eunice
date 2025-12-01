@@ -284,6 +284,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.11**: Short prefix system for tool names (m0_, m1_) to stay under Gemini's 64-char limit
 - **0.2.10**: Schema sanitization - removes `x-*` extension fields for Gemini compatibility
 - **0.2.9**: Verbose tool schema output for debugging provider compatibility
 - **0.2.8**: Configurable MCP timeout (`timeout` in config), default 10 minutes

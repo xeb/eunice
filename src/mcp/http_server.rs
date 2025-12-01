@@ -11,6 +11,8 @@ use std::time::Duration;
 /// Represents an MCP server connected via Streamable HTTP transport
 pub struct HttpMcpServer {
     pub name: String,
+    /// Short prefix for tool names (e.g., "m0")
+    prefix: String,
     url: String,
     client: Client,
     session_id: Option<String>,
@@ -23,7 +25,7 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
 
 impl HttpMcpServer {
     /// Connect to an HTTP MCP server and initialize it
-    pub async fn connect(name: &str, url: &str, timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
+    pub async fn connect(name: &str, prefix: &str, url: &str, timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
         let timeout = timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
         if verbose {
             eprintln!("  [verbose] HTTP timeout: {}s", timeout);
@@ -36,6 +38,7 @@ impl HttpMcpServer {
 
         let mut server = Self {
             name: name.to_string(),
+            prefix: prefix.to_string(),
             url: url.to_string(),
             client,
             session_id: None,
@@ -126,7 +129,8 @@ impl HttpMcpServer {
                 .context("Failed to parse tools/list response")?;
 
             for mcp_tool in tools_result.tools {
-                let prefixed_name = format!("{}_{}", self.name, mcp_tool.name);
+                // Use short prefix (m0, m1, etc.) instead of full server name to keep tool names short
+                let prefixed_name = format!("{}_{}", self.prefix, mcp_tool.name);
                 let (sanitized_name, was_modified) = sanitize_tool_name(&prefixed_name);
 
                 let mut parameters = mcp_tool.input_schema.unwrap_or(serde_json::json!({
