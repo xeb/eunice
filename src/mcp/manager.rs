@@ -72,15 +72,15 @@ impl McpManager {
         for (name, server_config) in &config.mcp_servers {
             // Check if this is an HTTP server or stdio server
             if server_config.is_http() {
-                self.start_http_server(name, server_config.url.as_ref().unwrap(), silent, verbose);
+                self.start_http_server(name, server_config.url.as_ref().unwrap(), server_config.timeout, silent, verbose);
             } else {
-                self.start_stdio_server(name, &server_config.command, &server_config.args, silent, verbose);
+                self.start_stdio_server(name, &server_config.command, &server_config.args, server_config.timeout, silent, verbose);
             }
         }
     }
 
     /// Start an HTTP-based MCP server in the background
-    fn start_http_server(&mut self, name: &str, url: &str, silent: bool, verbose: bool) {
+    fn start_http_server(&mut self, name: &str, url: &str, timeout: Option<u64>, silent: bool, verbose: bool) {
         if !silent {
             eprintln!("Connecting to HTTP MCP server: {} at {}", name, url);
         }
@@ -88,10 +88,14 @@ impl McpManager {
         if verbose {
             eprintln!("  [verbose] HTTP MCP server '{}' config:", name);
             eprintln!("    url: '{}'", url);
+            if let Some(t) = timeout {
+                eprintln!("    timeout: {}s", t);
+            }
         }
 
         let server_name = name.to_string();
         let server_url = url.to_string();
+        let server_timeout = timeout;
         let is_silent = silent;
         let is_verbose = verbose;
 
@@ -99,7 +103,7 @@ impl McpManager {
             if is_verbose {
                 eprintln!("  [verbose] Connecting to HTTP MCP server '{}'...", server_name);
             }
-            let result = HttpMcpServer::connect(&server_name, &server_url, is_verbose).await;
+            let result = HttpMcpServer::connect(&server_name, &server_url, server_timeout, is_verbose).await;
 
             if !is_silent {
                 match &result {
@@ -130,7 +134,7 @@ impl McpManager {
     }
 
     /// Start a stdio-based MCP server in the background
-    fn start_stdio_server(&mut self, name: &str, command: &str, args: &[String], silent: bool, verbose: bool) {
+    fn start_stdio_server(&mut self, name: &str, command: &str, args: &[String], timeout: Option<u64>, silent: bool, verbose: bool) {
         if !silent {
             eprintln!("Starting MCP server: {} (background)", name);
         }
@@ -139,10 +143,13 @@ impl McpManager {
             eprintln!("  [verbose] MCP server '{}' spawn config:", name);
             eprintln!("    command: '{}'", command);
             eprintln!("    args: {:?}", args);
+            if let Some(t) = timeout {
+                eprintln!("    timeout: {}s", t);
+            }
         }
 
         // Spawn the process synchronously (fast, doesn't block)
-        match SpawnedServer::spawn(name, command, args, verbose) {
+        match SpawnedServer::spawn(name, command, args, timeout, verbose) {
             Ok(spawned) => {
                 let server_name = name.to_string();
                 let is_silent = silent;

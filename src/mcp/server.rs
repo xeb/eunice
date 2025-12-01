@@ -9,18 +9,22 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::time::{timeout, Duration};
 
+/// Default timeout in seconds for MCP requests (10 minutes)
+pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
+
 /// Represents a spawned but not yet initialized MCP server
 pub struct SpawnedServer {
     name: String,
     process: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    timeout_secs: u64,
 }
 
 impl SpawnedServer {
     /// Spawn a server process without initializing it
     /// Note: This is synchronous but fast - it just spawns the process
-    pub fn spawn(name: &str, command: &str, args: &[String], verbose: bool) -> Result<Self> {
+    pub fn spawn(name: &str, command: &str, args: &[String], timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
         // Validate command is not empty
         if command.is_empty() {
             return Err(anyhow!(
@@ -29,8 +33,10 @@ impl SpawnedServer {
             ));
         }
 
+        let timeout = timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
         if verbose {
             eprintln!("  [verbose] Spawning process: {} {:?}", command, args);
+            eprintln!("  [verbose] Timeout: {}s", timeout);
         }
 
         // Note: stderr is set to null to prevent deadlock - if the MCP server
@@ -92,6 +98,7 @@ impl SpawnedServer {
             process,
             stdin,
             stdout: BufReader::new(stdout),
+            timeout_secs: timeout,
         })
     }
 
@@ -105,6 +112,7 @@ impl SpawnedServer {
             stdout: self.stdout,
             tools: Vec::new(),
             request_id: AtomicI64::new(1),
+            timeout_secs: self.timeout_secs,
         };
 
         // Try to initialize with retries (servers may need time to start)
@@ -139,6 +147,7 @@ pub struct McpServer {
     stdout: BufReader<ChildStdout>,
     pub tools: Vec<Tool>,
     request_id: AtomicI64,
+    timeout_secs: u64,
 }
 
 impl McpServer {
@@ -286,8 +295,7 @@ impl McpServer {
 
     /// Read a JSON-RPC message from the server
     async fn read_message(&mut self) -> Result<serde_json::Value> {
-        // 60 seconds is plenty for any MCP tool call
-        let read_timeout = Duration::from_secs(60);
+        let read_timeout = Duration::from_secs(self.timeout_secs);
 
         loop {
             let mut line = String::new();

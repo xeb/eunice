@@ -160,6 +160,9 @@ pub struct McpServerConfig {
     /// URL for HTTP transport (e.g., "http://localhost:3323/mcp")
     #[serde(default)]
     pub url: Option<String>,
+    /// Timeout in seconds for requests (default: 60)
+    #[serde(default)]
+    pub timeout: Option<u64>,
 }
 
 impl McpServerConfig {

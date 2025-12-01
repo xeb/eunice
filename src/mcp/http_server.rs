@@ -18,11 +18,19 @@ pub struct HttpMcpServer {
     request_id: AtomicI64,
 }
 
+/// Default timeout in seconds for MCP requests (10 minutes)
+pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
+
 impl HttpMcpServer {
     /// Connect to an HTTP MCP server and initialize it
-    pub async fn connect(name: &str, url: &str, verbose: bool) -> Result<Self> {
+    pub async fn connect(name: &str, url: &str, timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
+        let timeout = timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS);
+        if verbose {
+            eprintln!("  [verbose] HTTP timeout: {}s", timeout);
+        }
+
         let client = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(timeout))
             .build()
             .context("Failed to create HTTP client")?;
 

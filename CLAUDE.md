@@ -284,6 +284,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.8**: Configurable MCP timeout (`timeout` in config), default 10 minutes
 - **0.2.7**: Verbose MCP debugging (`--verbose`), tool name sanitization for Gemini compatibility
 - **0.2.6**: Documentation updates for PDF support
 - **0.2.5**: PDF understanding support via `interpret_image` tool

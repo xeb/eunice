@@ -17,18 +17,18 @@ pub fn get_dmn_mcp_config() -> McpConfig {
     servers.insert(
         "shell".to_string(),
         if use_mcpz {
-            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "shell".into()], url: None }
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "shell".into()], url: None, timeout: None }
         } else {
-            McpServerConfig { command: "uvx".into(), args: vec!["git+https://github.com/emsi/mcp-server-shell".into()], url: None }
+            McpServerConfig { command: "uvx".into(), args: vec!["git+https://github.com/emsi/mcp-server-shell".into()], url: None, timeout: None }
         },
     );
 
     servers.insert(
         "filesystem".to_string(),
         if use_mcpz {
-            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()], url: None }
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()], url: None, timeout: None }
         } else {
-            McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()], url: None }
+            McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()], url: None, timeout: None }
         },
     );
 
