@@ -172,19 +172,43 @@ impl AgentOrchestrator {
         })
     }
 
-    /// Get MCP tools filtered by agent's allowed tool patterns
+    /// Get MCP tools filtered by agent's configuration
+    ///
+    /// Logic:
+    /// - If agent has `mcp_servers` only: gets ALL tools from those servers
+    /// - If agent has `mcp_servers` + `tools`: filters tools from those servers using patterns
+    /// - If agent has `tools` only: filters ALL tools using patterns
+    /// - If agent has neither: no tools
     fn get_filtered_tools(&self, agent: &AgentConfig, mcp_manager: &McpManager) -> Vec<Tool> {
-        if agent.tools.is_empty() {
-            return Vec::new();
-        }
+        let has_servers = !agent.mcp_servers.is_empty();
+        let has_tools = !agent.tools.is_empty();
 
-        let all_tools = mcp_manager.get_tools();
-        all_tools.into_iter().filter(|tool| {
-            // Check if tool matches any allowed pattern
-            agent.tools.iter().any(|pattern| {
-                crate::mcp::tool_matches_pattern(&tool.function.name, pattern)
-            })
-        }).collect()
+        match (has_servers, has_tools) {
+            // Both mcp_servers and tools specified: filter tools from those servers
+            (true, true) => {
+                let server_tools = mcp_manager.get_tools_from_servers(&agent.mcp_servers);
+                server_tools.into_iter().filter(|tool| {
+                    agent.tools.iter().any(|pattern| {
+                        crate::mcp::tool_matches_pattern(&tool.function.name, pattern)
+                    })
+                }).collect()
+            }
+            // Only mcp_servers specified: get all tools from those servers
+            (true, false) => {
+                mcp_manager.get_tools_from_servers(&agent.mcp_servers)
+            }
+            // Only tools patterns specified: filter all available tools
+            (false, true) => {
+                let all_tools = mcp_manager.get_tools();
+                all_tools.into_iter().filter(|tool| {
+                    agent.tools.iter().any(|pattern| {
+                        crate::mcp::tool_matches_pattern(&tool.function.name, pattern)
+                    })
+                }).collect()
+            }
+            // Neither specified: no tools
+            (false, false) => Vec::new(),
+        }
     }
 
     /// The agent loop - processes messages and tool calls
@@ -413,11 +437,13 @@ mod tests {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "You are the root agent".to_string(),
+            mcp_servers: vec![],
             tools: vec![],
             can_invoke: vec!["worker".to_string()],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
             prompt: "You are a worker agent".to_string(),
+            mcp_servers: vec![],
             tools: vec!["shell".to_string()],
             can_invoke: vec![],
         });
@@ -432,11 +458,13 @@ mod tests {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "Root agent".to_string(),
+            mcp_servers: vec![],
             tools: vec![],
             can_invoke: vec!["dev".to_string()],
         });
         config.agents.insert("dev".to_string(), AgentConfig {
             prompt: "Developer agent".to_string(),
+            mcp_servers: vec![],
             tools: vec![],
             can_invoke: vec![],
         });

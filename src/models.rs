@@ -126,17 +126,18 @@ pub struct AssistantMessage {
 /// MCP configuration file structure
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
-    #[serde(rename = "mcpServers", default)]
+    /// MCP servers - accepts both "mcpServers" (camelCase) and "mcp_servers" (snake_case)
+    #[serde(default, alias = "mcpServers", alias = "mcp_servers")]
     pub mcp_servers: HashMap<String, McpServerConfig>,
     #[serde(default)]
     pub agents: HashMap<String, AgentConfig>,
     /// Optional list of allowed tool patterns (supports * wildcard)
     /// If empty or not specified, all tools are allowed
-    #[serde(rename = "allowedTools", default)]
+    #[serde(default, alias = "allowedTools", alias = "allowed_tools")]
     pub allowed_tools: Vec<String>,
     /// Optional list of denied tool patterns (supports * wildcard)
     /// Tools matching these patterns are excluded from the model
-    #[serde(rename = "deniedTools", default)]
+    #[serde(default, alias = "deniedTools", alias = "denied_tools")]
     pub denied_tools: Vec<String>,
 }
 
@@ -145,8 +146,14 @@ pub struct McpConfig {
 pub struct AgentConfig {
     /// System prompt (inline string or file path)
     pub prompt: String,
+    /// MCP server names this agent can access (gets all tools from these servers)
+    /// If specified without `tools`, agent gets ALL tools from these servers
+    /// If specified with `tools`, the tool patterns filter within these servers only
+    #[serde(default, alias = "mcpServers", alias = "mcp_servers")]
+    pub mcp_servers: Vec<String>,
     /// Tool name patterns this agent can access (supports * wildcard)
-    /// Examples: "eng_file_read" (exact), "eng_*" (all eng tools), "*_read" (all read tools)
+    /// Examples: "shell_*" (all shell tools), "*_read" (all read tools)
+    /// If mcp_servers is also specified, patterns filter within those servers only
     #[serde(default)]
     pub tools: Vec<String>,
     /// Agent names this agent can invoke

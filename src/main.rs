@@ -500,7 +500,7 @@ async fn main() -> Result<()> {
 
     // Detect provider and create client
     let provider_info = detect_provider(&model)?;
-    let client = Client::new(&provider_info)?;
+    let client = Client::new(&provider_info, args.verbose)?;
 
     // Initialize MCP manager (background startup for faster prompt display)
     let (mut mcp_manager, orchestrator) = if let Some(ref config) = mcp_config {
@@ -577,7 +577,16 @@ async fn main() -> Result<()> {
 
             if let Some(ref mut manager) = mcp_manager {
                 // Wait for servers to be ready before displaying info
-                manager.await_all_servers().await;
+                if manager.has_pending_servers() {
+                    let count = manager.pending_server_count();
+                    display::debug(&format!("Waiting for {} MCP server(s) to initialize...", count), args.verbose);
+                    let spinner = display::Spinner::start(&format!(
+                        "Starting MCP server{}...",
+                        if count > 1 { "s" } else { "" }
+                    ));
+                    manager.await_all_servers().await;
+                    spinner.stop().await;
+                }
                 let server_info = manager.get_server_info();
                 display::print_mcp_info(&server_info);
             }
@@ -773,11 +782,13 @@ mod tests {
         };
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "You are root".to_string(),
+            mcp_servers: vec![],
             tools: vec!["tool1".to_string()],
             can_invoke: vec!["worker".to_string()],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
             prompt: "You are worker".to_string(),
+            mcp_servers: vec![],
             tools: vec!["tool2".to_string(), "tool3".to_string()],
             can_invoke: Vec::new(),
         });

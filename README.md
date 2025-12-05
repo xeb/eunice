@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**4,881 lines of Rust** • **4.5MB binary** - Emphasizing "sophisticated simplicity".
+**4,970 lines of Rust** • **4.5MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -25,7 +25,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 
 Eunice is designed with these principles:
 
-1. **Minimal**: Small codebase (~4,900 lines), few dependencies, fast startup. No bloat.
+1. **Minimal**: Small codebase (~5,000 lines), few dependencies, fast startup. No bloat.
 
 2. **Multi-Backend**: Support multiple LLM providers (OpenAI, Gemini, Claude, Ollama) through a unified interface. Switch models with a flag.
 
@@ -170,6 +170,11 @@ If no prompt file is found and no prompt is given, eunice enters interactive mod
 
 Create a `eunice.json` or `eunice.toml` in your working directory for automatic MCP server loading.
 
+**Naming Flexibility**: Both camelCase and snake_case are accepted for all configuration keys:
+- `mcpServers` or `mcp_servers`
+- `allowedTools` or `allowed_tools`
+- `deniedTools` or `denied_tools`
+
 ### JSON Format
 
 ```json
@@ -190,17 +195,15 @@ Create a `eunice.json` or `eunice.toml` in your working directory for automatic 
 ### TOML Format
 
 ```toml
+# Both naming conventions work
 [mcpServers.shell]
 command = "mcpz"
 args = ["server", "shell"]
 
-[mcpServers.time]
-command = "uvx"
-args = ["mcp-server-time"]
-
-[mcpServers.time_mcpz]
+# snake_case also works
+[mcp_servers.filesystem]
 command = "mcpz"
-args = ["run", "mcp-server-time"]
+args = ["server", "filesystem"]
 ```
 
 ### HTTP Transport (Remote Servers)
@@ -302,13 +305,28 @@ args = ["server", "filesystem"]
 [agents.root]
 prompt = "You are the coordinator. Delegate tasks to workers."
 tools = []
-can_invoke = ["worker"]
+can_invoke = ["worker", "reader"]
 
 [agents.worker]
 prompt = "agents/worker.md"  # Can be file path
-tools = ["shell_*", "fs_read_file", "fs_write_file"]  # Tool name patterns
+tools = ["shell_*", "fs_write_*"]  # Tool name patterns
+can_invoke = []
+
+[agents.reader]
+prompt = "You are a reader agent with full filesystem access."
+mcp_servers = ["fs"]  # Gets ALL tools from the 'fs' server
 can_invoke = []
 ```
+
+### Agent Tool Access
+
+There are **three ways** to grant tool access to an agent:
+
+| Configuration | Effect |
+|---------------|--------|
+| `mcp_servers = ["shell", "fs"]` | Agent gets **ALL tools** from those servers |
+| `tools = ["shell_*", "*_read"]` | Agent gets **matching tools** from all servers |
+| `mcp_servers = ["fs"]` + `tools = ["*_read*"]` | Agent gets **matching tools** from specified servers only |
 
 ### Usage
 
@@ -331,7 +349,7 @@ eunice --list-tools
 1. When `[agents]` section exists in config, multi-agent mode auto-enables
 2. Each agent gets `invoke_*` tools for agents in their `can_invoke` list
 3. Agent prompts can be inline strings or file paths (`.md`, `.txt`)
-4. MCP tools are filtered per-agent based on `tools` patterns
+4. MCP tools are filtered per-agent based on `mcp_servers` and/or `tools` configuration
 5. Agents can invoke other agents recursively with depth tracking
 
 ### Example: Restaurant Simulation
@@ -341,6 +359,10 @@ See [examples/real_multi_agent](examples/real_multi_agent) for a complete exampl
 ### Example: Tool Filtering
 
 See [examples/tool_filtering](examples/tool_filtering) for fine-grained tool access control with reader/writer agents.
+
+### Example: Agent Tool Access Patterns
+
+See [examples/agent_tool_access](examples/agent_tool_access) for all three methods of controlling agent tool access: server-level, pattern-based, and combined.
 
 ### Example: Remote MCP Server
 
@@ -375,7 +397,7 @@ Agents:
   worker: 6 tools (patterns: ["shell_*", "fs_*"])
 ```
 
-### Tool Name Patterns
+### Agent Tool Patterns
 
 The `tools` array in agent configs uses tool name patterns with wildcard support:
 
@@ -386,6 +408,19 @@ The `tools` array in agent configs uses tool name patterns with wildcard support
 | `*_file` | All tools ending with `_file` |
 | `fs_*_file` | Tools starting with `fs_` AND ending with `_file` |
 | `*` | All tools |
+
+Alternatively, use `mcp_servers` for server-level access:
+
+```toml
+[agents.shell_expert]
+prompt = "You have full shell access"
+mcp_servers = ["shell"]  # Gets ALL tools from shell server
+
+[agents.fs_reader]
+prompt = "Read-only filesystem access"
+mcp_servers = ["filesystem"]  # Source: only filesystem server
+tools = ["*_read*", "*_list*"]  # Filter: only read/list operations
+```
 
 ### Global Tool Filtering
 

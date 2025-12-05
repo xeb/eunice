@@ -13,11 +13,12 @@ pub struct Client {
     api_key: String,
     provider: Provider,
     use_native_gemini_api: bool,
+    verbose: bool,
 }
 
 impl Client {
     /// Create a new client for the given provider
-    pub fn new(provider_info: &ProviderInfo) -> Result<Self> {
+    pub fn new(provider_info: &ProviderInfo, verbose: bool) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -61,6 +62,7 @@ impl Client {
             api_key: provider_info.api_key.clone(),
             provider: provider_info.provider.clone(),
             use_native_gemini_api: provider_info.use_native_gemini_api,
+            verbose,
         })
     }
 
@@ -198,10 +200,20 @@ impl Client {
 
             if !status.is_success() {
                 let error_text = response.text().await.unwrap_or_default();
+                // Include request body in error for debugging in verbose mode
+                let debug_info = if self.verbose {
+                    format!(
+                        "\n\n--- Request Body (--verbose) ---\n{}",
+                        serde_json::to_string_pretty(&gemini_request).unwrap_or_else(|_| "Failed to serialize request".to_string())
+                    )
+                } else {
+                    "\n\nTip: Use --verbose to see the full request body.".to_string()
+                };
                 return Err(anyhow!(
-                    "Gemini API request failed with status {}: {}",
+                    "Gemini API request failed with status {}: {}{}",
                     status,
-                    error_text
+                    error_text,
+                    debug_info
                 ));
             }
 
@@ -646,7 +658,7 @@ mod tests {
             resolved_model: "gemini-3-pro-preview".to_string(),
             use_native_gemini_api: true,
         };
-        Client::new(&provider_info).unwrap()
+        Client::new(&provider_info, false).unwrap()
     }
 
     #[test]

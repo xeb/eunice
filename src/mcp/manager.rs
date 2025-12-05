@@ -198,6 +198,16 @@ impl McpManager {
         }
     }
 
+    /// Check if any servers are still initializing
+    pub fn has_pending_servers(&self) -> bool {
+        self.servers.values().any(|s| matches!(s, ServerState::Initializing(_)))
+    }
+
+    /// Get count of pending servers
+    pub fn pending_server_count(&self) -> usize {
+        self.servers.values().filter(|s| matches!(s, ServerState::Initializing(_))).count()
+    }
+
     /// Wait for all pending servers to finish initializing
     pub async fn await_all_servers(&mut self) {
         let pending_names: Vec<String> = self
@@ -276,6 +286,18 @@ impl McpManager {
             });
         }
 
+        tools
+    }
+
+    /// Get tools from specific servers only
+    /// Returns tools from the specified servers, ignoring global allowed/denied filters
+    pub fn get_tools_from_servers(&self, server_names: &[String]) -> Vec<Tool> {
+        let mut tools = Vec::new();
+        for name in server_names {
+            if let Some(ServerState::Ready(server)) = self.servers.get(name) {
+                tools.extend(server.tools().iter().cloned());
+            }
+        }
         tools
     }
 
