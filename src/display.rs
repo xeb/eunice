@@ -185,6 +185,11 @@ pub fn print_error(message: &str) {
     eprintln!("{} {}", "❌".red(), message.red());
 }
 
+/// Print user stopped message (when user cancels with Escape)
+pub fn print_user_stopped() {
+    eprintln!("{}", "⏹ User Stopped".yellow().bold());
+}
+
 /// Print verbose debug message
 pub fn debug(message: &str, verbose: bool) {
     if verbose {

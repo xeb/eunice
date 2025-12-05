@@ -4,6 +4,7 @@ use crate::display::{Spinner, ThinkingSpinner};
 use crate::mcp::McpManager;
 use crate::models::{FunctionSpec, Message, Tool};
 use anyhow::{anyhow, Context, Result};
+use tokio::sync::watch;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 // --- Built-in interpret_image tool ---
@@ -84,8 +85,42 @@ async fn execute_interpret_image(
     Ok(content)
 }
 
+/// Result of running the agent - indicates if it completed or was cancelled
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentResult {
+    Completed,
+    Cancelled,
+}
+
 /// Run the agent loop until completion
 pub async fn run_agent(
+    client: &Client,
+    model: &str,
+    prompt: &str,
+    tool_output_limit: usize,
+    mcp_manager: Option<&mut McpManager>,
+    silent: bool,
+    verbose: bool,
+    conversation_history: &mut Vec<Message>,
+    enable_image_tool: bool,
+) -> Result<AgentResult> {
+    run_agent_cancellable(
+        client,
+        model,
+        prompt,
+        tool_output_limit,
+        mcp_manager,
+        silent,
+        verbose,
+        conversation_history,
+        enable_image_tool,
+        None,
+    )
+    .await
+}
+
+/// Run the agent loop with optional cancellation support
+pub async fn run_agent_cancellable(
     client: &Client,
     model: &str,
     prompt: &str,
@@ -95,7 +130,8 @@ pub async fn run_agent(
     verbose: bool,
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
-) -> Result<()> {
+    cancel_rx: Option<watch::Receiver<bool>>,
+) -> Result<AgentResult> {
     // Build the prompt, including any failed server info
     let final_prompt = if let Some(ref manager) = mcp_manager {
         let failed = manager.get_failed_servers();
@@ -149,20 +185,41 @@ pub async fn run_agent(
             None
         };
 
-        // Call the LLM
-        let response = client
-            .chat_completion(
+        // Call the LLM with optional cancellation support
+        let response = {
+            let api_call = client.chat_completion(
                 model,
                 serde_json::to_value(&*conversation_history)?,
                 tools_option.as_deref(),
                 enable_image_tool,
-            )
-            .await;
+            );
 
-        // Stop thinking spinner
-        if let Some(spinner) = thinking_spinner {
-            spinner.stop();
-        }
+            if let Some(ref mut rx) = cancel_rx.clone() {
+                tokio::select! {
+                    result = api_call => {
+                        // Stop thinking spinner
+                        if let Some(spinner) = thinking_spinner {
+                            spinner.stop();
+                        }
+                        result
+                    }
+                    _ = rx.changed() => {
+                        // Stop thinking spinner and return cancelled
+                        if let Some(spinner) = thinking_spinner {
+                            spinner.stop();
+                        }
+                        return Ok(AgentResult::Cancelled);
+                    }
+                }
+            } else {
+                let result = api_call.await;
+                // Stop thinking spinner
+                if let Some(spinner) = thinking_spinner {
+                    spinner.stop();
+                }
+                result
+            }
+        };
 
         let response = response?;
 
@@ -243,5 +300,5 @@ pub async fn run_agent(
         }
     }
 
-    Ok(())
+    Ok(AgentResult::Completed)
 }
