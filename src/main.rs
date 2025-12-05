@@ -578,14 +578,23 @@ async fn main() -> Result<()> {
             if let Some(ref mut manager) = mcp_manager {
                 // Wait for servers to be ready before displaying info
                 if manager.has_pending_servers() {
-                    let names = manager.pending_server_names();
+                    let mut names = manager.pending_server_names();
                     display::debug(&format!("Waiting for MCP server(s) to initialize: {}", names.join(", ")), args.verbose);
                     let spinner = display::Spinner::start(&format!(
                         "Starting MCP server{}: {}",
                         if names.len() > 1 { "s" } else { "" },
                         names.join(", ")
                     ));
-                    manager.await_all_servers().await;
+                    while !names.is_empty() {
+                        names = manager.await_next_pending_server().await;
+                        if !names.is_empty() {
+                            spinner.set_message(&format!(
+                                "Starting MCP server{}: {}",
+                                if names.len() > 1 { "s" } else { "" },
+                                names.join(", ")
+                            ));
+                        }
+                    }
                     spinner.stop().await;
                 }
                 let server_info = manager.get_server_info();

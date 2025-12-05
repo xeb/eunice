@@ -25,6 +25,11 @@ impl Spinner {
         Self(pb)
     }
 
+    /// Update the spinner message
+    pub fn set_message(&self, message: &str) {
+        self.0.set_message(message.to_string());
+    }
+
     /// Stop the spinner
     pub async fn stop(self) {
         self.0.finish_and_clear();

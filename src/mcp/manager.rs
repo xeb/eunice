@@ -219,21 +219,32 @@ impl McpManager {
 
     /// Wait for all pending servers to finish initializing
     pub async fn await_all_servers(&mut self) {
-        let pending_names: Vec<String> = self
+        while self.has_pending_servers() {
+            self.await_next_pending_server().await;
+        }
+    }
+
+    /// Wait for the next pending server to finish initializing
+    /// Returns the names of remaining pending servers after this one completes
+    pub async fn await_next_pending_server(&mut self) -> Vec<String> {
+        // Get the first pending server name
+        let next_name = self
             .servers
             .iter()
-            .filter_map(|(name, state)| {
+            .find_map(|(name, state)| {
                 if matches!(state, ServerState::Initializing(_)) {
                     Some(name.clone())
                 } else {
                     None
                 }
-            })
-            .collect();
+            });
 
-        for name in pending_names {
+        if let Some(name) = next_name {
             self.await_server(&name).await;
         }
+
+        // Return remaining pending servers
+        self.pending_server_names()
     }
 
     /// Await a specific server if it's still initializing
