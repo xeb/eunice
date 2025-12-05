@@ -146,7 +146,7 @@ The `gemini-3-pro-preview` model uses a different API format:
 **Conversion Logic:**
 - `Message::User` → role: "user"
 - `Message::Assistant` → role: "model"
-- `Message::Tool` → skipped (not supported)
+- `Message::Tool` → converted to `functionResponse` (user role)
 
 ## Multi-Agent Architecture
 
@@ -288,6 +288,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.12**: Fixed Gemini native API tool response handling (wraps non-object responses)
 - **0.2.11**: Short prefix system for tool names (m0_, m1_) to stay under Gemini's 64-char limit
 - **0.2.10**: Schema sanitization - removes `x-*` extension fields for Gemini compatibility
 - **0.2.9**: Verbose tool schema output for debugging provider compatibility

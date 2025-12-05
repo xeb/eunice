@@ -414,11 +414,16 @@ impl Client {
                 }
                 Message::Tool { tool_call_id, content } => {
                     // Convert tool result to Gemini functionResponse format
-                    // Try to parse the content as JSON, otherwise wrap it
-                    let response_value: serde_json::Value =
-                        serde_json::from_str(content).unwrap_or_else(|_| {
-                            serde_json::json!({ "result": content })
-                        });
+                    // Try to parse the content as JSON
+                    let parsed = serde_json::from_str::<serde_json::Value>(content);
+                    
+                    // Gemini requires functionResponse.response to be a Map (JSON object).
+                    // If the tool output is a primitive or array, we must wrap it.
+                    let response_value = match parsed {
+                        Ok(val) if val.is_object() => val,
+                        Ok(val) => serde_json::json!({ "result": val }),
+                        Err(_) => serde_json::json!({ "result": content }),
+                    };
 
                     // Extract function name from tool_call_id
                     // The ID may be encoded as "name::signature" or just "name"
@@ -659,6 +664,47 @@ mod tests {
             use_native_gemini_api: true,
         };
         Client::new(&provider_info, false).unwrap()
+    }
+
+    #[test]
+    fn test_convert_messages_to_gemini_wraps_array_response() {
+        let client = create_test_client();
+        let messages = vec![
+            Message::Tool {
+                tool_call_id: "my_function".to_string(),
+                content: "[\"item1\", \"item2\"]".to_string(),
+            },
+        ];
+
+        let result = client.convert_messages_to_gemini(&messages);
+        assert!(result.is_ok());
+        let contents = result.unwrap();
+        
+        let response = contents[0].parts[0].function_response.as_ref().unwrap();
+        // Check that it's wrapped in an object
+        assert!(response.response.is_object());
+        // Check content
+        assert_eq!(response.response["result"][0], "item1");
+    }
+
+    #[test]
+    fn test_convert_messages_to_gemini_preserves_object_response() {
+        let client = create_test_client();
+        let messages = vec![
+            Message::Tool {
+                tool_call_id: "my_function".to_string(),
+                content: "{\"key\": \"value\"}".to_string(),
+            },
+        ];
+
+        let result = client.convert_messages_to_gemini(&messages);
+        assert!(result.is_ok());
+        let contents = result.unwrap();
+        
+        let response = contents[0].parts[0].function_response.as_ref().unwrap();
+        // Check that it's NOT wrapped
+        assert_eq!(response.response["key"], "value");
+        assert!(response.response.get("result").is_none());
     }
 
     #[test]
