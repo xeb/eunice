@@ -203,9 +203,18 @@ impl McpManager {
         self.servers.values().any(|s| matches!(s, ServerState::Initializing(_)))
     }
 
-    /// Get count of pending servers
-    pub fn pending_server_count(&self) -> usize {
-        self.servers.values().filter(|s| matches!(s, ServerState::Initializing(_))).count()
+    /// Get names of pending servers
+    pub fn pending_server_names(&self) -> Vec<String> {
+        self.servers
+            .iter()
+            .filter_map(|(name, state)| {
+                if matches!(state, ServerState::Initializing(_)) {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Wait for all pending servers to finish initializing
