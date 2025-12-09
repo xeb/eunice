@@ -288,6 +288,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.24**: Enhanced verbose logging for HTTP MCP connections (shows request/response bodies, status, content-type)
 - **0.2.23**: Auto context compression when RESOURCE_EXHAUSTED error occurs (DMN mode)
 - **0.2.22**: Added SSE response parsing for HTTP MCP servers (FastMCP compatibility)
 - **0.2.21**: Fixed HTTP MCP Accept header to include both `application/json` and `text/event-stream` per MCP spec

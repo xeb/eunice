@@ -16,6 +16,7 @@ pub struct HttpMcpServer {
     session_id: Option<String>,
     pub tools: Vec<Tool>,
     request_id: AtomicI64,
+    verbose: bool,
 }
 
 /// Default timeout in seconds for MCP requests (10 minutes)
@@ -63,6 +64,7 @@ impl HttpMcpServer {
             session_id: None,
             tools: Vec::new(),
             request_id: AtomicI64::new(1),
+            verbose,
         };
 
         // Initialize the MCP protocol
@@ -79,7 +81,7 @@ impl HttpMcpServer {
 
         // Discover available tools
         server
-            .discover_tools(verbose)
+            .discover_tools()
             .await
             .with_context(|| format!("Failed to discover tools from HTTP MCP server '{}'", name))?;
 
@@ -125,13 +127,20 @@ impl HttpMcpServer {
     }
 
     /// Discover available tools from the server
-    async fn discover_tools(&mut self, verbose: bool) -> Result<()> {
+    async fn discover_tools(&mut self) -> Result<()> {
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: self.next_id(),
             method: "tools/list".to_string(),
             params: None,
         };
+
+        if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': sending tools/list request",
+                self.name
+            );
+        }
 
         let response = self.send_request(&request).await?;
 
@@ -144,8 +153,29 @@ impl HttpMcpServer {
         }
 
         if let Some(result) = response.result {
-            let tools_result: McpToolsResult = serde_json::from_value(result)
-                .context("Failed to parse tools/list response")?;
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': tools/list raw result: {}",
+                    self.name,
+                    serde_json::to_string(&result).unwrap_or_else(|_| "<serialize error>".to_string())
+                );
+            }
+
+            let tools_result: McpToolsResult = serde_json::from_value(result.clone())
+                .with_context(|| {
+                    format!(
+                        "Failed to parse tools/list response. Expected {{\"tools\": [...]}}, got: {}",
+                        serde_json::to_string(&result).unwrap_or_else(|_| "<serialize error>".to_string())
+                    )
+                })?;
+
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': parsed {} tools",
+                    self.name,
+                    tools_result.tools.len()
+                );
+            }
 
             for mcp_tool in tools_result.tools {
                 // Prefix tool name with server name for routing
@@ -162,7 +192,7 @@ impl HttpMcpServer {
                 // Remove x-* extension fields that Gemini doesn't support
                 sanitize_schema(&mut parameters);
 
-                if verbose {
+                if self.verbose {
                     if was_modified {
                         eprintln!(
                             "  [verbose] HTTP MCP tool registered: '{}' -> '{}' (sanitized)",
@@ -190,6 +220,11 @@ impl HttpMcpServer {
                 };
                 self.tools.push(tool);
             }
+        } else if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': tools/list returned no result field",
+                self.name
+            );
         }
 
         Ok(())
@@ -245,6 +280,18 @@ impl HttpMcpServer {
 
     /// Send a JSON-RPC request and get the response
     async fn send_request(&mut self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
+        if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': POST {} method={}",
+                self.name, self.url, request.method
+            );
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': request body: {}",
+                self.name,
+                serde_json::to_string(request).unwrap_or_else(|_| "<serialize error>".to_string())
+            );
+        }
+
         let mut req_builder = self
             .client
             .post(&self.url)
@@ -264,8 +311,22 @@ impl HttpMcpServer {
 
         // Check for HTTP errors
         let status = response.status();
+        if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': response status: {}",
+                self.name, status
+            );
+        }
+
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_default();
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': error response body: {}",
+                    self.name,
+                    if error_body.is_empty() { "<empty>" } else { &error_body }
+                );
+            }
             return Err(anyhow!(
                 "HTTP {} from MCP server '{}': {}",
                 status,
@@ -282,6 +343,12 @@ impl HttpMcpServer {
         if let Some(session_id) = response.headers().get("mcp-session-id") {
             if let Ok(id) = session_id.to_str() {
                 self.session_id = Some(id.to_string());
+                if self.verbose {
+                    eprintln!(
+                        "  [verbose] HTTP MCP '{}': received session ID: {}",
+                        self.name, id
+                    );
+                }
             }
         }
 
@@ -292,20 +359,51 @@ impl HttpMcpServer {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
 
+        if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': Content-Type: '{}'",
+                self.name,
+                if content_type.is_empty() { "<not set>" } else { content_type }
+            );
+        }
+
         let json_response: JsonRpcResponse = if content_type.contains("text/event-stream") {
             // Parse SSE format: look for "data: {...}" lines
             let body = response
                 .text()
                 .await
                 .context("Failed to read SSE response body")?;
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': SSE response body:\n{}",
+                    self.name, body
+                );
+            }
             parse_sse_response(&body)?
         } else {
-            // Parse as direct JSON
-            response
-                .json()
+            // Read body as text first so we can log it
+            let body = response
+                .text()
                 .await
-                .context("Failed to parse JSON-RPC response")?
+                .context("Failed to read response body")?;
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': JSON response body: {}",
+                    self.name, body
+                );
+            }
+            serde_json::from_str(&body)
+                .with_context(|| format!("Failed to parse JSON-RPC response: {}", body))?
         };
+
+        if self.verbose {
+            if let Some(ref error) = json_response.error {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': JSON-RPC error: {} (code: {})",
+                    self.name, error.message, error.code
+                );
+            }
+        }
 
         Ok(json_response)
     }
