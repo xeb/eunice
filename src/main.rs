@@ -1,5 +1,6 @@
 mod agent;
 mod client;
+mod compress;
 mod config;
 mod display;
 mod interactive;
@@ -648,6 +649,13 @@ async fn main() -> Result<()> {
 
             let mut conversation_history: Vec<Message> = Vec::new();
 
+            // Enable compression in DMN mode by default
+            let compression_config = if args.dmn {
+                Some(compress::CompressionConfig::default())
+            } else {
+                None
+            };
+
             agent::run_agent(
                 &client,
                 &provider_info.resolved_model,
@@ -658,6 +666,7 @@ async fn main() -> Result<()> {
                 args.verbose,
                 &mut conversation_history,
                 args.dmn || args.images,
+                compression_config,
             )
             .await?;
         }

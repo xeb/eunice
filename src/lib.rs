@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod client;
+pub mod compress;
 pub mod config;
 pub mod display;
 pub mod interactive;

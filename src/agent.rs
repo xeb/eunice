@@ -1,11 +1,12 @@
 use crate::client::Client;
+use crate::compress::{compress_context, is_context_exhausted_error, CompressionConfig};
 use crate::display;
 use crate::display::{Spinner, ThinkingSpinner};
 use crate::mcp::McpManager;
 use crate::models::{FunctionSpec, Message, Tool};
 use anyhow::{anyhow, Context, Result};
-use tokio::sync::watch;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use tokio::sync::watch;
 
 // --- Built-in interpret_image tool ---
 pub const INTERPRET_IMAGE_TOOL_NAME: &str = "interpret_image";
@@ -103,6 +104,7 @@ pub async fn run_agent(
     verbose: bool,
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
+    compression_config: Option<CompressionConfig>,
 ) -> Result<AgentResult> {
     run_agent_cancellable(
         client,
@@ -115,6 +117,7 @@ pub async fn run_agent(
         conversation_history,
         enable_image_tool,
         None,
+        compression_config,
     )
     .await
 }
@@ -131,6 +134,7 @@ pub async fn run_agent_cancellable(
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
     cancel_rx: Option<watch::Receiver<bool>>,
+    compression_config: Option<CompressionConfig>,
 ) -> Result<AgentResult> {
     // Build the prompt, including any failed server info
     let final_prompt = if let Some(ref manager) = mcp_manager {
@@ -158,6 +162,9 @@ pub async fn run_agent_cancellable(
     });
 
     display::debug(&format!("Sending prompt: {}", final_prompt), verbose);
+
+    // Track if we've already tried compression this loop iteration
+    let mut compression_attempted = false;
 
     loop {
         // Get available tools
@@ -221,7 +228,65 @@ pub async fn run_agent_cancellable(
             }
         };
 
-        let response = response?;
+        // Handle errors with potential context compression
+        let response = match response {
+            Ok(r) => {
+                compression_attempted = false; // Reset on success
+                r
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+
+                // Check if this is a context exhaustion error and we can compress
+                if is_context_exhausted_error(&error_msg)
+                    && !compression_attempted
+                    && compression_config.is_some()
+                {
+                    let config = compression_config.as_ref().unwrap();
+                    if config.enabled {
+                        if !silent {
+                            eprintln!(
+                                "⚠️  Context exhausted. Compressing conversation history..."
+                            );
+                        }
+
+                        // Attempt compression
+                        match compress_context(client, model, conversation_history, config).await {
+                            Ok(compressed) => {
+                                if !silent {
+                                    let method = if compressed.used_full_summarization {
+                                        "full summarization"
+                                    } else {
+                                        "lightweight compaction"
+                                    };
+                                    eprintln!(
+                                        "✓ Compressed to {:.0}% of original size using {}",
+                                        compressed.compression_ratio * 100.0,
+                                        method
+                                    );
+                                }
+
+                                // Replace conversation history with compressed version
+                                conversation_history.clear();
+                                conversation_history.extend(compressed.messages);
+
+                                compression_attempted = true;
+                                continue; // Retry with compressed context
+                            }
+                            Err(compress_err) => {
+                                if !silent {
+                                    eprintln!("✗ Compression failed: {}", compress_err);
+                                }
+                                return Err(e); // Return original error
+                            }
+                        }
+                    }
+                }
+
+                // Not a context error or compression disabled/failed
+                return Err(e);
+            }
+        };
 
         let choice = &response.choices[0];
 
