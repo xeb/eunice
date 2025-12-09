@@ -66,6 +66,7 @@ find . -name "*.ts" -type f
 - **Tools vs Text**: Use tools for actions, text only for communication
 - **Parallelism**: Execute independent tool calls in parallel
 - **Background Processes**: Use & for long-running commands
+- **Minimal File Reading**: When reading files, read only what you need. Prefer filesystem MCP tools (which support offset/limit parameters) over shell commands. Fall back to shell commands like `head -n 100`, `tail -n 100`, or `sed -n '50,150p'` only when needed. Bias toward reading 100 lines or less at a time unless absolutely necessary. For large files, start with a small sample and expand only if needed.
 
 ## Git Guidelines
 
