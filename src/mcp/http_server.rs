@@ -21,6 +21,10 @@ pub struct HttpMcpServer {
 /// Default timeout in seconds for MCP requests (10 minutes)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
 
+/// Accept header for MCP Streamable HTTP transport
+/// Must include both application/json and text/event-stream per MCP spec
+pub const MCP_ACCEPT_HEADER: &str = "application/json, text/event-stream";
+
 impl HttpMcpServer {
     /// Connect to an HTTP MCP server and initialize it
     pub async fn connect(name: &str, url: &str, timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
@@ -227,7 +231,7 @@ impl HttpMcpServer {
             .client
             .post(&self.url)
             .header("Content-Type", "application/json")
-            .header("Accept", "application/json");
+            .header("Accept", MCP_ACCEPT_HEADER);
 
         // Add session ID if we have one
         if let Some(ref session_id) = self.session_id {
@@ -277,7 +281,7 @@ impl HttpMcpServer {
             .client
             .post(&self.url)
             .header("Content-Type", "application/json")
-            .header("Accept", "application/json");
+            .header("Accept", MCP_ACCEPT_HEADER);
 
         if let Some(ref session_id) = self.session_id {
             req_builder = req_builder.header("mcp-session-id", session_id);

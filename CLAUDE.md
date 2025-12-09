@@ -288,6 +288,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.21**: Fixed HTTP MCP Accept header to include both `application/json` and `text/event-stream` per MCP spec
 - **0.2.12**: Fixed Gemini native API tool response handling (wraps non-object responses)
 - **0.2.11**: Short prefix system for tool names (m0_, m1_) to stay under Gemini's 64-char limit
 - **0.2.10**: Schema sanitization - removes `x-*` extension fields for Gemini compatibility

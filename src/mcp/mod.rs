@@ -259,4 +259,18 @@ mod tests {
         assert!(!tool_matches_pattern("eng_file_write", "eng_*_read"));
         assert!(!tool_matches_pattern("other_file_read", "eng_*_read"));
     }
+
+    #[test]
+    fn test_mcp_accept_header_includes_required_types() {
+        use crate::mcp::http_server::MCP_ACCEPT_HEADER;
+        // MCP Streamable HTTP spec requires clients to accept both JSON and SSE
+        assert!(
+            MCP_ACCEPT_HEADER.contains("application/json"),
+            "Accept header must include application/json"
+        );
+        assert!(
+            MCP_ACCEPT_HEADER.contains("text/event-stream"),
+            "Accept header must include text/event-stream for SSE support"
+        );
+    }
 }
