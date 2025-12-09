@@ -1,0 +1,3 @@
+[mcpServers.sample]
+url = "http://localhost:8773/mcp"
+transport = "streamable-http"

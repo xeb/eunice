@@ -25,6 +25,24 @@ pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
 /// Must include both application/json and text/event-stream per MCP spec
 pub const MCP_ACCEPT_HEADER: &str = "application/json, text/event-stream";
 
+/// Parse a Server-Sent Events (SSE) response body to extract JSON-RPC response.
+/// SSE format has lines like:
+///   event: message
+///   data: {"jsonrpc": "2.0", ...}
+fn parse_sse_response(body: &str) -> Result<JsonRpcResponse> {
+    for line in body.lines() {
+        let line = line.trim();
+        if let Some(data) = line.strip_prefix("data:") {
+            let json_str = data.trim();
+            if !json_str.is_empty() {
+                return serde_json::from_str(json_str)
+                    .with_context(|| format!("Failed to parse SSE data as JSON: {}", json_str));
+            }
+        }
+    }
+    Err(anyhow!("No JSON data found in SSE response: {}", body))
+}
+
 impl HttpMcpServer {
     /// Connect to an HTTP MCP server and initialize it
     pub async fn connect(name: &str, url: &str, timeout_secs: Option<u64>, verbose: bool) -> Result<Self> {
@@ -267,10 +285,27 @@ impl HttpMcpServer {
             }
         }
 
-        let json_response: JsonRpcResponse = response
-            .json()
-            .await
-            .context("Failed to parse JSON-RPC response")?;
+        // Check Content-Type to determine response format
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        let json_response: JsonRpcResponse = if content_type.contains("text/event-stream") {
+            // Parse SSE format: look for "data: {...}" lines
+            let body = response
+                .text()
+                .await
+                .context("Failed to read SSE response body")?;
+            parse_sse_response(&body)?
+        } else {
+            // Parse as direct JSON
+            response
+                .json()
+                .await
+                .context("Failed to parse JSON-RPC response")?
+        };
 
         Ok(json_response)
     }
@@ -297,5 +332,49 @@ impl HttpMcpServer {
     /// Get the next request ID
     fn next_id(&self) -> i64 {
         self.request_id.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sse_response_valid() {
+        let sse_body = r#"event: message
+data: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}
+
+"#;
+        let response = parse_sse_response(sse_body).unwrap();
+        assert_eq!(response.jsonrpc, "2.0");
+        assert_eq!(response.id, Some(1));
+        assert!(response.result.is_some());
+    }
+
+    #[test]
+    fn test_parse_sse_response_with_whitespace() {
+        let sse_body = "  data:   {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}  \n";
+        let response = parse_sse_response(sse_body).unwrap();
+        assert_eq!(response.id, Some(2));
+    }
+
+    #[test]
+    fn test_parse_sse_response_no_data() {
+        let sse_body = "event: message\n\n";
+        let result = parse_sse_response(sse_body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_sse_response_multiple_data_lines() {
+        // Should return first valid data line
+        let sse_body = r#"event: message
+data: {"jsonrpc":"2.0","id":1,"result":"first"}
+
+event: message
+data: {"jsonrpc":"2.0","id":2,"result":"second"}
+"#;
+        let response = parse_sse_response(sse_body).unwrap();
+        assert_eq!(response.id, Some(1));
     }
 }
