@@ -1,6 +1,6 @@
 use crate::agent::{run_agent_cancellable, AgentResult};
 use crate::client::Client;
-use crate::compress::CompressionConfig;
+use crate::compact::CompactionConfig;
 use crate::config::DMN_INSTRUCTIONS;
 use crate::display;
 use crate::mcp::McpManager;
@@ -575,9 +575,9 @@ async fn run_prompt(
         // Single-agent mode (original behavior)
         let final_prompt = inject_dmn_instructions_if_needed(prompt, dmn_injected, dmn);
 
-        // Enable compression in DMN mode
-        let compression_config = if dmn {
-            Some(CompressionConfig::default())
+        // Enable compaction in DMN mode
+        let compaction_config = if dmn {
+            Some(CompactionConfig::default())
         } else {
             None
         };
@@ -593,7 +593,7 @@ async fn run_prompt(
             conversation_history,
             enable_image_tool,
             cancel_rx,
-            compression_config,
+            compaction_config,
         )
         .await?;
         Ok(result == AgentResult::Cancelled)

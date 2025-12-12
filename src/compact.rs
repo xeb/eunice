@@ -1,9 +1,9 @@
-//! Context compression for handling context window exhaustion
+//! Context compaction for handling context window exhaustion
 //!
-//! This module provides functionality to compress conversation history when
+//! This module provides functionality to compact conversation history when
 //! the context window is exhausted (e.g., Gemini's RESOURCE_EXHAUSTED error).
 //!
-//! Two-phase compression strategy:
+//! Two-phase compaction strategy:
 //! 1. Lightweight compaction: Clear old tool outputs (often sufficient)
 //! 2. Full summarization: LLM-generated summary of the conversation
 
@@ -11,20 +11,20 @@ use crate::client::Client;
 use crate::models::Message;
 use anyhow::{Context, Result};
 
-/// Compression configuration
+/// Compaction configuration
 #[derive(Debug, Clone)]
-pub struct CompressionConfig {
+pub struct CompactionConfig {
     /// Keep last N messages with full tool outputs
     pub preserve_recent_messages: usize,
-    /// Maximum characters for compressed tool outputs in lightweight mode
+    /// Maximum characters for compacted tool outputs in lightweight mode
     pub tool_output_max_chars: usize,
     /// Whether to attempt lightweight compaction first
     pub try_lightweight_first: bool,
-    /// Enable compression (can be disabled via config)
+    /// Enable compaction (can be disabled via config)
     pub enabled: bool,
 }
 
-impl Default for CompressionConfig {
+impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
             preserve_recent_messages: 10,
@@ -35,22 +35,22 @@ impl Default for CompressionConfig {
     }
 }
 
-/// Result of compression
+/// Result of compaction
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct CompressedContext {
+pub struct CompactedContext {
     /// Summary of the conversation (empty if lightweight compaction was sufficient)
     pub summary: String,
     /// Messages to use going forward
     pub messages: Vec<Message>,
-    /// Compression ratio (compressed / original)
-    pub compression_ratio: f32,
+    /// Compaction ratio (compacted / original)
+    pub compaction_ratio: f32,
     /// Whether full summarization was used (vs lightweight)
     pub used_full_summarization: bool,
 }
 
-/// Compression prompt template (embedded from file)
-const COMPRESSION_PROMPT: &str = include_str!("../compression_prompt.md");
+/// Compaction prompt template (embedded from file)
+const COMPACTION_PROMPT: &str = include_str!("../compaction_prompt.md");
 
 /// Estimate token count for messages (rough heuristic: ~4 chars per token)
 pub fn estimate_tokens(messages: &[Message]) -> usize {
@@ -72,7 +72,7 @@ pub fn estimate_tokens(messages: &[Message]) -> usize {
 }
 
 /// Perform lightweight compaction by truncating old tool outputs
-fn lightweight_compact(messages: &[Message], config: &CompressionConfig) -> Vec<Message> {
+fn lightweight_compact(messages: &[Message], config: &CompactionConfig) -> Vec<Message> {
     let cutoff = messages.len().saturating_sub(config.preserve_recent_messages);
 
     messages
@@ -80,7 +80,7 @@ fn lightweight_compact(messages: &[Message], config: &CompressionConfig) -> Vec<
         .enumerate()
         .map(|(i, msg)| {
             if i < cutoff {
-                // Compress old tool outputs
+                // Compact old tool outputs
                 match msg {
                     Message::Tool {
                         tool_call_id,
@@ -172,7 +172,7 @@ async fn generate_summary(
 ) -> Result<String> {
     let conversation_text = format_conversation_for_summary(messages);
 
-    let summary_prompt = format!("{}\n\n{}", COMPRESSION_PROMPT, conversation_text);
+    let summary_prompt = format!("{}\n\n{}", COMPACTION_PROMPT, conversation_text);
 
     // Create a simple request for summarization (no tools)
     let summary_messages = vec![Message::User {
@@ -199,22 +199,22 @@ async fn generate_summary(
     Ok(content)
 }
 
-/// Compress conversation history
+/// Compact conversation history
 ///
-/// This function implements a two-phase compression strategy:
+/// This function implements a two-phase compaction strategy:
 /// 1. First, try lightweight compaction (truncating old tool outputs)
 /// 2. If still too large, use full LLM summarization
-pub async fn compress_context(
+pub async fn compact_context(
     client: &Client,
     model: &str,
     messages: &[Message],
-    config: &CompressionConfig,
-) -> Result<CompressedContext> {
+    config: &CompactionConfig,
+) -> Result<CompactedContext> {
     if messages.is_empty() {
-        return Ok(CompressedContext {
+        return Ok(CompactedContext {
             summary: String::new(),
             messages: vec![],
-            compression_ratio: 1.0,
+            compaction_ratio: 1.0,
             used_full_summarization: false,
         });
     }
@@ -226,13 +226,13 @@ pub async fn compress_context(
         let lightweight = lightweight_compact(messages, config);
         let lightweight_tokens = estimate_tokens(&lightweight);
 
-        // If we achieved significant compression (>30% reduction), use it
+        // If we achieved significant compaction (>30% reduction), use it
         let ratio = lightweight_tokens as f32 / original_tokens as f32;
         if ratio < 0.7 {
-            return Ok(CompressedContext {
+            return Ok(CompactedContext {
                 summary: String::new(),
                 messages: lightweight,
-                compression_ratio: ratio,
+                compaction_ratio: ratio,
                 used_full_summarization: false,
             });
         }
@@ -248,7 +248,7 @@ pub async fn compress_context(
     // Build new messages with summary as first message
     let mut new_messages = vec![Message::User {
         content: format!(
-            "## Continuing from Compressed Context\n\n{}\n\n---\n\n[The above is a summary of our previous conversation. Please continue with the task.]",
+            "## Continuing from Compacted Context\n\n{}\n\n---\n\n[The above is a summary of our previous conversation. Please continue with the task.]",
             summary
         ),
     }];
@@ -257,10 +257,10 @@ pub async fn compress_context(
     let new_tokens = estimate_tokens(&new_messages);
     let ratio = new_tokens as f32 / original_tokens as f32;
 
-    Ok(CompressedContext {
+    Ok(CompactedContext {
         summary,
         messages: new_messages,
-        compression_ratio: ratio,
+        compaction_ratio: ratio,
         used_full_summarization: true,
     })
 }
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_lightweight_compact() {
-        let config = CompressionConfig {
+        let config = CompactionConfig {
             preserve_recent_messages: 2,
             tool_output_max_chars: 50,
             ..Default::default()

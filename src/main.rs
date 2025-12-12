@@ -1,6 +1,6 @@
 mod agent;
 mod client;
-mod compress;
+mod compact;
 mod config;
 mod display;
 mod interactive;
@@ -649,9 +649,9 @@ async fn main() -> Result<()> {
 
             let mut conversation_history: Vec<Message> = Vec::new();
 
-            // Enable compression in DMN mode by default
-            let compression_config = if args.dmn {
-                Some(compress::CompressionConfig::default())
+            // Enable compaction in DMN mode by default
+            let compaction_config = if args.dmn {
+                Some(compact::CompactionConfig::default())
             } else {
                 None
             };
@@ -666,7 +666,7 @@ async fn main() -> Result<()> {
                 args.verbose,
                 &mut conversation_history,
                 args.dmn || args.images,
-                compression_config,
+                compaction_config,
             )
             .await?;
         }

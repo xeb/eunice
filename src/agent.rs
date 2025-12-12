@@ -1,5 +1,5 @@
 use crate::client::Client;
-use crate::compress::{compress_context, is_context_exhausted_error, CompressionConfig};
+use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::display;
 use crate::display::{Spinner, ThinkingSpinner};
 use crate::mcp::McpManager;
@@ -104,7 +104,7 @@ pub async fn run_agent(
     verbose: bool,
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
-    compression_config: Option<CompressionConfig>,
+    compaction_config: Option<CompactionConfig>,
 ) -> Result<AgentResult> {
     run_agent_cancellable(
         client,
@@ -117,7 +117,7 @@ pub async fn run_agent(
         conversation_history,
         enable_image_tool,
         None,
-        compression_config,
+        compaction_config,
     )
     .await
 }
@@ -134,7 +134,7 @@ pub async fn run_agent_cancellable(
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
     cancel_rx: Option<watch::Receiver<bool>>,
-    compression_config: Option<CompressionConfig>,
+    compaction_config: Option<CompactionConfig>,
 ) -> Result<AgentResult> {
     // Build the prompt, including any failed server info
     let final_prompt = if let Some(ref manager) = mcp_manager {
@@ -164,7 +164,7 @@ pub async fn run_agent_cancellable(
     display::debug(&format!("Sending prompt: {}", final_prompt), verbose);
 
     // Track if we've already tried compression this loop iteration
-    let mut compression_attempted = false;
+    let mut compaction_attempted = false;
 
     loop {
         // Get available tools
@@ -231,51 +231,51 @@ pub async fn run_agent_cancellable(
         // Handle errors with potential context compression
         let response = match response {
             Ok(r) => {
-                compression_attempted = false; // Reset on success
+                compaction_attempted = false; // Reset on success
                 r
             }
             Err(e) => {
                 let error_msg = e.to_string();
 
-                // Check if this is a context exhaustion error and we can compress
+                // Check if this is a context exhaustion error and we can compact
                 if is_context_exhausted_error(&error_msg)
-                    && !compression_attempted
-                    && compression_config.is_some()
+                    && !compaction_attempted
+                    && compaction_config.is_some()
                 {
-                    let config = compression_config.as_ref().unwrap();
+                    let config = compaction_config.as_ref().unwrap();
                     if config.enabled {
                         if !silent {
                             eprintln!(
-                                "⚠️  Context exhausted. Compressing conversation history..."
+                                "⚠️  Context exhausted. Compacting conversation history..."
                             );
                         }
 
-                        // Attempt compression
-                        match compress_context(client, model, conversation_history, config).await {
-                            Ok(compressed) => {
+                        // Attempt compaction
+                        match compact_context(client, model, conversation_history, config).await {
+                            Ok(compacted) => {
                                 if !silent {
-                                    let method = if compressed.used_full_summarization {
+                                    let method = if compacted.used_full_summarization {
                                         "full summarization"
                                     } else {
                                         "lightweight compaction"
                                     };
                                     eprintln!(
-                                        "✓ Compressed to {:.0}% of original size using {}",
-                                        compressed.compression_ratio * 100.0,
+                                        "✓ Compacted to {:.0}% of original size using {}",
+                                        compacted.compaction_ratio * 100.0,
                                         method
                                     );
                                 }
 
-                                // Replace conversation history with compressed version
+                                // Replace conversation history with compacted version
                                 conversation_history.clear();
-                                conversation_history.extend(compressed.messages);
+                                conversation_history.extend(compacted.messages);
 
-                                compression_attempted = true;
-                                continue; // Retry with compressed context
+                                compaction_attempted = true;
+                                continue; // Retry with compacted context
                             }
-                            Err(compress_err) => {
+                            Err(compact_err) => {
                                 if !silent {
-                                    eprintln!("✗ Compression failed: {}", compress_err);
+                                    eprintln!("✗ Compaction failed: {}", compact_err);
                                 }
                                 return Err(e); // Return original error
                             }
@@ -283,7 +283,7 @@ pub async fn run_agent_cancellable(
                     }
                 }
 
-                // Not a context error or compression disabled/failed
+                // Not a context error or compaction disabled/failed
                 return Err(e);
             }
         };
