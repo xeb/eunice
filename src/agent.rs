@@ -39,7 +39,7 @@ pub fn get_interpret_image_tool_spec() -> Tool {
     }
 }
 
-async fn execute_interpret_image(
+pub async fn execute_interpret_image(
     client: &Client,
     model: &str,
     args: serde_json::Value,
@@ -116,7 +116,7 @@ pub fn get_search_query_tool_spec() -> Tool {
 }
 
 /// Execute search_query tool using Gemini API with Google Search grounding
-async fn execute_search_query(
+pub async fn execute_search_query(
     args: serde_json::Value,
 ) -> Result<String> {
     let query = args["query"]

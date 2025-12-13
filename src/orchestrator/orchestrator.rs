@@ -1,3 +1,4 @@
+use crate::agent::{self, SEARCH_QUERY_TOOL_NAME, INTERPRET_IMAGE_TOOL_NAME};
 use crate::client::Client;
 use crate::display;
 use crate::display::{Spinner, ThinkingSpinner};
@@ -172,6 +173,23 @@ impl AgentOrchestrator {
         })
     }
 
+    /// Get built-in tools that match agent's tool patterns
+    fn get_builtin_tools(&self, agent: &AgentConfig) -> Vec<Tool> {
+        let mut tools = Vec::new();
+
+        // Check if search_query matches any pattern
+        if agent.tools.iter().any(|p| crate::mcp::tool_matches_pattern(SEARCH_QUERY_TOOL_NAME, p)) {
+            tools.push(agent::get_search_query_tool_spec());
+        }
+
+        // Check if interpret_image matches any pattern
+        if agent.tools.iter().any(|p| crate::mcp::tool_matches_pattern(INTERPRET_IMAGE_TOOL_NAME, p)) {
+            tools.push(agent::get_interpret_image_tool_spec());
+        }
+
+        tools
+    }
+
     /// Get MCP tools filtered by agent's configuration
     ///
     /// Logic:
@@ -179,11 +197,12 @@ impl AgentOrchestrator {
     /// - If agent has `mcp_servers` + `tools`: filters tools from those servers using patterns
     /// - If agent has `tools` only: filters ALL tools using patterns
     /// - If agent has neither: no tools
+    /// - Built-in tools (search_query, interpret_image) are added if they match patterns
     fn get_filtered_tools(&self, agent: &AgentConfig, mcp_manager: &McpManager) -> Vec<Tool> {
         let has_servers = !agent.mcp_servers.is_empty();
         let has_tools = !agent.tools.is_empty();
 
-        match (has_servers, has_tools) {
+        let mut result = match (has_servers, has_tools) {
             // Both mcp_servers and tools specified: filter tools from those servers
             (true, true) => {
                 let server_tools = mcp_manager.get_tools_from_servers(&agent.mcp_servers);
@@ -208,7 +227,14 @@ impl AgentOrchestrator {
             }
             // Neither specified: no tools
             (false, false) => Vec::new(),
+        };
+
+        // Add built-in tools that match patterns
+        if has_tools {
+            result.extend(self.get_builtin_tools(agent));
         }
+
+        result
     }
 
     /// The agent loop - processes messages and tool calls
@@ -323,6 +349,38 @@ impl AgentOrchestrator {
                         client, model, tool_name, &args, mcp_manager,
                         tool_output_limit, silent, verbose, depth, agent_name,
                     ).await
+                } else if tool_name == SEARCH_QUERY_TOOL_NAME {
+                    // Built-in search_query tool
+                    let spinner = if !silent {
+                        Some(Spinner::start(&format!("Running {}", tool_name)))
+                    } else {
+                        None
+                    };
+
+                    let result = agent::execute_search_query(args).await
+                        .unwrap_or_else(|e| format!("Error: {}", e));
+
+                    if let Some(spinner) = spinner {
+                        spinner.stop().await;
+                    }
+
+                    result
+                } else if tool_name == INTERPRET_IMAGE_TOOL_NAME {
+                    // Built-in interpret_image tool
+                    let spinner = if !silent {
+                        Some(Spinner::start(&format!("Running {}", tool_name)))
+                    } else {
+                        None
+                    };
+
+                    let result = agent::execute_interpret_image(client, model, args).await
+                        .unwrap_or_else(|e| format!("Error: {}", e));
+
+                    if let Some(spinner) = spinner {
+                        spinner.stop().await;
+                    }
+
+                    result
                 } else {
                     // Regular MCP tool
                     let spinner = if !silent {
