@@ -17,6 +17,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Multi-Agent Orchestration**: Agents can invoke other agents as tools for complex workflows
 - **Image Interpretation**: Built-in multimodal image analysis via `--images` flag
 - **Web Search**: Built-in web search with Google Search grounding via `--search` flag
+- **Research Mode**: Built-in multi-agent research orchestration via `--research` flag
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with minimal MCP tools
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
@@ -104,6 +105,7 @@ Options:
       --config <FILE>           Path to MCP configuration JSON/TOML
       --no-mcp                  Disable MCP even if eunice.json exists
       --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
+      --research                Enable Research mode with multi-agent orchestration (requires GEMINI_API_KEY)
       --agent <NAME>            Run as specific agent (default: root if agents configured)
   -i, --interact                Interactive mode for multi-turn conversations
       --silent                  Suppress all output except AI responses
@@ -368,6 +370,53 @@ See [examples/agent_tool_access](examples/agent_tool_access) for all three metho
 ### Example: Remote MCP Server
 
 See [examples/remote_mcp](examples/remote_mcp) for connecting to a remote MCP server via HTTP transport.
+
+### Example: Research Agent
+
+See [examples/research_agent](examples/research_agent) for a multi-agent research system with orchestrator-workers and evaluator patterns.
+
+## Research Mode
+
+Enable with `--research` for built-in multi-agent research orchestration using Gemini with Google Search grounding.
+
+**Requires**: `GEMINI_API_KEY`
+
+```bash
+# One-shot research
+eunice --research "Best office chairs of 2025"
+
+# Interactive research mode
+eunice --research --interact
+
+# List embedded agents
+eunice --research --list-agents
+```
+
+### How It Works
+
+Research mode uses 4 embedded agents following the orchestrator-workers pattern:
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| `root` | Coordinator - breaks topic into subtopics, delegates work | `invoke_*` only |
+| `researcher` | Searches web, saves notes to `research_notes/` | `search_query`, `filesystem_write_*` |
+| `report_writer` | Synthesizes research into reports in `reports/` | `filesystem_*` |
+| `evaluator` | Reviews reports, approves or requests one revision | `filesystem_read_*`, `filesystem_list_*` |
+
+### Workflow
+
+1. User provides research topic
+2. Root breaks into 2-4 subtopics and spawns researchers
+3. Researchers use `search_query` (with `pro_preview` model) and save notes
+4. Report writer synthesizes findings into a report
+5. Evaluator reviews (APPROVED or NEEDS_REVISION with one revision cycle)
+6. Final report saved to `reports/` directory
+
+### Output
+
+Research mode creates:
+- `research_notes/*.md` - Individual research notes per subtopic
+- `reports/*_summary.md` - Final synthesized report
 
 ## Tool Discovery & Filtering
 

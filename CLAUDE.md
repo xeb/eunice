@@ -254,6 +254,49 @@ eunice --search --no-mcp "What are the latest AI developments?"
 eunice --dmn "Search for the current weather in Tokyo"
 ```
 
+## Research Mode
+
+Eunice includes a built-in `--research` mode for multi-agent research orchestration using Gemini with Google Search grounding.
+
+### Enabling
+
+Use `--research` flag (requires `GEMINI_API_KEY`):
+
+```bash
+eunice --research "Best laptops of 2025"
+eunice --research --interact  # Interactive mode
+```
+
+### Architecture
+
+Research mode uses 4 embedded agents following the orchestrator-workers pattern:
+
+1. **root** (coordinator): Breaks research into subtopics, delegates to workers, manages workflow
+2. **researcher**: Uses `search_query` tool with `pro_preview` model, saves notes to `research_notes/`
+3. **report_writer**: Reads research notes, synthesizes into reports in `reports/`
+4. **evaluator**: Reviews reports, returns APPROVED or NEEDS_REVISION (one revision cycle)
+
+### Implementation (`src/config.rs`)
+
+- `get_research_mcp_config()` - Returns embedded agent configuration
+- `has_gemini_api_key()` - Checks for required API key
+- Embedded prompts: `RESEARCH_LEAD_PROMPT`, `RESEARCH_RESEARCHER_PROMPT`, etc.
+
+### Workflow
+
+1. User provides research topic
+2. Root agent breaks into 2-4 subtopics
+3. Researcher agents search web and save notes
+4. Report writer synthesizes findings
+5. Evaluator reviews (one revision if needed)
+6. Final report in `reports/` directory
+
+### CLI Flags
+
+- `--research`: Enable research mode (conflicts with `--dmn`)
+- `--research --interact`: Interactive research sessions
+- `--research --list-agents`: Show embedded agents
+
 ## Key Design Decisions
 
 1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
@@ -316,6 +359,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.27**: Research mode via `--research` flag with built-in multi-agent orchestration (requires GEMINI_API_KEY)
 - **0.2.26**: Web search tool via `--search` flag using Gemini with Google Search grounding
 - **0.2.24**: Enhanced verbose logging for HTTP MCP connections (shows request/response bodies, status, content-type)
 - **0.2.23**: Auto context compression when RESOURCE_EXHAUSTED error occurs (DMN mode)
