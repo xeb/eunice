@@ -10,7 +10,7 @@ mod orchestrator;
 mod provider;
 
 use crate::client::Client;
-use crate::config::{get_dmn_mcp_config, load_mcp_config, DMN_INSTRUCTIONS, LLMS_TXT, LLMS_FULL_TXT};
+use crate::config::{get_dmn_mcp_config, get_research_mcp_config, has_gemini_api_key, load_mcp_config, DMN_INSTRUCTIONS, LLMS_TXT, LLMS_FULL_TXT};
 use crate::mcp::McpManager;
 use crate::models::{McpConfig, Message};
 use crate::orchestrator::AgentOrchestrator;
@@ -78,6 +78,10 @@ struct Args {
     /// Enable built-in web search tool (uses Gemini with Google Search)
     #[arg(long, help_heading = "Modes")]
     search: bool,
+
+    /// Enable Research mode with multi-agent orchestration (requires GEMINI_API_KEY)
+    #[arg(long, help_heading = "Modes")]
+    research: bool,
 
     // === Output ===
     /// Suppress all output except AI responses
@@ -158,6 +162,14 @@ fn handle_help_with_mcp() {
         println!("DMN Mode MCP Servers (--dmn):");
         let dmn_config = get_dmn_mcp_config();
         print_mcp_servers_help(&dmn_config);
+
+        // Show Research mode info
+        println!("\nResearch Mode (--research):");
+        println!("    Multi-agent research system with 4 agents:");
+        println!("      root (coordinator) → researcher, report_writer, evaluator");
+        println!("    Built-in: search_query (Gemini + Google Search)");
+        println!("    MCP: filesystem");
+        println!("    Requires: GEMINI_API_KEY");
     }
 
     std::process::exit(0);
@@ -216,6 +228,14 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
             return Err(anyhow!("--dmn cannot be used with --config"));
         }
         return Ok(Some(get_dmn_mcp_config()));
+    }
+
+    // --research uses embedded multi-agent config
+    if args.research {
+        if args.config.is_some() {
+            return Err(anyhow!("--research cannot be used with --config"));
+        }
+        return Ok(Some(get_research_mcp_config()));
     }
 
     // --config specified
@@ -282,6 +302,19 @@ async fn main() -> Result<()> {
         return Err(anyhow!("--dmn requires MCP tools and cannot be used with --no-mcp"));
     }
 
+    if args.research && args.no_mcp {
+        return Err(anyhow!("--research requires MCP tools and cannot be used with --no-mcp"));
+    }
+
+    if args.research && args.dmn {
+        return Err(anyhow!("--research and --dmn cannot be used together"));
+    }
+
+    // --research requires GEMINI_API_KEY for search_query tool
+    if args.research && !has_gemini_api_key() {
+        return Err(anyhow!("--research requires GEMINI_API_KEY environment variable for web search"));
+    }
+
     // Get config early for --list-agents
     let mcp_config = determine_config(&args)?;
 
@@ -319,7 +352,7 @@ async fn main() -> Result<()> {
     // Handle --list-mcp-servers
     if args.list_mcp_servers {
         let enable_image_tool = args.dmn || args.images;
-        let enable_search_tool = args.dmn || args.search;
+        let enable_search_tool = args.dmn || args.search || args.research;
         let mut has_output = false;
 
         // Show built-in tools section
@@ -377,7 +410,7 @@ async fn main() -> Result<()> {
     // Handle --list-tools
     if args.list_tools {
         let enable_image_tool = args.dmn || args.images;
-        let enable_search_tool = args.dmn || args.search;
+        let enable_search_tool = args.dmn || args.search || args.research;
         let mut all_tool_names: Vec<String> = Vec::new();
 
         // Add built-in tools
@@ -582,7 +615,7 @@ async fn main() -> Result<()> {
             args.verbose,
             args.dmn,
             args.dmn || args.images,
-            args.dmn || args.search,
+            args.dmn || args.search || args.research,
         )
         .await?;
     } else {
@@ -621,6 +654,10 @@ async fn main() -> Result<()> {
 
             if args.dmn {
                 display::print_dmn_mode();
+            }
+
+            if args.research {
+                display::print_research_mode();
             }
 
             // Show agent info if in multi-agent mode
@@ -683,7 +720,7 @@ async fn main() -> Result<()> {
                 args.verbose,
                 &mut conversation_history,
                 args.dmn || args.images,
-                args.dmn || args.search,
+                args.dmn || args.search || args.research,
                 compaction_config,
             )
             .await?;
@@ -788,6 +825,27 @@ mod tests {
     fn test_args_dmn_alias() {
         let args = Args::try_parse_from(["eunice", "--dmn"]).unwrap();
         assert!(args.dmn);
+    }
+
+    #[test]
+    fn test_args_research_flag() {
+        let args = Args::try_parse_from(["eunice", "--research"]).unwrap();
+        assert!(args.research);
+        assert!(!args.dmn);
+    }
+
+    #[test]
+    fn test_args_research_with_interact() {
+        let args = Args::try_parse_from(["eunice", "--research", "-i"]).unwrap();
+        assert!(args.research);
+        assert!(args.interact);
+    }
+
+    #[test]
+    fn test_args_research_with_images() {
+        let args = Args::try_parse_from(["eunice", "--research", "--images"]).unwrap();
+        assert!(args.research);
+        assert!(args.images);
     }
 
     #[test]

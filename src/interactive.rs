@@ -411,6 +411,12 @@ pub async fn interactive_mode(
             display::print_dmn_mode();
         }
 
+        // Detect research mode: search enabled + multi-agent orchestration (not DMN)
+        let research = !dmn && enable_search_tool && orchestrator.as_ref().map_or(false, |o| o.has_agents());
+        if research {
+            display::print_research_mode();
+        }
+
         if let Some(name) = agent_name {
             eprintln!("🤖 Multi-Agent Mode: starting as '{}'", name);
         }

@@ -185,6 +185,11 @@ pub fn print_dmn_mode() {
     println!("{} {}", "🧠", "DMN Mode".yellow().bold());
 }
 
+/// Print Research mode indicator
+pub fn print_research_mode() {
+    println!("{} {}", "🔬", "Research Mode".cyan().bold());
+}
+
 /// Print error message
 pub fn print_error(message: &str) {
     eprintln!("{} {}", "❌".red(), message.red());
