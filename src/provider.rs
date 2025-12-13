@@ -282,7 +282,7 @@ mod tests {
     fn test_other_gemini_models_use_openai_compatible() {
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
-        let models = vec!["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
+        let models = vec!["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
 
         for model in models {
             let result = detect_provider(model);

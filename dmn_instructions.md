@@ -10,6 +10,7 @@ You have access to:
 - **shell**: Execute any shell command (grep, curl, wget, git, npm, cargo, etc.)
 - **filesystem**: Read/write files, list directories, search files
 - **interpret_image**: Analyze images (built-in, always available)
+- **search_query**: Web search using Gemini with Google Search grounding (built-in, always available)
 
 ## Core Mandates
 
@@ -37,12 +38,16 @@ You have access to:
 
 ### Web Searches
 
-When you need to search the web or fetch URLs, use shell commands:
-```bash
-# Web search via DuckDuckGo (no API key needed)
-curl -s "https://html.duckduckgo.com/html/?q=your+search+query" | grep -oP '(?<=href=")[^"]*(?=")' | head -10
+**Preferred: Use the `search_query` tool** for web searches with AI-powered results:
+- `search_query(query, model)` - Search using Gemini with Google Search grounding
+- Model choices:
+  - `flash` (gemini-2.5-flash): Quick knowledge queries, fast and cheap
+  - `pro` (gemini-2.5-pro): Medium complexity queries requiring deeper analysis
+  - `pro_preview` (gemini-3-pro-preview): Hardest queries requiring maximum reasoning
 
-# Fetch a URL
+**Fallback: Shell commands** when you need raw HTML or specific URL fetching:
+```bash
+# Fetch a specific URL
 curl -s "https://example.com/api"
 wget -qO- "https://example.com/page"
 ```

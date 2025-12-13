@@ -362,6 +362,7 @@ pub async fn interactive_mode(
     verbose: bool,
     dmn: bool,
     enable_image_tool: bool,
+    enable_search_tool: bool,
 ) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
     let mut dmn_injected = false;
@@ -437,6 +438,7 @@ pub async fn interactive_mode(
             verbose,
             dmn,
             enable_image_tool,
+            enable_search_tool,
             &mut dmn_injected,
             &mut conversation_history,
             Some(cancel_rx),
@@ -510,6 +512,7 @@ pub async fn interactive_mode(
             verbose,
             dmn,
             enable_image_tool,
+            enable_search_tool,
             &mut dmn_injected,
             &mut conversation_history,
             Some(cancel_rx),
@@ -545,6 +548,7 @@ async fn run_prompt(
     verbose: bool,
     dmn: bool,
     enable_image_tool: bool,
+    enable_search_tool: bool,
     dmn_injected: &mut bool,
     conversation_history: &mut Vec<Message>,
     cancel_rx: Option<watch::Receiver<bool>>,
@@ -592,6 +596,7 @@ async fn run_prompt(
             verbose,
             conversation_history,
             enable_image_tool,
+            enable_search_tool,
             cancel_rx,
             compaction_config,
         )

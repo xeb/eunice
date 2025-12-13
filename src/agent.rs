@@ -11,6 +11,9 @@ use tokio::sync::watch;
 // --- Built-in interpret_image tool ---
 pub const INTERPRET_IMAGE_TOOL_NAME: &str = "interpret_image";
 
+// --- Built-in search_query tool ---
+pub const SEARCH_QUERY_TOOL_NAME: &str = "search_query";
+
 /// Get the tool spec for the built-in interpret_image tool
 pub fn get_interpret_image_tool_spec() -> Tool {
     Tool {
@@ -86,6 +89,137 @@ async fn execute_interpret_image(
     Ok(content)
 }
 
+/// Get the tool spec for the built-in search_query tool
+pub fn get_search_query_tool_spec() -> Tool {
+    Tool {
+        tool_type: "function".to_string(),
+        function: FunctionSpec {
+            name: SEARCH_QUERY_TOOL_NAME.to_string(),
+            description: "Search the web using Gemini models with Google Search grounding. Use 'flash' for quick knowledge queries (fast, cheap), use 'pro' for medium complexity queries requiring deeper analysis, and use 'pro_preview' for the hardest queries requiring maximum reasoning capability.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to send to the model with Google Search grounding."
+                    },
+                    "model": {
+                        "type": "string",
+                        "enum": ["flash", "pro", "pro_preview"],
+                        "description": "The Gemini model to use. 'flash' (gemini-2.5-flash) for quick queries, 'pro' (gemini-2.5-pro) for medium complexity, 'pro_preview' (gemini-3-pro-preview) for hardest queries."
+                    }
+                },
+                "required": ["query", "model"]
+            }),
+        },
+    }
+}
+
+/// Execute search_query tool using Gemini API with Google Search grounding
+async fn execute_search_query(
+    args: serde_json::Value,
+) -> Result<String> {
+    let query = args["query"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing query"))?;
+    let model_choice = args["model"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing model"))?;
+
+    // Map model choice to actual model name
+    let model = match model_choice {
+        "flash" => "gemini-2.5-flash",
+        "pro" => "gemini-2.5-pro",
+        "pro_preview" => "gemini-3-pro-preview",
+        _ => return Err(anyhow!("Invalid model choice: {}. Must be 'flash', 'pro', or 'pro_preview'", model_choice)),
+    };
+
+    // Get API key from environment
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .context("GEMINI_API_KEY environment variable not set")?;
+
+    // Build the request
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+        model
+    );
+
+    let request_body = serde_json::json!({
+        "contents": [
+            {
+                "parts": [
+                    {"text": query}
+                ]
+            }
+        ],
+        "tools": [
+            {
+                "google_search": {}
+            }
+        ]
+    });
+
+    // Make the HTTP request
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("x-goog-api-key", &api_key)
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .context("Failed to send search request to Gemini")?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(anyhow!("Gemini search request failed: {}", error_text));
+    }
+
+    let response_json: serde_json::Value = response
+        .json()
+        .await
+        .context("Failed to parse Gemini search response")?;
+
+    // Extract the text response
+    let text = response_json["candidates"]
+        .get(0)
+        .and_then(|c| c["content"]["parts"].as_array())
+        .and_then(|parts| {
+            parts.iter()
+                .filter_map(|p| p["text"].as_str())
+                .collect::<Vec<_>>()
+                .first()
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "No text response from search".to_string());
+
+    // Extract grounding metadata if available
+    let mut result = text;
+
+    if let Some(grounding) = response_json["candidates"]
+        .get(0)
+        .and_then(|c| c.get("groundingMetadata"))
+    {
+        if let Some(sources) = grounding.get("groundingChunks").and_then(|c| c.as_array()) {
+            let source_urls: Vec<String> = sources
+                .iter()
+                .filter_map(|s| {
+                    let web = s.get("web")?;
+                    let uri = web.get("uri")?.as_str()?;
+                    let title = web.get("title").and_then(|t| t.as_str()).unwrap_or("Source");
+                    Some(format!("- [{}]({})", title, uri))
+                })
+                .collect();
+
+            if !source_urls.is_empty() {
+                result = format!("{}\n\n**Sources:**\n{}", result, source_urls.join("\n"));
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 /// Result of running the agent - indicates if it completed or was cancelled
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentResult {
@@ -104,6 +238,7 @@ pub async fn run_agent(
     verbose: bool,
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
+    enable_search_tool: bool,
     compaction_config: Option<CompactionConfig>,
 ) -> Result<AgentResult> {
     run_agent_cancellable(
@@ -116,6 +251,7 @@ pub async fn run_agent(
         verbose,
         conversation_history,
         enable_image_tool,
+        enable_search_tool,
         None,
         compaction_config,
     )
@@ -133,6 +269,7 @@ pub async fn run_agent_cancellable(
     verbose: bool,
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
+    enable_search_tool: bool,
     cancel_rx: Option<watch::Receiver<bool>>,
     compaction_config: Option<CompactionConfig>,
 ) -> Result<AgentResult> {
@@ -179,6 +316,11 @@ pub async fn run_agent_cancellable(
         // Add built-in interpret_image tool when enabled (via --dmn or --images)
         if enable_image_tool {
             tools.push(get_interpret_image_tool_spec());
+        }
+
+        // Add built-in search_query tool when enabled (via --dmn or --search)
+        if enable_search_tool {
+            tools.push(get_search_query_tool_spec());
         }
 
         let tools_option = if tools.is_empty() { None } else { Some(tools.as_slice()) };
@@ -337,9 +479,11 @@ pub async fn run_agent_cancellable(
                 None
             };
 
-            // Execute tool via MCP manager
+            // Execute tool via MCP manager or built-in handlers
             let result = if tool_name == INTERPRET_IMAGE_TOOL_NAME {
                 execute_interpret_image(client, model, args).await
+            } else if tool_name == SEARCH_QUERY_TOOL_NAME {
+                execute_search_query(args).await
             } else if let Some(ref mut manager) = mcp_manager.as_deref_mut() {
                 manager.execute_tool(tool_name, args).await
             } else {
@@ -366,4 +510,68 @@ pub async fn run_agent_cancellable(
     }
 
     Ok(AgentResult::Completed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_interpret_image_tool_spec() {
+        let spec = get_interpret_image_tool_spec();
+        assert_eq!(spec.function.name, INTERPRET_IMAGE_TOOL_NAME);
+        assert_eq!(spec.tool_type, "function");
+        assert!(spec.function.description.contains("image"));
+
+        // Check parameters
+        let params = &spec.function.parameters;
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"]["file_path"]["type"].as_str() == Some("string"));
+        assert!(params["properties"]["prompt"]["type"].as_str() == Some("string"));
+
+        // Check required fields
+        let required = params["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("file_path")));
+        assert!(required.contains(&serde_json::json!("prompt")));
+    }
+
+    #[test]
+    fn test_search_query_tool_spec() {
+        let spec = get_search_query_tool_spec();
+        assert_eq!(spec.function.name, SEARCH_QUERY_TOOL_NAME);
+        assert_eq!(spec.tool_type, "function");
+        assert!(spec.function.description.contains("Search"));
+        assert!(spec.function.description.contains("Google Search"));
+
+        // Check parameters
+        let params = &spec.function.parameters;
+        assert_eq!(params["type"], "object");
+        assert!(params["properties"]["query"]["type"].as_str() == Some("string"));
+        assert!(params["properties"]["model"]["type"].as_str() == Some("string"));
+
+        // Check enum values for model
+        let model_enum = params["properties"]["model"]["enum"].as_array().unwrap();
+        assert!(model_enum.contains(&serde_json::json!("flash")));
+        assert!(model_enum.contains(&serde_json::json!("pro")));
+        assert!(model_enum.contains(&serde_json::json!("pro_preview")));
+
+        // Check required fields
+        let required = params["required"].as_array().unwrap();
+        assert!(required.contains(&serde_json::json!("query")));
+        assert!(required.contains(&serde_json::json!("model")));
+    }
+
+    #[test]
+    fn test_search_query_tool_description_contains_guidance() {
+        let spec = get_search_query_tool_spec();
+        let desc = &spec.function.description;
+
+        // Should contain guidance for each model tier
+        assert!(desc.contains("flash"));
+        assert!(desc.contains("pro"));
+        assert!(desc.contains("pro_preview"));
+        assert!(desc.contains("quick"));
+        assert!(desc.contains("medium complexity"));
+        assert!(desc.contains("hardest"));
+    }
 }

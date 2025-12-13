@@ -75,6 +75,10 @@ struct Args {
     #[arg(long, help_heading = "Modes")]
     images: bool,
 
+    /// Enable built-in web search tool (uses Gemini with Google Search)
+    #[arg(long, help_heading = "Modes")]
+    search: bool,
+
     // === Output ===
     /// Suppress all output except AI responses
     #[arg(long, help_heading = "Output")]
@@ -315,13 +319,20 @@ async fn main() -> Result<()> {
     // Handle --list-mcp-servers
     if args.list_mcp_servers {
         let enable_image_tool = args.dmn || args.images;
+        let enable_search_tool = args.dmn || args.search;
         let mut has_output = false;
 
         // Show built-in tools section
-        if enable_image_tool {
+        if enable_image_tool || enable_search_tool {
             println!("Built-in tools:\n");
-            println!("  interpret_image");
-            println!("    Analyzes images (PNG, JPEG, GIF, WebP) and PDF documents");
+            if enable_image_tool {
+                println!("  interpret_image");
+                println!("    Analyzes images (PNG, JPEG, GIF, WebP) and PDF documents");
+            }
+            if enable_search_tool {
+                println!("  search_query");
+                println!("    Web search using Gemini models with Google Search");
+            }
             println!();
             has_output = true;
         }
@@ -366,11 +377,15 @@ async fn main() -> Result<()> {
     // Handle --list-tools
     if args.list_tools {
         let enable_image_tool = args.dmn || args.images;
+        let enable_search_tool = args.dmn || args.search;
         let mut all_tool_names: Vec<String> = Vec::new();
 
         // Add built-in tools
         if enable_image_tool {
             all_tool_names.push(agent::INTERPRET_IMAGE_TOOL_NAME.to_string());
+        }
+        if enable_search_tool {
+            all_tool_names.push(agent::SEARCH_QUERY_TOOL_NAME.to_string());
         }
 
         // Get MCP tools if config exists
@@ -396,7 +411,7 @@ async fn main() -> Result<()> {
             println!("Discovered tools ({}):\n", all_tool_names.len());
 
             for name in &all_tool_names {
-                let is_builtin = name == agent::INTERPRET_IMAGE_TOOL_NAME;
+                let is_builtin = name == agent::INTERPRET_IMAGE_TOOL_NAME || name == agent::SEARCH_QUERY_TOOL_NAME;
 
                 if is_builtin {
                     println!("  {} [built-in]", name);
@@ -450,6 +465,7 @@ async fn main() -> Result<()> {
                 if !config.allowed_tools.is_empty() {
                     let allowed_count = all_tool_names.iter().filter(|n| {
                         *n == agent::INTERPRET_IMAGE_TOOL_NAME ||
+                        *n == agent::SEARCH_QUERY_TOOL_NAME ||
                         config.allowed_tools.iter().any(|p| crate::mcp::tool_matches_pattern(n, p))
                     }).count();
                     println!("allowedTools: {:?}", config.allowed_tools);
@@ -566,6 +582,7 @@ async fn main() -> Result<()> {
             args.verbose,
             args.dmn,
             args.dmn || args.images,
+            args.dmn || args.search,
         )
         .await?;
     } else {
@@ -666,6 +683,7 @@ async fn main() -> Result<()> {
                 args.verbose,
                 &mut conversation_history,
                 args.dmn || args.images,
+                args.dmn || args.search,
                 compaction_config,
             )
             .await?;

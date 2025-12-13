@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**5,528 lines of Rust** • **4.6MB binary** - Emphasizing "sophisticated simplicity".
+**5,696 lines of Rust** • **4.6MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -16,6 +16,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **MCP Integration**: Model Context Protocol servers for extensible tool capabilities
 - **Multi-Agent Orchestration**: Agents can invoke other agents as tools for complex workflows
 - **Image Interpretation**: Built-in multimodal image analysis via `--images` flag
+- **Web Search**: Built-in web search with Google Search grounding via `--search` flag
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with minimal MCP tools
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode

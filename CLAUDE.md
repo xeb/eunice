@@ -226,6 +226,34 @@ eunice --dmn "Analyze diagram.jpg and summarize it"
 eunice --dmn "Extract text from document.pdf"
 ```
 
+## Web Search
+
+Eunice includes a built-in `search_query` tool for web searches using Gemini models with Google Search grounding.
+
+### Enabling
+
+- **DMN mode**: Auto-enabled with `--dmn`
+- **Standalone**: Use `--search` flag
+
+### Implementation (`src/agent.rs`)
+
+1. `get_search_query_tool_spec()` - Returns tool definition with model enum
+2. `execute_search_query()` - Makes Gemini API request with `google_search` tool
+3. Tool is added when `enable_search_tool` flag is true
+
+### Model Selection
+
+- `flash` (gemini-2.5-flash): Quick knowledge queries, fast and cheap
+- `pro` (gemini-2.5-pro): Medium complexity queries requiring deeper analysis
+- `pro_preview` (gemini-3-pro-preview): Hardest queries requiring maximum reasoning
+
+### CLI Usage
+
+```bash
+eunice --search --no-mcp "What are the latest AI developments?"
+eunice --dmn "Search for the current weather in Tokyo"
+```
+
 ## Key Design Decisions
 
 1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
@@ -234,7 +262,7 @@ eunice --dmn "Extract text from document.pdf"
 4. **DMN Mode for Autonomy**: Automatic retry and continuous execution
 5. **MCP for Extensibility**: Tools provided via Model Context Protocol servers
 6. **Agents as Tools**: Agent-to-agent calls are just tool calls, reusing MCP infrastructure
-7. **Built-in Tools**: Special tools like `interpret_image` are handled directly by the agent
+7. **Built-in Tools**: Special tools like `interpret_image` and `search_query` are handled directly by the agent
 
 ## File Structure
 
@@ -288,6 +316,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.26**: Web search tool via `--search` flag using Gemini with Google Search grounding
 - **0.2.24**: Enhanced verbose logging for HTTP MCP connections (shows request/response bodies, status, content-type)
 - **0.2.23**: Auto context compression when RESOURCE_EXHAUSTED error occurs (DMN mode)
 - **0.2.22**: Added SSE response parsing for HTTP MCP servers (FastMCP compatibility)
