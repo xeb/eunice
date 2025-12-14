@@ -121,7 +121,7 @@ pub async fn config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> 
     };
 
     // Get servers and tools from MCP manager
-    let (servers, tools) = if let Some(ref manager) = *mcp_manager {
+    let (servers, mut tools) = if let Some(ref manager) = *mcp_manager {
         let server_info = manager.get_server_info();
         let servers: Vec<ServerInfo> = server_info
             .iter()
@@ -157,6 +157,22 @@ pub async fn config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> 
     } else {
         (vec![], vec![])
     };
+
+    // Add built-in tools if enabled
+    if state.enable_image_tool {
+        tools.push(ToolInfo {
+            name: agent::INTERPRET_IMAGE_TOOL_NAME.to_string(),
+            server: "built-in".to_string(),
+            description: Some("Analyze images and PDFs using multimodal AI".to_string()),
+        });
+    }
+    if state.enable_search_tool {
+        tools.push(ToolInfo {
+            name: agent::SEARCH_QUERY_TOOL_NAME.to_string(),
+            server: "built-in".to_string(),
+            description: Some("Web search using Gemini with Google Search grounding".to_string()),
+        });
+    }
 
     Json(ConfigResponse {
         agents,

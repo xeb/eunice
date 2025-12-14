@@ -366,6 +366,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.31**: Webapp config endpoint includes built-in tools (interpret_image, search_query) when enabled
 - **0.2.30**: Webapp enhancements: Config modal, agent display in status bar, auto-scroll fix
 - **0.2.29**: Webapp mode via `--webapp` flag with browser-based interface and real-time SSE streaming
 - **0.2.27**: Research mode via `--research` flag with built-in multi-agent orchestration (requires GEMINI_API_KEY)
