@@ -367,6 +367,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.39**: Webapp: fix tool count in status bar to include built-in tools; add session history restoration on page refresh
 - **0.2.38**: Fix spinner terminal artifacts: explicit line clear after stopping spinner to prevent whitespace issues
 - **0.2.37**: Webapp: improved error display (HTTP errors, parse errors, connection closed without response)
 - **0.2.36**: Research mode: `--config` can now be used with `--research` to merge MCP servers (agents ignored)

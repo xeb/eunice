@@ -1185,8 +1185,64 @@ data: {"type":"done"}</pre>
             }
         });
 
+        // Restore session history on page load
+        async function restoreSessionHistory() {
+            if (!sessionId) return;
+
+            try {
+                const res = await fetch('/api/session/history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+
+                const data = await res.json();
+
+                if (!data.exists) {
+                    // Session no longer exists on server, clear local storage
+                    sessionId = null;
+                    localStorage.removeItem(SESSION_KEY);
+                    return;
+                }
+
+                // Render each message from history
+                for (const msg of data.messages) {
+                    switch (msg.role) {
+                        case 'user':
+                            addMessage('user', escapeHtml(msg.content));
+                            break;
+
+                        case 'assistant':
+                            // Render tool calls if present
+                            if (msg.tool_calls) {
+                                for (const tc of msg.tool_calls) {
+                                    addMessage('tool-call', `
+                                        <span class="tool-name">${escapeHtml(tc.name)}</span>
+                                        <div class="tool-args">${escapeHtml(tc.arguments)}</div>
+                                    `);
+                                }
+                            }
+                            // Render content if present
+                            if (msg.content) {
+                                addMessage('response', renderContent(msg.content));
+                            }
+                            break;
+
+                        case 'tool':
+                            addMessage('tool-result', `
+                                <div class="tool-result-content">${escapeHtml(msg.result)}</div>
+                            `);
+                            break;
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to restore session history:', err);
+            }
+        }
+
         // Initialize
         fetchStatus();
+        restoreSessionHistory();
         queryInput.focus();
     </script>
 </body>

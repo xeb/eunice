@@ -41,7 +41,7 @@ pub struct StatusResponse {
 /// Status endpoint handler
 pub async fn status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
     let mcp_manager = state.mcp_manager.lock().await;
-    let (servers, tools_count) = if let Some(ref manager) = *mcp_manager {
+    let (servers, mut tools_count) = if let Some(ref manager) = *mcp_manager {
         let info = manager.get_server_info();
         let servers: Vec<String> = info.iter().map(|(name, _, _)| name.clone()).collect();
         let tools: usize = info.iter().map(|(_, count, _)| count).sum();
@@ -49,6 +49,14 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> 
     } else {
         (vec![], 0)
     };
+
+    // Add built-in tools to count
+    if state.enable_image_tool {
+        tools_count += 1;
+    }
+    if state.enable_search_tool {
+        tools_count += 1;
+    }
 
     let mode = if state.research {
         "research"
@@ -209,6 +217,91 @@ pub async fn new_session(State(state): State<Arc<AppState>>) -> Json<NewSessionR
     }
 
     Json(NewSessionResponse { session_id })
+}
+
+/// Session history request
+#[derive(Deserialize)]
+pub struct SessionHistoryRequest {
+    session_id: String,
+}
+
+/// History message for client display
+#[derive(Serialize)]
+#[serde(tag = "role", rename_all = "snake_case")]
+pub enum HistoryMessage {
+    User { content: String },
+    Assistant { content: Option<String>, tool_calls: Option<Vec<HistoryToolCall>> },
+    Tool { tool_call_id: String, name: String, result: String },
+}
+
+/// Tool call info for history
+#[derive(Serialize)]
+pub struct HistoryToolCall {
+    name: String,
+    arguments: String,
+}
+
+/// Session history response
+#[derive(Serialize)]
+pub struct SessionHistoryResponse {
+    exists: bool,
+    messages: Vec<HistoryMessage>,
+}
+
+/// Get session history
+pub async fn get_session_history(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SessionHistoryRequest>,
+) -> Json<SessionHistoryResponse> {
+    let sessions = state.sessions.read().await;
+
+    if let Some(session) = sessions.get(&request.session_id) {
+        let messages: Vec<HistoryMessage> = session.history.iter().map(|msg| {
+            match msg {
+                Message::User { content } => HistoryMessage::User {
+                    content: content.clone(),
+                },
+                Message::Assistant { content, tool_calls } => HistoryMessage::Assistant {
+                    content: content.clone(),
+                    tool_calls: tool_calls.as_ref().map(|tcs| {
+                        tcs.iter().map(|tc| HistoryToolCall {
+                            name: tc.function.name.clone(),
+                            arguments: tc.function.arguments.clone(),
+                        }).collect()
+                    }),
+                },
+                Message::Tool { tool_call_id, content } => {
+                    // Try to find the tool name from the corresponding tool call
+                    let name = session.history.iter()
+                        .filter_map(|m| {
+                            if let Message::Assistant { tool_calls: Some(tcs), .. } = m {
+                                tcs.iter().find(|tc| tc.id == *tool_call_id).map(|tc| tc.function.name.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .next()
+                        .unwrap_or_else(|| "unknown".to_string());
+
+                    HistoryMessage::Tool {
+                        tool_call_id: tool_call_id.clone(),
+                        name,
+                        result: content.clone(),
+                    }
+                }
+            }
+        }).collect();
+
+        Json(SessionHistoryResponse {
+            exists: true,
+            messages,
+        })
+    } else {
+        Json(SessionHistoryResponse {
+            exists: false,
+            messages: vec![],
+        })
+    }
 }
 
 /// SSE event types
