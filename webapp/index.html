@@ -834,6 +834,8 @@ data: {"type":"done"}</pre>
             // Add thinking indicator
             thinkingEl = addMessage('thinking', '<span class="cursor">|</span> Thinking... <span id="thinking-time">0</span>s');
 
+            let receivedAnyEvent = false;
+
             try {
                 const res = await fetch('/api/query', {
                     method: 'POST',
@@ -841,31 +843,64 @@ data: {"type":"done"}</pre>
                     body: JSON.stringify({ prompt: query, session_id: sessionId })
                 });
 
+                // Check for HTTP errors
+                if (!res.ok) {
+                    removeThinking();
+                    const errorText = await res.text();
+                    addMessage('error', `HTTP ${res.status}: ${errorText || res.statusText}`);
+                    isRunning = false;
+                    sendBtn.disabled = false;
+                    cancelBtn.classList.remove('visible');
+                    return;
+                }
+
                 const reader = res.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
 
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    if (done) {
+                        // Process any remaining buffer content
+                        if (buffer.trim()) {
+                            processSSEData(buffer);
+                        }
+                        break;
+                    }
 
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
                     buffer = lines.pop() || '';
 
                     for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = line.slice(6);
-                            if (data === 'ping') continue;
+                        processSSEData(line);
+                    }
+                }
 
-                            try {
-                                const event = JSON.parse(data);
-                                handleEvent(event);
-                            } catch (e) {
-                                console.error('Parse error:', e, data);
+                function processSSEData(line) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === 'ping') return;
+
+                        try {
+                            const event = JSON.parse(data);
+                            receivedAnyEvent = true;
+                            handleEvent(event);
+                        } catch (e) {
+                            console.error('Parse error:', e, data);
+                            // Show parse errors to user if they contain useful info
+                            if (data && data.length > 0) {
+                                removeThinking();
+                                addMessage('error', `Parse error: ${data}`);
                             }
                         }
                     }
+                }
+
+                // If stream ended without any events, show error
+                if (!receivedAnyEvent) {
+                    removeThinking();
+                    addMessage('error', 'Connection closed without response');
                 }
             } catch (err) {
                 removeThinking();
