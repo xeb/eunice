@@ -460,19 +460,153 @@
 
             header {
                 flex-direction: column;
-                gap: 12px;
+                gap: 8px;
                 align-items: flex-start;
+            }
+
+            .logo {
+                font-size: 14px;
+            }
+
+            .status {
+                font-size: 10px;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .model-badge {
+                font-size: 10px;
+                padding: 2px 6px;
+            }
+
+            .btn-api {
+                font-size: 10px;
+                padding: 2px 6px;
+            }
+
+            .message {
+                font-size: 13px;
+                padding: 10px 14px;
+            }
+
+            .tool-args, .tool-result-content {
+                font-size: 11px;
             }
 
             .input-wrapper {
                 flex-direction: column;
             }
 
+            .query-input {
+                font-size: 13px;
+                padding: 10px 12px;
+            }
+
             .btn {
                 width: 100%;
+                font-size: 13px;
+                padding: 10px 16px;
+            }
+
+            .status-bar {
+                font-size: 10px;
+                flex-wrap: wrap;
+            }
+
+            .modal {
+                padding: 10px;
+            }
+
+            .modal-content {
+                padding: 16px;
+                max-height: 85vh;
+            }
+
+            .modal-title {
+                font-size: 14px;
+            }
+
+            .api-endpoint h3 {
+                font-size: 12px;
+            }
+
+            .api-endpoint p {
+                font-size: 11px;
+            }
+
+            .api-example {
+                font-size: 10px;
+                padding: 8px;
             }
         }
+
+        /* Markdown rendered content */
+        .message.response .markdown-content {
+            white-space: normal;
+        }
+        .message.response .markdown-content h1,
+        .message.response .markdown-content h2,
+        .message.response .markdown-content h3 {
+            margin: 16px 0 8px 0;
+            font-weight: 600;
+        }
+        .message.response .markdown-content h1 { font-size: 1.4em; }
+        .message.response .markdown-content h2 { font-size: 1.2em; }
+        .message.response .markdown-content h3 { font-size: 1.1em; }
+        .message.response .markdown-content p { margin: 8px 0; }
+        .message.response .markdown-content ul,
+        .message.response .markdown-content ol {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+        .message.response .markdown-content li { margin: 4px 0; }
+        .message.response .markdown-content code {
+            background: var(--bg-input);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        .message.response .markdown-content pre {
+            background: var(--bg-input);
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+        .message.response .markdown-content pre code {
+            background: none;
+            padding: 0;
+        }
+        .message.response .markdown-content blockquote {
+            border-left: 3px solid var(--neon-cyan);
+            padding-left: 12px;
+            margin: 8px 0;
+            color: var(--text-secondary);
+        }
+        .message.response .markdown-content a {
+            color: var(--neon-cyan);
+            text-decoration: none;
+        }
+        .message.response .markdown-content a:hover {
+            text-decoration: underline;
+        }
+        .message.response .markdown-content table {
+            border-collapse: collapse;
+            margin: 12px 0;
+            width: 100%;
+        }
+        .message.response .markdown-content th,
+        .message.response .markdown-content td {
+            border: 1px solid var(--border);
+            padding: 8px;
+            text-align: left;
+        }
+        .message.response .markdown-content th {
+            background: var(--bg-input);
+        }
     </style>
+    <!-- Markdown-it library for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -655,10 +789,8 @@ data: {"type":"done"}</pre>
             el.className = `message ${type}`;
             el.innerHTML = content;
             messagesEl.appendChild(el);
-            // Use requestAnimationFrame for reliable scroll after render
-            requestAnimationFrame(() => {
-                messagesEl.scrollTop = messagesEl.scrollHeight;
-            });
+            // Use scrollIntoView for reliable autoscroll
+            el.scrollIntoView({ behavior: 'instant', block: 'end' });
             return el;
         }
 
@@ -761,7 +893,7 @@ data: {"type":"done"}</pre>
 
                 case 'response':
                     removeThinking();
-                    addMessage('response', escapeHtml(event.content));
+                    addMessage('response', renderContent(event.content));
                     break;
 
                 case 'error':
@@ -797,6 +929,73 @@ data: {"type":"done"}</pre>
             const div = document.createElement('div');
             div.textContent = str;
             return div.innerHTML;
+        }
+
+        // Initialize markdown-it
+        const md = window.markdownit ? window.markdownit({
+            html: true,
+            linkify: true,
+            typographer: true,
+            breaks: true
+        }) : null;
+
+        // Detect content type: 'markdown', 'html', or 'plain'
+        function detectContentType(text) {
+            if (!text || typeof text !== 'string') return 'plain';
+
+            // Check for HTML tags (but not markdown code blocks)
+            const htmlTagPattern = /<(div|span|p|table|tr|td|th|ul|ol|li|h[1-6]|br|hr|img|a|strong|em|b|i)[^>]*>/i;
+            const hasHtmlTags = htmlTagPattern.test(text);
+
+            // Check for markdown patterns
+            const markdownPatterns = [
+                /^#{1,6}\s+.+$/m,           // Headers: # Header
+                /\*\*[^*]+\*\*/,            // Bold: **text**
+                /\*[^*]+\*/,                // Italic: *text*
+                /`[^`]+`/,                  // Inline code: `code`
+                /```[\s\S]*?```/,           // Code blocks: ```code```
+                /^\s*[-*+]\s+.+$/m,         // Unordered lists: - item
+                /^\s*\d+\.\s+.+$/m,         // Ordered lists: 1. item
+                /\[.+\]\(.+\)/,             // Links: [text](url)
+                /^\s*>\s+.+$/m,             // Blockquotes: > quote
+                /^\s*\|.+\|.+\|/m,          // Tables: | col | col |
+            ];
+
+            const hasMarkdown = markdownPatterns.some(pattern => pattern.test(text));
+
+            // If text has HTML tags and looks like intentional HTML, render as HTML
+            if (hasHtmlTags && !hasMarkdown) {
+                return 'html';
+            }
+
+            // If text has markdown patterns, render as markdown
+            if (hasMarkdown) {
+                return 'markdown';
+            }
+
+            return 'plain';
+        }
+
+        // Render content based on detected type
+        function renderContent(text) {
+            const contentType = detectContentType(text);
+
+            switch (contentType) {
+                case 'markdown':
+                    if (md) {
+                        return `<div class="markdown-content">${md.render(text)}</div>`;
+                    }
+                    // Fallback if markdown-it not loaded
+                    return escapeHtml(text);
+
+                case 'html':
+                    // Render HTML directly (sanitization would be ideal in production)
+                    return `<div class="html-content">${text}</div>`;
+
+                case 'plain':
+                default:
+                    return escapeHtml(text);
+            }
         }
 
         // API Modal

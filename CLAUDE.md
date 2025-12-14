@@ -366,6 +366,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.33**: Webapp: autoscroll fix, mobile responsive design, markdown/HTML rendering; Interactive: multiline input fix
 - **0.2.32**: Webapp multi-turn sessions with conversation history and automatic context compaction
 - **0.2.31**: Webapp config endpoint includes built-in tools (interpret_image, search_query) when enabled
 - **0.2.30**: Webapp enhancements: Config modal, agent display in status bar, auto-scroll fix

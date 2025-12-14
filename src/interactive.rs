@@ -331,21 +331,42 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
 }
 
 /// Redraw the current line (used after editing)
+/// Handles multiline input by clearing from cursor down
 fn redraw_line(
     stdout: &mut io::Stdout,
     buffer: &str,
     cursor_pos: usize,
     prompt_len: u16,
 ) -> io::Result<()> {
-    // Move to start of input area and clear
+    // Move to start of input area
     stdout.execute(MoveToColumn(prompt_len))?;
-    stdout.execute(Clear(ClearType::UntilNewLine))?;
+    // Clear from cursor down to handle multiline wrapped text
+    stdout.execute(Clear(ClearType::FromCursorDown))?;
     // Print buffer
     print!("{}", buffer);
     stdout.flush()?;
     // Move cursor to correct position
-    let target_col = prompt_len + cursor_pos as u16;
-    stdout.execute(MoveToColumn(target_col))?;
+    // For multiline, we need to account for terminal width
+    if let Ok((term_width, _)) = crossterm::terminal::size() {
+        let total_chars = prompt_len as usize + cursor_pos;
+        let lines_down = total_chars / term_width as usize;
+        let final_col = (total_chars % term_width as usize) as u16;
+
+        // First, go back to where we started printing (after buffer)
+        let buffer_total = prompt_len as usize + buffer.len();
+        let buffer_lines = buffer_total / term_width as usize;
+
+        // Move from end of buffer to cursor position
+        if lines_down < buffer_lines {
+            // Cursor is on an earlier line than end of buffer
+            stdout.execute(MoveUp((buffer_lines - lines_down) as u16))?;
+        }
+        stdout.execute(MoveToColumn(final_col))?;
+    } else {
+        // Fallback for when we can't get terminal size
+        let target_col = prompt_len + cursor_pos as u16;
+        stdout.execute(MoveToColumn(target_col))?;
+    }
     Ok(())
 }
 
