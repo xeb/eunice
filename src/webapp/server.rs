@@ -86,6 +86,7 @@ pub async fn run_server(
         .route("/api/cancel", post(handlers::cancel))
         .route("/api/session/new", post(handlers::new_session))
         .route("/api/session/history", post(handlers::get_session_history))
+        .route("/api/session/clear", post(handlers::clear_session))
         .with_state(state);
 
     let addr = format!("{}:{}", webapp_config.host, webapp_config.port);

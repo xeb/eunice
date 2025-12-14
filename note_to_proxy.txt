@@ -1,0 +1,180 @@
+# Reverse Proxy Configuration for Eunice Webapp
+
+## User Authentication Headers
+
+Eunice's webapp supports user authentication via reverse proxy headers. When these
+headers are present, sessions are automatically scoped to the authenticated user,
+allowing them to resume their conversation history across page refreshes and devices.
+
+### Supported Headers (checked in order of priority)
+
+1. `X-Forwarded-Email` - Common for OAuth proxies
+2. `X-Auth-Request-Email` - OAuth2 Proxy (recommended for Google Auth)
+3. `X-Forwarded-User` - Generic proxy header
+4. `X-Auth-Request-User` - OAuth2 Proxy
+5. `Remote-User` - CGI standard (Apache/nginx)
+
+The first non-empty header found will be used as the user identifier.
+
+## SSE Streaming Configuration
+
+Eunice uses Server-Sent Events (SSE) for real-time streaming. Reverse proxies must
+be configured to disable response buffering for proper streaming behavior.
+
+### nginx Configuration
+
+```nginx
+location / {
+    proxy_pass http://localhost:3000;  # Your eunice --webapp port
+    proxy_http_version 1.1;
+
+    # Required for SSE streaming
+    proxy_buffering off;
+    proxy_cache off;
+
+    # Forward authentication headers
+    proxy_set_header X-Forwarded-Email $http_x_auth_request_email;
+    proxy_set_header X-Forwarded-User $http_x_auth_request_user;
+
+    # Standard proxy headers
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Timeouts for long-running requests
+    proxy_read_timeout 600s;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 600s;
+}
+```
+
+### OAuth2 Proxy with nginx
+
+If using OAuth2 Proxy for Google Authentication:
+
+```nginx
+# OAuth2 Proxy auth endpoint
+location /oauth2/ {
+    proxy_pass http://127.0.0.1:4180;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+
+# Auth check subrequest
+location = /oauth2/auth {
+    proxy_pass http://127.0.0.1:4180;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+
+# Protected eunice webapp
+location / {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in;
+
+    # Capture auth headers from OAuth2 Proxy
+    auth_request_set $auth_email $upstream_http_x_auth_request_email;
+    auth_request_set $auth_user $upstream_http_x_auth_request_user;
+
+    # Forward to eunice
+    proxy_pass http://localhost:3000;
+    proxy_http_version 1.1;
+
+    # Pass authenticated user to eunice
+    proxy_set_header X-Auth-Request-Email $auth_email;
+    proxy_set_header X-Auth-Request-User $auth_user;
+
+    # SSE streaming support
+    proxy_buffering off;
+    proxy_cache off;
+
+    # Standard headers
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_read_timeout 600s;
+}
+```
+
+### Traefik Configuration
+
+```yaml
+http:
+  middlewares:
+    eunice-headers:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Email: "{{ .Request.Header.Get \"X-Auth-Request-Email\" }}"
+
+  services:
+    eunice:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:3000"
+        responseForwarding:
+          # Disable buffering for SSE
+          flushInterval: -1
+```
+
+### Caddy Configuration
+
+```caddyfile
+example.com {
+    reverse_proxy localhost:3000 {
+        # Disable response buffering for SSE
+        flush_interval -1
+
+        # Forward auth headers
+        header_up X-Forwarded-Email {http.request.header.X-Auth-Request-Email}
+        header_up X-Forwarded-User {http.request.header.X-Auth-Request-User}
+    }
+}
+```
+
+## Testing Your Setup
+
+1. Start eunice webapp:
+   ```bash
+   eunice --webapp --port 3000
+   ```
+
+2. Check that your proxy passes headers correctly:
+   ```bash
+   curl -H "X-Forwarded-Email: test@example.com" http://your-proxy/api/status
+   ```
+
+   The response should include:
+   ```json
+   {"authenticated_user": "test@example.com", ...}
+   ```
+
+3. Verify SSE streaming works:
+   ```bash
+   curl -N -H "X-Forwarded-Email: test@example.com" \
+        -H "Content-Type: application/json" \
+        -d '{"prompt": "hello"}' \
+        http://your-proxy/api/query
+   ```
+
+   You should see events streaming in real-time, including:
+   - `event: thinking` updates every second
+   - `event: tool_call` and `event: tool_result` for tool execution
+   - `event: response` for the final response
+   - `event: done` when complete
+
+## Session Behavior
+
+- **Without auth headers**: Sessions are managed client-side via localStorage.
+  Each browser tab/device gets an independent session.
+
+- **With auth headers**: Sessions are keyed to the authenticated user's email/username.
+  The same user will see the same conversation history across devices and page refreshes.
+
+- **RESET button**: Clears the current session. For authenticated users, this clears
+  server-side history. For anonymous users, this clears the localStorage session ID.

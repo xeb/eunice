@@ -5,6 +5,7 @@ use crate::config::DMN_INSTRUCTIONS;
 use crate::models::Message;
 use axum::{
     extract::State,
+    http::HeaderMap,
     response::{Html, Sse},
     Json,
 };
@@ -25,6 +26,30 @@ fn log(event: &str) {
     println!("[{}] [webapp] {}", timestamp, event);
 }
 
+/// Standard headers for authenticated user identity (checked in order)
+const USER_IDENTITY_HEADERS: &[&str] = &[
+    "x-forwarded-email",      // Common for OAuth proxies
+    "x-auth-request-email",   // OAuth2 Proxy
+    "x-forwarded-user",       // Generic proxy header
+    "x-auth-request-user",    // OAuth2 Proxy
+    "remote-user",            // CGI standard
+];
+
+/// Extract authenticated user identity from proxy headers
+fn extract_user_identity(headers: &HeaderMap) -> Option<String> {
+    for header_name in USER_IDENTITY_HEADERS {
+        if let Some(value) = headers.get(*header_name) {
+            if let Ok(user) = value.to_str() {
+                let user = user.trim();
+                if !user.is_empty() {
+                    return Some(user.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Embedded HTML frontend
 const INDEX_HTML: &str = include_str!("../../webapp/index.html");
 
@@ -43,10 +68,15 @@ pub struct StatusResponse {
     agent: Option<String>,
     mcp_servers: Vec<String>,
     tools_count: usize,
+    /// Authenticated user from proxy headers (if present)
+    authenticated_user: Option<String>,
 }
 
 /// Status endpoint handler
-pub async fn status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
+pub async fn status(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Json<StatusResponse> {
     let mcp_manager = state.mcp_manager.lock().await;
     let (servers, mut tools_count) = if let Some(ref manager) = *mcp_manager {
         let info = manager.get_server_info();
@@ -73,6 +103,9 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> 
         "standard"
     };
 
+    // Extract authenticated user from proxy headers
+    let authenticated_user = extract_user_identity(&headers);
+
     Json(StatusResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
         model: state.provider_info.resolved_model.clone(),
@@ -81,6 +114,7 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> 
         agent: state.agent_name.clone(),
         mcp_servers: servers,
         tools_count,
+        authenticated_user,
     })
 }
 
@@ -258,12 +292,20 @@ pub struct SessionHistoryResponse {
 
 /// Get session history
 pub async fn get_session_history(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Json(request): Json<SessionHistoryRequest>,
 ) -> Json<SessionHistoryResponse> {
+    // Check for authenticated user - if present, use their session instead
+    let session_key = if let Some(user) = extract_user_identity(&headers) {
+        format!("user:{}", user)
+    } else {
+        request.session_id.clone()
+    };
+
     let sessions = state.sessions.read().await;
 
-    if let Some(session) = sessions.get(&request.session_id) {
+    if let Some(session) = sessions.get(&session_key) {
         let messages: Vec<HistoryMessage> = session.history.iter().map(|msg| {
             match msg {
                 Message::User { content } => HistoryMessage::User {
@@ -312,6 +354,30 @@ pub async fn get_session_history(
     }
 }
 
+/// Clear session response
+#[derive(Serialize)]
+pub struct ClearSessionResponse {
+    cleared: bool,
+}
+
+/// Clear session history (for authenticated users to start fresh)
+pub async fn clear_session(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Json<ClearSessionResponse> {
+    // Check for authenticated user
+    if let Some(user) = extract_user_identity(&headers) {
+        let session_key = format!("user:{}", user);
+        let mut sessions = state.sessions.write().await;
+        if let Some(session) = sessions.get_mut(&session_key) {
+            session.history.clear();
+            log(&format!("Cleared session history for: {}", user));
+            return Json(ClearSessionResponse { cleared: true });
+        }
+    }
+    Json(ClearSessionResponse { cleared: false })
+}
+
 /// SSE event types
 #[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -330,6 +396,7 @@ pub enum SseEvent {
 
 /// Query endpoint handler - returns SSE stream
 pub async fn query(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Json(request): Json<QueryRequest>,
 ) -> Sse<impl Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
@@ -355,30 +422,52 @@ pub async fn query(
     };
     log(&format!("Query received: \"{}\"", prompt_preview));
 
+    // Check for authenticated user from proxy headers
+    let authenticated_user = extract_user_identity(&headers);
+
     // Get or create session
-    let session_id = match request.session_id {
-        Some(id) => {
-            // Verify session exists, create if not
-            let sessions = state.sessions.read().await;
-            if sessions.contains_key(&id) {
-                log(&format!("Using existing session: {}", &id[..8]));
-                id
-            } else {
-                drop(sessions);
+    // If authenticated, use user identity as session key for persistent per-user sessions
+    let session_id = if let Some(ref user) = authenticated_user {
+        // Use a hash of the user identity as session key for privacy in logs
+        let user_session_key = format!("user:{}", user);
+        let sessions = state.sessions.read().await;
+        if sessions.contains_key(&user_session_key) {
+            log(&format!("Using authenticated session for: {}", user));
+            drop(sessions);
+            user_session_key
+        } else {
+            drop(sessions);
+            let mut sessions = state.sessions.write().await;
+            sessions.insert(user_session_key.clone(), Session::new());
+            log(&format!("Created new authenticated session for: {}", user));
+            user_session_key
+        }
+    } else {
+        // Anonymous session (original behavior)
+        match request.session_id {
+            Some(id) => {
+                // Verify session exists, create if not
+                let sessions = state.sessions.read().await;
+                if sessions.contains_key(&id) {
+                    log(&format!("Using existing session: {}", &id[..8]));
+                    id
+                } else {
+                    drop(sessions);
+                    let new_id = Uuid::new_v4().to_string();
+                    let mut sessions = state.sessions.write().await;
+                    sessions.insert(new_id.clone(), Session::new());
+                    log(&format!("Session {} not found, created new: {}", &id[..8], &new_id[..8]));
+                    new_id
+                }
+            }
+            None => {
+                // Create new session
                 let new_id = Uuid::new_v4().to_string();
                 let mut sessions = state.sessions.write().await;
                 sessions.insert(new_id.clone(), Session::new());
-                log(&format!("Session {} not found, created new: {}", &id[..8], &new_id[..8]));
+                log(&format!("No session provided, created new: {}", &new_id[..8]));
                 new_id
             }
-        }
-        None => {
-            // Create new session
-            let new_id = Uuid::new_v4().to_string();
-            let mut sessions = state.sessions.write().await;
-            sessions.insert(new_id.clone(), Session::new());
-            log(&format!("No session provided, created new: {}", &new_id[..8]));
-            new_id
         }
     };
 

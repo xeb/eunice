@@ -170,6 +170,12 @@
             color: var(--text);
         }
 
+        .tool-agent {
+            font-size: 11px;
+            color: var(--neon-magenta);
+            font-weight: 500;
+        }
+
         .tool-args {
             color: var(--text-muted);
             font-size: 13px;
@@ -316,6 +322,13 @@
         .mode-badge {
             font-weight: 600;
             color: var(--text);
+        }
+
+        .header-info {
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 2px 6px;
+            border: 1px solid var(--border);
         }
 
         /* API Button */
@@ -676,7 +689,10 @@
             <div class="logo">E U N I C E</div>
             <div class="status">
                 <span class="model-badge" id="model-badge">loading...</span>
-                <button class="btn-api btn-new" id="new-btn">NEW</button>
+                <span class="header-info" id="mode-display"></span>
+                <span class="header-info" id="agent-display" style="display: none;"></span>
+                <span class="header-info" id="tools-display">-</span>
+                <button class="btn-api btn-new" id="new-btn">RESET</button>
                 <button class="btn-api" id="config-btn">CONFIG</button>
                 <button class="btn-api" id="api-btn">API</button>
                 <div class="connection-status">
@@ -777,10 +793,7 @@ data: {"type":"done"}</pre>
         </div>
 
         <div class="status-bar" id="status-bar">
-            <span id="mode-display">loading</span>
-            <span id="agent-display" style="display: none;"></span>
             <span id="servers-display">-</span>
-            <span id="tools-display">-</span>
             <span id="version-display">-</span>
         </div>
     </div>
@@ -801,10 +814,13 @@ data: {"type":"done"}</pre>
         let isRunning = false;
         let thinkingEl = null;
         let eventSource = null;
+        let currentAgent = null;  // Current agent name for multi-agent mode
 
         // Session management - stored in localStorage for persistence across tab closes
+        // When authenticated via proxy, server handles sessions per-user automatically
         const SESSION_KEY = 'eunice_session_id';
         let sessionId = localStorage.getItem(SESSION_KEY);
+        let authenticatedUser = null;  // Set if user is authenticated via proxy
 
         // Auto-resize textarea
         queryInput.addEventListener('input', () => {
@@ -833,19 +849,31 @@ data: {"type":"done"}</pre>
                 statusDot.className = 'status-dot';
                 statusText.textContent = 'ready';
 
-                modeDisplay.innerHTML = `<span class="mode-badge">${data.mode.toUpperCase()}</span>`;
+                // Header info
+                modeDisplay.textContent = data.mode.toUpperCase();
 
                 // Show agent name if present
                 if (data.agent) {
+                    currentAgent = data.agent;
                     agentDisplay.textContent = `agent: ${data.agent}`;
                     agentDisplay.style.display = 'inline';
                 }
 
+                toolsDisplay.textContent = `${data.tools_count} tools`;
+
+                // Footer info
                 serversDisplay.textContent = data.mcp_servers.length > 0
                     ? data.mcp_servers.join(', ')
                     : 'no servers';
-                toolsDisplay.textContent = `${data.tools_count} tools`;
                 document.getElementById('version-display').textContent = `v${data.version}`;
+
+                // Handle authenticated user (from proxy headers)
+                if (data.authenticated_user) {
+                    authenticatedUser = data.authenticated_user;
+                    statusText.textContent = authenticatedUser;
+                    // When authenticated, server manages sessions - don't use localStorage
+                    sessionId = null;
+                }
             } catch (err) {
                 statusDot.className = 'status-dot disconnected';
                 statusText.textContent = 'error';
@@ -975,8 +1003,9 @@ data: {"type":"done"}</pre>
 
                 case 'tool_call':
                     removeThinking();
+                    const agentPrefix = currentAgent ? `<span class="tool-agent">[${escapeHtml(currentAgent)}]</span> ` : '';
                     addMessage('tool-call', `
-                        <span class="tool-name">${escapeHtml(event.name)}</span>
+                        ${agentPrefix}<span class="tool-name">${escapeHtml(event.name)}</span>
                         <div class="tool-args">${escapeHtml(event.arguments)}</div>
                     `);
                     // Re-add thinking for tool execution
@@ -1249,13 +1278,22 @@ data: {"type":"done"}</pre>
 
         // NEW button - start a new session
         const newBtn = document.getElementById('new-btn');
-        newBtn.addEventListener('click', () => {
-            // Clear session from localStorage
-            sessionId = null;
-            localStorage.removeItem(SESSION_KEY);
-
+        newBtn.addEventListener('click', async () => {
             // Clear chat messages
             messagesEl.innerHTML = '';
+
+            if (authenticatedUser) {
+                // Authenticated: clear server-side session
+                try {
+                    await fetch('/api/session/clear', { method: 'POST' });
+                } catch (err) {
+                    console.error('Failed to clear session:', err);
+                }
+            } else {
+                // Anonymous: clear localStorage session
+                sessionId = null;
+                localStorage.removeItem(SESSION_KEY);
+            }
 
             // Focus input
             queryInput.focus();
