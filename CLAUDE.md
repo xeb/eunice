@@ -296,6 +296,7 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 - `--research`: Enable research mode (conflicts with `--dmn`)
 - `--research --interact`: Interactive research sessions
 - `--research --list-agents`: Show embedded agents
+- `--research --config eunice.toml`: Merge MCP servers from config (agents ignored)
 
 ## Key Design Decisions
 
@@ -366,6 +367,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.36**: Research mode: `--config` can now be used with `--research` to merge MCP servers (agents ignored)
 - **0.2.35**: Documentation: --webapp examples with custom host/port configuration in README and llms-full.txt
 - **0.2.34**: Webapp: server-side session management with NEW button, localStorage persistence, mobile zoom fix
 - **0.2.33**: Webapp: autoscroll fix, mobile responsive design, markdown/HTML rendering; Interactive: multiline input fix

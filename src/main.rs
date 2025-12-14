@@ -236,11 +236,34 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
     }
 
     // --research uses embedded multi-agent config
+    // If --config is also specified, merge MCP servers from config (ignoring agents)
     if args.research {
-        if args.config.is_some() {
-            return Err(anyhow!("--research cannot be used with --config"));
+        let mut research_config = get_research_mcp_config();
+
+        // Optionally merge MCP servers from user config
+        if let Some(config_path) = &args.config {
+            if !config_path.is_empty() {
+                let path = Path::new(config_path);
+                let user_config = load_mcp_config(path)?;
+
+                // Merge user's MCP servers into research config
+                for (name, server) in user_config.mcp_servers {
+                    research_config.mcp_servers.insert(name, server);
+                }
+
+                // Also merge allowed/denied tools if user specified them
+                if !user_config.allowed_tools.is_empty() {
+                    research_config.allowed_tools = user_config.allowed_tools;
+                }
+                if !user_config.denied_tools.is_empty() {
+                    research_config.denied_tools = user_config.denied_tools;
+                }
+
+                // Agents from user config are intentionally ignored - research mode uses embedded agents
+            }
         }
-        return Ok(Some(get_research_mcp_config()));
+
+        return Ok(Some(research_config));
     }
 
     // --config specified
