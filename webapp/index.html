@@ -299,7 +299,7 @@
         }
 
         .status-bar span::after {
-            content: ' \u25C6';
+            content: ' \25C6';
             margin-left: 8px;
         }
 
@@ -473,8 +473,9 @@
         <header>
             <div class="logo">E U N I C E</div>
             <div class="status">
-                <button class="btn-api" id="api-btn">API</button>
                 <span class="model-badge" id="model-badge">loading...</span>
+                <button class="btn-api" id="config-btn">CONFIG</button>
+                <button class="btn-api" id="api-btn">API</button>
                 <div class="connection-status">
                     <div class="status-dot loading" id="status-dot"></div>
                     <span id="status-text">connecting</span>
@@ -543,6 +544,20 @@ data: {"type":"done"}</pre>
             </div>
         </div>
 
+        <!-- Config Modal -->
+        <div class="modal-overlay" id="config-modal">
+            <div class="modal">
+                <div class="modal-header">
+                    <span class="modal-title">C O N F I G U R A T I O N</span>
+                    <button class="modal-close" id="config-modal-close">&times;</button>
+                </div>
+
+                <div id="config-content">
+                    <p style="color: var(--text-muted);">Loading configuration...</p>
+                </div>
+            </div>
+        </div>
+
         <div class="messages" id="messages"></div>
 
         <div class="input-area">
@@ -560,6 +575,7 @@ data: {"type":"done"}</pre>
 
         <div class="status-bar" id="status-bar">
             <span id="mode-display">loading</span>
+            <span id="agent-display" style="display: none;"></span>
             <span id="servers-display">-</span>
             <span id="tools-display">-</span>
         </div>
@@ -574,6 +590,7 @@ data: {"type":"done"}</pre>
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
         const modeDisplay = document.getElementById('mode-display');
+        const agentDisplay = document.getElementById('agent-display');
         const serversDisplay = document.getElementById('servers-display');
         const toolsDisplay = document.getElementById('tools-display');
 
@@ -609,6 +626,13 @@ data: {"type":"done"}</pre>
                 statusText.textContent = 'ready';
 
                 modeDisplay.innerHTML = `<span class="mode-badge">${data.mode.toUpperCase()}</span>`;
+
+                // Show agent name if present
+                if (data.agent) {
+                    agentDisplay.textContent = `agent: ${data.agent}`;
+                    agentDisplay.style.display = 'inline';
+                }
+
                 serversDisplay.textContent = data.mcp_servers.length > 0
                     ? data.mcp_servers.join(', ')
                     : 'no servers';
@@ -624,7 +648,10 @@ data: {"type":"done"}</pre>
             el.className = `message ${type}`;
             el.innerHTML = content;
             messagesEl.appendChild(el);
-            messagesEl.scrollTop = messagesEl.scrollHeight;
+            // Use requestAnimationFrame for reliable scroll after render
+            requestAnimationFrame(() => {
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            });
             return el;
         }
 
@@ -790,9 +817,88 @@ data: {"type":"done"}</pre>
             }
         });
 
+        // Config Modal
+        const configBtn = document.getElementById('config-btn');
+        const configModal = document.getElementById('config-modal');
+        const configModalClose = document.getElementById('config-modal-close');
+        const configContent = document.getElementById('config-content');
+
+        async function fetchConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+
+                let html = '';
+
+                // Agents section
+                html += '<div class="api-endpoint"><h3>Agents</h3>';
+                if (data.agents.length === 0) {
+                    html += '<p>No agents configured</p>';
+                } else {
+                    html += '<div class="api-curl">';
+                    for (const agent of data.agents) {
+                        const tools = agent.tools.length > 0 ? agent.tools.join(', ') : 'no tools';
+                        const invokes = agent.can_invoke.length > 0
+                            ? ` → can invoke: ${agent.can_invoke.join(', ')}`
+                            : '';
+                        html += `${agent.name}: [${tools}]${invokes}\n`;
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+
+                // Servers section
+                html += '<div class="api-endpoint"><h3>MCP Servers</h3>';
+                if (data.servers.length === 0) {
+                    html += '<p>No MCP servers configured</p>';
+                } else {
+                    html += '<div class="api-curl">';
+                    for (const server of data.servers) {
+                        html += `${server.name} [${server.transport}] ${server.tool_count} tools\n`;
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+
+                // Tools section
+                html += '<div class="api-endpoint"><h3>Tools (' + data.tools.length + ')</h3>';
+                if (data.tools.length === 0) {
+                    html += '<p>No tools available</p>';
+                } else {
+                    html += '<div class="api-curl" style="max-height: 300px; overflow-y: auto;">';
+                    for (const tool of data.tools) {
+                        const desc = tool.description ? ` - ${tool.description.substring(0, 60)}${tool.description.length > 60 ? '...' : ''}` : '';
+                        html += `${tool.name}${desc}\n`;
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+
+                configContent.innerHTML = html;
+            } catch (err) {
+                configContent.innerHTML = `<p style="color: var(--neon-coral);">Error loading config: ${err.message}</p>`;
+            }
+        }
+
+        configBtn.addEventListener('click', () => {
+            fetchConfig();
+            configModal.classList.add('visible');
+        });
+
+        configModalClose.addEventListener('click', () => {
+            configModal.classList.remove('visible');
+        });
+
+        configModal.addEventListener('click', (e) => {
+            if (e.target === configModal) {
+                configModal.classList.remove('visible');
+            }
+        });
+
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && apiModal.classList.contains('visible')) {
+            if (e.key === 'Escape') {
                 apiModal.classList.remove('visible');
+                configModal.classList.remove('visible');
             }
         });
 

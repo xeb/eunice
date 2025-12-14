@@ -63,6 +63,7 @@ pub async fn run_server(
     let app = Router::new()
         .route("/", get(handlers::index))
         .route("/api/status", get(handlers::status))
+        .route("/api/config", get(handlers::config))
         .route("/api/query", post(handlers::query))
         .route("/api/cancel", post(handlers::cancel))
         .with_state(state);

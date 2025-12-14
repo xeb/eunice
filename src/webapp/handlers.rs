@@ -67,6 +67,104 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Json<StatusResponse> 
     })
 }
 
+/// Agent info for config response
+#[derive(Serialize)]
+pub struct AgentInfo {
+    name: String,
+    tools: Vec<String>,
+    can_invoke: Vec<String>,
+}
+
+/// Server info for config response
+#[derive(Serialize)]
+pub struct ServerInfo {
+    name: String,
+    transport: String,
+    connection: String,
+    tool_count: usize,
+}
+
+/// Tool info for config response
+#[derive(Serialize)]
+pub struct ToolInfo {
+    name: String,
+    server: String,
+    description: Option<String>,
+}
+
+/// Config response
+#[derive(Serialize)]
+pub struct ConfigResponse {
+    agents: Vec<AgentInfo>,
+    servers: Vec<ServerInfo>,
+    tools: Vec<ToolInfo>,
+}
+
+/// Config endpoint handler - returns detailed configuration
+pub async fn config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> {
+    let mcp_manager = state.mcp_manager.lock().await;
+
+    // Get agents from orchestrator
+    let agents: Vec<AgentInfo> = if let Some(ref orch) = state.orchestrator {
+        orch.agent_names()
+            .iter()
+            .filter_map(|name| {
+                orch.get_agent(name).map(|agent| AgentInfo {
+                    name: name.clone(),
+                    tools: agent.tools.clone(),
+                    can_invoke: agent.can_invoke.clone(),
+                })
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+
+    // Get servers and tools from MCP manager
+    let (servers, tools) = if let Some(ref manager) = *mcp_manager {
+        let server_info = manager.get_server_info();
+        let servers: Vec<ServerInfo> = server_info
+            .iter()
+            .map(|(name, count, _)| ServerInfo {
+                name: name.clone(),
+                transport: "stdio".to_string(), // Could be enhanced to detect HTTP
+                connection: "connected".to_string(),
+                tool_count: *count,
+            })
+            .collect();
+
+        let tools: Vec<ToolInfo> = manager
+            .get_tools()
+            .iter()
+            .map(|tool| {
+                // Extract server name from tool prefix (e.g., "shell_execute" -> "shell")
+                let server = tool
+                    .function
+                    .name
+                    .split('_')
+                    .next()
+                    .unwrap_or("unknown")
+                    .to_string();
+                ToolInfo {
+                    name: tool.function.name.clone(),
+                    server,
+                    description: Some(tool.function.description.clone()),
+                }
+            })
+            .collect();
+
+        (servers, tools)
+    } else {
+        (vec![], vec![])
+    };
+
+    Json(ConfigResponse {
+        agents,
+        servers,
+        tools,
+    })
+}
+
 /// Query request
 #[derive(Deserialize)]
 pub struct QueryRequest {
