@@ -1,16 +1,31 @@
 use crate::client::Client;
 use crate::mcp::McpManager;
-use crate::models::{ProviderInfo, WebappConfig};
+use crate::models::{Message, ProviderInfo, WebappConfig};
 use crate::orchestrator::AgentOrchestrator;
 use anyhow::Result;
 use axum::{
     routing::{get, post},
     Router,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, Mutex, RwLock};
 
 use super::handlers;
+
+/// Session data stored on the server
+pub struct Session {
+    pub history: Vec<Message>,
+}
+
+impl Session {
+    pub fn new() -> Self {
+        Self { history: Vec::new() }
+    }
+}
+
+/// In-memory session store
+pub type SessionStore = Arc<RwLock<HashMap<String, Session>>>;
 
 /// Shared application state
 #[allow(dead_code)]
@@ -28,6 +43,8 @@ pub struct AppState {
     pub enable_search_tool: bool,
     /// Active query cancellation sender
     pub cancel_tx: Arc<Mutex<Option<watch::Sender<bool>>>>,
+    /// In-memory session store
+    pub sessions: SessionStore,
 }
 
 /// Run the webapp server
@@ -58,6 +75,7 @@ pub async fn run_server(
         enable_image_tool,
         enable_search_tool,
         cancel_tx: Arc::new(Mutex::new(None)),
+        sessions: Arc::new(RwLock::new(HashMap::new())),
     });
 
     let app = Router::new()
@@ -66,6 +84,7 @@ pub async fn run_server(
         .route("/api/config", get(handlers::config))
         .route("/api/query", post(handlers::query))
         .route("/api/cancel", post(handlers::cancel))
+        .route("/api/session/new", post(handlers::new_session))
         .with_state(state);
 
     let addr = format!("{}:{}", webapp_config.host, webapp_config.port);

@@ -1,4 +1,4 @@
-use super::server::AppState;
+use super::server::{AppState, Session};
 use crate::agent;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::config::DMN_INSTRUCTIONS;
@@ -16,6 +16,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use uuid::Uuid;
 
 /// Embedded HTML frontend
 const INDEX_HTML: &str = include_str!("../../webapp/index.html");
@@ -186,8 +187,28 @@ pub async fn config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> 
 #[derive(Deserialize)]
 pub struct QueryRequest {
     prompt: String,
+    /// Session ID for server-side history management
     #[serde(default)]
-    history: Vec<Message>,
+    session_id: Option<String>,
+}
+
+/// New session response
+#[derive(Serialize)]
+pub struct NewSessionResponse {
+    session_id: String,
+}
+
+/// Create a new session
+pub async fn new_session(State(state): State<Arc<AppState>>) -> Json<NewSessionResponse> {
+    let session_id = Uuid::new_v4().to_string();
+
+    // Create session in store
+    {
+        let mut sessions = state.sessions.write().await;
+        sessions.insert(session_id.clone(), Session::new());
+    }
+
+    Json(NewSessionResponse { session_id })
 }
 
 /// SSE event types
@@ -199,8 +220,8 @@ pub enum SseEvent {
     ToolResult { name: String, result: String, truncated: bool },
     Response { content: String },
     Error { message: String },
-    /// Updated conversation history for multi-turn sessions
-    History { messages: Vec<Message> },
+    /// Session ID confirmation (sent at start of query)
+    SessionId { session_id: String },
     /// Context was compacted due to size limits
     Compacted { message: String },
     Done,
@@ -224,11 +245,34 @@ pub async fn query(
 
     let state_clone = state.clone();
     let prompt = request.prompt;
-    let history = request.history;
+
+    // Get or create session
+    let session_id = match request.session_id {
+        Some(id) => {
+            // Verify session exists, create if not
+            let sessions = state.sessions.read().await;
+            if sessions.contains_key(&id) {
+                id
+            } else {
+                drop(sessions);
+                let new_id = Uuid::new_v4().to_string();
+                let mut sessions = state.sessions.write().await;
+                sessions.insert(new_id.clone(), Session::new());
+                new_id
+            }
+        }
+        None => {
+            // Create new session
+            let new_id = Uuid::new_v4().to_string();
+            let mut sessions = state.sessions.write().await;
+            sessions.insert(new_id.clone(), Session::new());
+            new_id
+        }
+    };
 
     // Spawn agent task
     tokio::spawn(async move {
-        run_agent_with_events(state_clone, prompt, history, tx, cancel_rx).await;
+        run_agent_with_events(state_clone, prompt, session_id, tx, cancel_rx).await;
     });
 
     // Convert channel to SSE stream
@@ -240,7 +284,7 @@ pub async fn query(
             SseEvent::ToolResult { .. } => "tool_result",
             SseEvent::Response { .. } => "response",
             SseEvent::Error { .. } => "error",
-            SseEvent::History { .. } => "history",
+            SseEvent::SessionId { .. } => "session_id",
             SseEvent::Compacted { .. } => "compacted",
             SseEvent::Done => "done",
         };
@@ -271,10 +315,23 @@ pub async fn cancel(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
 async fn run_agent_with_events(
     state: Arc<AppState>,
     prompt: String,
-    incoming_history: Vec<Message>,
+    session_id: String,
     tx: mpsc::Sender<SseEvent>,
     cancel_rx: watch::Receiver<bool>,
 ) {
+    // Send session ID to client first
+    let _ = tx.send(SseEvent::SessionId {
+        session_id: session_id.clone(),
+    }).await;
+
+    // Load existing history from session store
+    let incoming_history = {
+        let sessions = state.sessions.read().await;
+        sessions.get(&session_id)
+            .map(|s| s.history.clone())
+            .unwrap_or_default()
+    };
+
     // Prepare the prompt with DMN instructions if needed (only for first message in session)
     let final_prompt = if state.dmn && incoming_history.is_empty() {
         format!(
@@ -485,10 +542,13 @@ async fn run_agent_with_events(
     // Stop thinking timer
     thinking_handle.abort();
 
-    // Send updated history back to client for session continuity
-    let _ = tx.send(SseEvent::History {
-        messages: conversation_history,
-    }).await;
+    // Save updated history to session store
+    {
+        let mut sessions = state.sessions.write().await;
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.history = conversation_history;
+        }
+    }
 
     // Clear cancel sender
     {
