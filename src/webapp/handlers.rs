@@ -1,5 +1,6 @@
 use super::server::AppState;
 use crate::agent;
+use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::config::DMN_INSTRUCTIONS;
 use crate::models::Message;
 use axum::{
@@ -185,6 +186,8 @@ pub async fn config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> 
 #[derive(Deserialize)]
 pub struct QueryRequest {
     prompt: String,
+    #[serde(default)]
+    history: Vec<Message>,
 }
 
 /// SSE event types
@@ -196,6 +199,10 @@ pub enum SseEvent {
     ToolResult { name: String, result: String, truncated: bool },
     Response { content: String },
     Error { message: String },
+    /// Updated conversation history for multi-turn sessions
+    History { messages: Vec<Message> },
+    /// Context was compacted due to size limits
+    Compacted { message: String },
     Done,
 }
 
@@ -217,10 +224,11 @@ pub async fn query(
 
     let state_clone = state.clone();
     let prompt = request.prompt;
+    let history = request.history;
 
     // Spawn agent task
     tokio::spawn(async move {
-        run_agent_with_events(state_clone, prompt, tx, cancel_rx).await;
+        run_agent_with_events(state_clone, prompt, history, tx, cancel_rx).await;
     });
 
     // Convert channel to SSE stream
@@ -232,6 +240,8 @@ pub async fn query(
             SseEvent::ToolResult { .. } => "tool_result",
             SseEvent::Response { .. } => "response",
             SseEvent::Error { .. } => "error",
+            SseEvent::History { .. } => "history",
+            SseEvent::Compacted { .. } => "compacted",
             SseEvent::Done => "done",
         };
         Ok(axum::response::sse::Event::default()
@@ -261,11 +271,12 @@ pub async fn cancel(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
 async fn run_agent_with_events(
     state: Arc<AppState>,
     prompt: String,
+    incoming_history: Vec<Message>,
     tx: mpsc::Sender<SseEvent>,
     cancel_rx: watch::Receiver<bool>,
 ) {
-    // Prepare the prompt with DMN instructions if needed
-    let final_prompt = if state.dmn {
+    // Prepare the prompt with DMN instructions if needed (only for first message in session)
+    let final_prompt = if state.dmn && incoming_history.is_empty() {
         format!(
             "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
             DMN_INSTRUCTIONS, prompt
@@ -295,10 +306,15 @@ async fn run_agent_with_events(
 
     let tools_option = if tools.is_empty() { None } else { Some(tools) };
 
-    // Build conversation history
-    let mut conversation_history: Vec<Message> = vec![Message::User {
+    // Build conversation history from incoming history + new user message
+    let mut conversation_history: Vec<Message> = incoming_history;
+    conversation_history.push(Message::User {
         content: final_prompt.clone(),
-    }];
+    });
+
+    // Compaction config
+    let compaction_config = CompactionConfig::default();
+    let mut compaction_attempted = false;
 
     // Thinking timer
     let tx_thinking = tx.clone();
@@ -347,10 +363,47 @@ async fn run_agent_with_events(
         let response = match response {
             Ok(r) => r,
             Err(e) => {
-                let _ = tx.send(SseEvent::Error {
-                    message: format!("API error: {}", e),
-                }).await;
-                break;
+                let error_msg = format!("{}", e);
+
+                // Check if this is a context exhaustion error and we haven't tried compaction yet
+                if is_context_exhausted_error(&error_msg) && !compaction_attempted {
+                    compaction_attempted = true;
+
+                    // Attempt compaction
+                    match compact_context(
+                        &state.client,
+                        &state.provider_info.resolved_model,
+                        &conversation_history,
+                        &compaction_config,
+                    ).await {
+                        Ok(compacted) => {
+                            let compaction_msg = if compacted.used_full_summarization {
+                                format!("Context compacted via summarization (ratio: {:.1}%)", compacted.compaction_ratio * 100.0)
+                            } else {
+                                format!("Context compacted via truncation (ratio: {:.1}%)", compacted.compaction_ratio * 100.0)
+                            };
+
+                            let _ = tx.send(SseEvent::Compacted {
+                                message: compaction_msg,
+                            }).await;
+
+                            // Replace history with compacted version and retry
+                            conversation_history = compacted.messages;
+                            continue;
+                        }
+                        Err(compact_err) => {
+                            let _ = tx.send(SseEvent::Error {
+                                message: format!("Context exhausted and compaction failed: {}", compact_err),
+                            }).await;
+                            break;
+                        }
+                    }
+                } else {
+                    let _ = tx.send(SseEvent::Error {
+                        message: format!("API error: {}", e),
+                    }).await;
+                    break;
+                }
             }
         };
 
@@ -431,6 +484,11 @@ async fn run_agent_with_events(
 
     // Stop thinking timer
     thinking_handle.abort();
+
+    // Send updated history back to client for session continuity
+    let _ = tx.send(SseEvent::History {
+        messages: conversation_history,
+    }).await;
 
     // Clear cancel sender
     {

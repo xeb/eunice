@@ -213,6 +213,12 @@
             color: var(--neon-coral);
         }
 
+        .message.system {
+            border-left-color: var(--neon-yellow);
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
         /* Input Area */
         .input-area {
             padding: 16px 0 24px;
@@ -597,6 +603,7 @@ data: {"type":"done"}</pre>
         let isRunning = false;
         let thinkingEl = null;
         let eventSource = null;
+        let conversationHistory = []; // Session history for multi-turn conversations
 
         // Auto-resize textarea
         queryInput.addEventListener('input', () => {
@@ -682,7 +689,7 @@ data: {"type":"done"}</pre>
                 const res = await fetch('/api/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: query })
+                    body: JSON.stringify({ prompt: query, history: conversationHistory })
                 });
 
                 const reader = res.body.getReader();
@@ -760,6 +767,16 @@ data: {"type":"done"}</pre>
                 case 'error':
                     removeThinking();
                     addMessage('error', escapeHtml(event.message));
+                    break;
+
+                case 'history':
+                    // Update session history for multi-turn conversations
+                    conversationHistory = event.messages || [];
+                    break;
+
+                case 'compacted':
+                    // Show compaction notice
+                    addMessage('system', `Context compacted: ${escapeHtml(event.message)}`);
                     break;
 
                 case 'done':
