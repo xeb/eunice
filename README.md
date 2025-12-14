@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**6,021 lines of Rust** • **4.7MB binary** - Emphasizing "sophisticated simplicity".
+**7,324 lines of code** • **5.4MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -18,6 +18,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Image Interpretation**: Built-in multimodal image analysis via `--images` flag
 - **Web Search**: Built-in web search with Google Search grounding via `--search` flag
 - **Research Mode**: Built-in multi-agent research orchestration via `--research` flag
+- **Webapp Mode**: Browser-based interface via `--webapp` flag with real-time streaming
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with minimal MCP tools
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
@@ -106,6 +107,7 @@ Options:
       --no-mcp                  Disable MCP even if eunice.json exists
       --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
       --research                Enable Research mode with multi-agent orchestration (requires GEMINI_API_KEY)
+      --webapp                  Start web server interface (default: 0.0.0.0:8811)
       --agent <NAME>            Run as specific agent (default: root if agents configured)
   -i, --interact                Interactive mode for multi-turn conversations
       --silent                  Suppress all output except AI responses
@@ -417,6 +419,45 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 Research mode creates:
 - `research_notes/*.md` - Individual research notes per subtopic
 - `reports/*_summary.md` - Final synthesized report
+
+## Webapp Mode
+
+Enable with `--webapp` for a browser-based interface with real-time streaming of tool calls and responses.
+
+```bash
+# Basic webapp (no MCP tools)
+eunice --webapp --no-mcp
+
+# Webapp with DMN tools
+eunice --webapp --dmn
+
+# Webapp with custom config
+eunice --webapp --config eunice.toml
+
+# Webapp with specific model
+eunice --webapp --model sonnet --dmn
+```
+
+### Configuration
+
+Configure host and port in `eunice.toml`:
+
+```toml
+[webapp]
+host = "0.0.0.0"   # default
+port = 8811        # default
+```
+
+### Features
+
+- **Real-time streaming**: Tool calls and results appear as they execute
+- **Synth minimal UI**: Clean white background with neon accents and monospace typography
+- **Cancel support**: Stop running queries via the Cancel button
+- **Mode indicators**: Shows current model, mode (DMN/Research), and available tools
+
+### Compatibility
+
+Webapp mode works with `--dmn`, `--research`, `--agent`, `--config`, and `--model` flags. It conflicts with `--interact`, `--events`, and `--silent`.
 
 ## Tool Discovery & Filtering
 

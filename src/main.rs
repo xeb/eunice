@@ -8,6 +8,7 @@ mod mcp;
 mod models;
 mod orchestrator;
 mod provider;
+mod webapp;
 
 use crate::client::Client;
 use crate::config::{get_dmn_mcp_config, get_research_mcp_config, has_gemini_api_key, load_mcp_config, DMN_INSTRUCTIONS, LLMS_TXT, LLMS_FULL_TXT};
@@ -82,6 +83,10 @@ struct Args {
     /// Enable Research mode with multi-agent orchestration (requires GEMINI_API_KEY)
     #[arg(long, help_heading = "Modes")]
     research: bool,
+
+    /// Start web server interface (default: 0.0.0.0:8811)
+    #[arg(long, help_heading = "Modes")]
+    webapp: bool,
 
     // === Output ===
     /// Suppress all output except AI responses
@@ -308,6 +313,17 @@ async fn main() -> Result<()> {
 
     if args.research && args.dmn {
         return Err(anyhow!("--research and --dmn cannot be used together"));
+    }
+
+    // --webapp conflicts with --interact, --events, --silent
+    if args.webapp && args.interact {
+        return Err(anyhow!("--webapp and --interact cannot be used together"));
+    }
+    if args.webapp && args.events {
+        return Err(anyhow!("--webapp and --events cannot be used together"));
+    }
+    if args.webapp && args.silent {
+        return Err(anyhow!("--webapp and --silent cannot be used together"));
     }
 
     // --research requires GEMINI_API_KEY for search_query tool
@@ -601,6 +617,35 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Webapp mode - starts web server and blocks
+    if args.webapp {
+        // Wait for MCP servers to be ready
+        if let Some(ref mut manager) = mcp_manager {
+            manager.await_all_servers().await;
+        }
+
+        // Get webapp config from mcp_config or use defaults
+        let webapp_config = mcp_config
+            .as_ref()
+            .and_then(|c| c.webapp.clone())
+            .unwrap_or_default();
+
+        return webapp::run_server(
+            webapp_config,
+            client,
+            provider_info,
+            mcp_manager,
+            orchestrator,
+            agent_name,
+            args.tool_output_limit,
+            args.verbose,
+            args.dmn,
+            args.research,
+            args.dmn || args.images,
+            args.dmn || args.search || args.research,
+        ).await;
+    }
+
     // Run appropriate mode
     if interactive {
         interactive::interactive_mode(
@@ -861,6 +906,7 @@ mod tests {
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
             denied_tools: Vec::new(),
+            webapp: None,
         };
         let result = format_agents(&config);
         assert!(result.is_empty());
@@ -874,6 +920,7 @@ mod tests {
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
             denied_tools: Vec::new(),
+            webapp: None,
         };
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "You are root".to_string(),
@@ -901,6 +948,7 @@ mod tests {
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
             denied_tools: Vec::new(),
+            webapp: None,
         };
         config.mcp_servers.insert("shell".to_string(), McpServerConfig {
             command: "mcpz".to_string(),
@@ -921,6 +969,7 @@ mod tests {
             agents: std::collections::HashMap::new(),
             allowed_tools: Vec::new(),
             denied_tools: Vec::new(),
+            webapp: None,
         };
         config.mcp_servers.insert("remote".to_string(), McpServerConfig {
             command: String::new(),

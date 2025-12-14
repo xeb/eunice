@@ -42,6 +42,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         agents: HashMap::new(),
         allowed_tools: Vec::new(),
         denied_tools: Vec::new(),
+        webapp: None,
     }
 }
 
@@ -99,6 +100,7 @@ pub fn get_research_mcp_config() -> McpConfig {
         agents,
         allowed_tools: Vec::new(),
         denied_tools: Vec::new(),
+        webapp: None,
     }
 }
 

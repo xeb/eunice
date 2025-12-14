@@ -312,7 +312,7 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 ```
 src/
 ├── main.rs              - CLI entry, arg parsing, multi-agent detection
-├── models.rs            - Data structures + AgentConfig
+├── models.rs            - Data structures + AgentConfig + WebappConfig
 ├── client.rs            - HTTP client, format conversions
 ├── mcp/
 │   ├── mod.rs           - Module exports
@@ -322,12 +322,19 @@ src/
 ├── orchestrator/
 │   ├── mod.rs           - Module exports
 │   └── orchestrator.rs  - Multi-agent coordination
+├── webapp/
+│   ├── mod.rs           - Module exports
+│   ├── server.rs        - Axum web server setup
+│   └── handlers.rs      - HTTP/SSE request handlers
 ├── provider.rs          - Provider detection
 ├── display.rs           - Terminal UI with indicatif spinners
 ├── interactive.rs       - Interactive REPL mode
 ├── agent.rs             - Single-agent loop with tool execution
 ├── config.rs            - Configuration loading
 └── lib.rs               - Library exports
+
+webapp/
+└── index.html           - Embedded HTML/CSS/JS frontend (synth minimal aesthetic)
 
 dmn_instructions.md      - DMN system instructions (embedded via include_str!)
 ```
@@ -359,6 +366,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.29**: Webapp mode via `--webapp` flag with browser-based interface and real-time SSE streaming
 - **0.2.27**: Research mode via `--research` flag with built-in multi-agent orchestration (requires GEMINI_API_KEY)
 - **0.2.26**: Web search tool via `--search` flag using Gemini with Google Search grounding
 - **0.2.24**: Enhanced verbose logging for HTTP MCP connections (shows request/response bodies, status, content-type)

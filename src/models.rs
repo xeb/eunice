@@ -139,6 +139,37 @@ pub struct McpConfig {
     /// Tools matching these patterns are excluded from the model
     #[serde(default, alias = "deniedTools", alias = "denied_tools")]
     pub denied_tools: Vec<String>,
+    /// Optional webapp configuration
+    #[serde(default)]
+    pub webapp: Option<WebappConfig>,
+}
+
+/// Configuration for the webapp server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebappConfig {
+    /// Host to bind to (default: "0.0.0.0")
+    #[serde(default = "default_webapp_host")]
+    pub host: String,
+    /// Port to bind to (default: 8811)
+    #[serde(default = "default_webapp_port")]
+    pub port: u16,
+}
+
+fn default_webapp_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_webapp_port() -> u16 {
+    8811
+}
+
+impl Default for WebappConfig {
+    fn default() -> Self {
+        Self {
+            host: default_webapp_host(),
+            port: default_webapp_port(),
+        }
+    }
 }
 
 /// Configuration for a single agent
