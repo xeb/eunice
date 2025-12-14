@@ -27,6 +27,7 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Multi-Agent Orchestration**: Agents can invoke other agents as tools for complex workflows
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with pre-configured MCP tools for software engineering
+- **Webapp Mode**: Browser-based interface via `--webapp` with real-time streaming and server-side sessions
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
 - **Interactive Mode**: Multi-turn conversations with context preservation
 - **Progress Spinners**: Visual feedback during tool execution
@@ -95,6 +96,7 @@ Options:
       --config <FILE>           Path to MCP configuration JSON/TOML
       --no-mcp                  Disable MCP even if eunice.json exists
       --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
+      --webapp                  Start web server interface (default: 0.0.0.0:8811)
       --agent <NAME>            Run as specific agent (default: root if agents configured)
       --list-agents             List configured agents
   -i, --interact                Interactive mode for multi-turn conversations
@@ -411,6 +413,64 @@ eunice --dmn "Find all TODO comments and create issues for them"
 # ⏳ Rate limit hit (429). DMN mode: retrying in 6 seconds...
 # [continues automatically after retry]
 ```
+
+### Webapp Mode
+
+Start a browser-based interface with real-time streaming of tool calls and responses:
+
+```bash
+# Basic webapp (no MCP tools)
+eunice --webapp --no-mcp
+
+# Webapp with DMN tools
+eunice --webapp --dmn
+
+# Webapp with custom config and specific agent
+eunice --webapp --config eunice.toml --agent researcher
+
+# Webapp with specific model
+eunice --webapp --model sonnet --dmn
+
+# Webapp with image and search tools
+eunice --webapp --images --search
+```
+
+Configure host and port in `eunice.toml`:
+
+```toml
+[webapp]
+host = "0.0.0.0"   # default - listen on all interfaces
+port = 8811        # default port
+
+# Can also configure with MCP servers
+[mcpServers.shell]
+command = "mcpz"
+args = ["server", "shell"]
+```
+
+Example with custom port (8991):
+
+```toml
+# eunice.toml
+[webapp]
+host = "0.0.0.0"
+port = 8991
+```
+
+```bash
+# Then run with --webapp
+eunice --webapp --dmn
+# Starts webapp at http://0.0.0.0:8991
+```
+
+Features:
+- Real-time SSE streaming of tool calls and results
+- Server-side session management (persists across tab closes)
+- NEW button to start fresh sessions
+- Markdown and HTML rendering in responses
+- Mobile-responsive design
+- CONFIG modal showing agents, servers, and tools
+- API documentation modal with curl examples
 
 ## Environment Variables
 

@@ -452,12 +452,30 @@ host = "0.0.0.0"   # default
 port = 8811        # default
 ```
 
+Example with custom port:
+
+```toml
+# eunice.toml
+[webapp]
+host = "0.0.0.0"
+port = 8991
+```
+
+```bash
+eunice --webapp --dmn
+# Starts webapp at http://0.0.0.0:8991
+```
+
 ### Features
 
 - **Real-time streaming**: Tool calls and results appear as they execute
+- **Server-side sessions**: Conversations persist across tab closes (cleared on server restart)
+- **NEW button**: Start a fresh session at any time
+- **Markdown/HTML rendering**: Model responses are rendered appropriately
 - **Synth minimal UI**: Clean white background with neon accents and monospace typography
 - **Cancel support**: Stop running queries via the Cancel button
 - **Mode indicators**: Shows current model, mode (DMN/Research), and available tools
+- **Mobile responsive**: Works on mobile devices with optimized layout
 
 ### Compatibility
 
