@@ -617,6 +617,55 @@
         .message.response .markdown-content th {
             background: var(--bg-input);
         }
+
+        /* Tabbed content view for HTML/Markdown */
+        .tabbed-content {
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .tabbed-content .tab-header {
+            display: flex;
+            background: var(--bg-input);
+            border-bottom: 1px solid var(--border);
+        }
+        .tabbed-content .tab-btn {
+            background: none;
+            border: none;
+            padding: 8px 16px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .tabbed-content .tab-btn:hover {
+            color: var(--text);
+        }
+        .tabbed-content .tab-btn.active {
+            color: var(--neon-cyan);
+            background: var(--bg);
+            border-bottom: 2px solid var(--neon-cyan);
+            margin-bottom: -1px;
+        }
+        .tabbed-content .tab-body {
+            padding: 12px;
+        }
+        .tabbed-content .tab-panel {
+            display: none;
+        }
+        .tabbed-content .tab-panel.active {
+            display: block;
+        }
+        .tabbed-content .tab-panel.code-panel {
+            background: var(--bg-input);
+            white-space: pre-wrap;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+        }
     </style>
     <!-- Markdown-it library for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
@@ -1031,26 +1080,66 @@ data: {"type":"done"}</pre>
             return 'plain';
         }
 
-        // Render content based on detected type
+        // Generate unique ID for tabbed content
+        let tabbedContentId = 0;
+
+        // Render content based on detected type with tabbed view for HTML/Markdown
         function renderContent(text) {
             const contentType = detectContentType(text);
 
             switch (contentType) {
                 case 'markdown':
                     if (md) {
-                        return `<div class="markdown-content">${md.render(text)}</div>`;
+                        return createTabbedContent(text, md.render(text), 'Markdown');
                     }
                     // Fallback if markdown-it not loaded
                     return escapeHtml(text);
 
                 case 'html':
-                    // Render HTML directly (sanitization would be ideal in production)
-                    return `<div class="html-content">${text}</div>`;
+                    // Create tabbed view for HTML content
+                    return createTabbedContent(text, text, 'HTML');
 
                 case 'plain':
                 default:
                     return escapeHtml(text);
             }
+        }
+
+        // Create a tabbed content view with Preview and Code tabs
+        function createTabbedContent(rawText, renderedContent, contentLabel) {
+            const id = `tabbed-${++tabbedContentId}`;
+            return `
+                <div class="tabbed-content" id="${id}">
+                    <div class="tab-header">
+                        <button class="tab-btn active" data-tab="preview" onclick="switchTab('${id}', 'preview')">Preview</button>
+                        <button class="tab-btn" data-tab="code" onclick="switchTab('${id}', 'code')">${contentLabel} Code</button>
+                    </div>
+                    <div class="tab-body">
+                        <div class="tab-panel preview-panel active">${renderedContent}</div>
+                        <div class="tab-panel code-panel">${escapeHtml(rawText)}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Switch tabs in tabbed content
+        function switchTab(containerId, tabName) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+
+            // Update tab buttons
+            container.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabName);
+            });
+
+            // Update tab panels
+            container.querySelectorAll('.tab-panel').forEach(panel => {
+                if (tabName === 'preview') {
+                    panel.classList.toggle('active', panel.classList.contains('preview-panel'));
+                } else {
+                    panel.classList.toggle('active', panel.classList.contains('code-panel'));
+                }
+            });
         }
 
         // API Modal

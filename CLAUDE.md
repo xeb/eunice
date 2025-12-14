@@ -367,6 +367,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.42**: Webapp: tabbed Preview/Code view for HTML and Markdown responses
 - **0.2.41**: Webapp: add console logging for debugging (sessions, queries, LLM calls, tool execution); improve spinner terminal cleanup
 - **0.2.40**: Webapp: display version number in status bar footer
 - **0.2.39**: Webapp: fix tool count in status bar to include built-in tools; add session history restoration on page refresh
