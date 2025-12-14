@@ -58,8 +58,20 @@
             padding: 24px 0 16px;
             border-bottom: 1px solid var(--border-strong);
             display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .header-row {
+            display: flex;
             justify-content: space-between;
             align-items: center;
+        }
+
+        .header-info-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
         }
 
         .logo {
@@ -686,19 +698,24 @@
 <body>
     <div class="container">
         <header>
-            <div class="logo">E U N I C E</div>
-            <div class="status">
-                <span class="model-badge" id="model-badge">loading...</span>
+            <div class="header-row">
+                <div class="logo">E U N I C E</div>
+                <div class="status">
+                    <span class="model-badge" id="model-badge">loading...</span>
+                    <button class="btn-api btn-new" id="new-btn">RESET</button>
+                    <button class="btn-api" id="config-btn">CONFIG</button>
+                    <button class="btn-api" id="api-btn">API</button>
+                    <div class="connection-status">
+                        <div class="status-dot loading" id="status-dot"></div>
+                        <span id="status-text">connecting</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-info-row">
                 <span class="header-info" id="mode-display"></span>
                 <span class="header-info" id="agent-display" style="display: none;"></span>
                 <span class="header-info" id="tools-display">-</span>
-                <button class="btn-api btn-new" id="new-btn">RESET</button>
-                <button class="btn-api" id="config-btn">CONFIG</button>
-                <button class="btn-api" id="api-btn">API</button>
-                <div class="connection-status">
-                    <div class="status-dot loading" id="status-dot"></div>
-                    <span id="status-text">connecting</span>
-                </div>
+                <span class="header-info" id="servers-display">-</span>
             </div>
         </header>
 
@@ -793,7 +810,6 @@ data: {"type":"done"}</pre>
         </div>
 
         <div class="status-bar" id="status-bar">
-            <span id="servers-display">-</span>
             <span id="version-display">-</span>
         </div>
     </div>
