@@ -36,14 +36,18 @@ impl Spinner {
     pub async fn stop(self) {
         self.0.finish_and_clear();
 
-        // Explicitly clear the line and reset cursor
+        // Force a complete terminal reset
         let mut stdout = stdout();
         let _ = execute!(
             stdout,
             cursor::MoveToColumn(0),
-            terminal::Clear(terminal::ClearType::CurrentLine)
+            terminal::Clear(terminal::ClearType::CurrentLine),
+            cursor::MoveToColumn(0)
         );
         let _ = stdout.flush();
+
+        // Small yield to let any pending terminal operations complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 }
 
@@ -87,24 +91,30 @@ impl ThinkingSpinner {
 
     /// Stop the thinking spinner
     pub fn stop(self) {
-        // Signal the background task to stop
+        // Signal the background task to stop first
         self.running.store(false, Ordering::Relaxed);
 
-        // Disable the steady tick first to prevent more updates
+        // Disable the steady tick to prevent more updates
         self.pb.disable_steady_tick();
 
-        // Clear the progress bar
+        // Clear the progress bar (this uses indicatif's internal clearing)
         self.pb.finish_and_clear();
 
-        // Explicitly clear the line and reset cursor to column 0
-        // This handles any race conditions with the background task
+        // Force a complete terminal reset:
+        // 1. Move to column 0
+        // 2. Clear the entire current line
+        // 3. Ensure cursor is at column 0 for next print
         let mut stdout = stdout();
         let _ = execute!(
             stdout,
             cursor::MoveToColumn(0),
-            terminal::Clear(terminal::ClearType::CurrentLine)
+            terminal::Clear(terminal::ClearType::CurrentLine),
+            cursor::MoveToColumn(0)
         );
         let _ = stdout.flush();
+
+        // Small yield to let any pending terminal operations complete
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

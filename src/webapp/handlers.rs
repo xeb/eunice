@@ -8,6 +8,7 @@ use axum::{
     response::{Html, Sse},
     Json,
 };
+use chrono::Local;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
@@ -17,6 +18,12 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use uuid::Uuid;
+
+/// Log a webapp event with timestamp
+fn log(event: &str) {
+    let timestamp = Local::now().format("%H:%M:%S%.3f");
+    println!("[{}] [webapp] {}", timestamp, event);
+}
 
 /// Embedded HTML frontend
 const INDEX_HTML: &str = include_str!("../../webapp/index.html");
@@ -216,6 +223,7 @@ pub async fn new_session(State(state): State<Arc<AppState>>) -> Json<NewSessionR
         sessions.insert(session_id.clone(), Session::new());
     }
 
+    log(&format!("New session created: {}", &session_id[..8]));
     Json(NewSessionResponse { session_id })
 }
 
@@ -337,7 +345,15 @@ pub async fn query(
     }
 
     let state_clone = state.clone();
-    let prompt = request.prompt;
+    let prompt = request.prompt.clone();
+
+    // Log incoming query
+    let prompt_preview = if request.prompt.len() > 100 {
+        format!("{}...", &request.prompt[..100])
+    } else {
+        request.prompt.clone()
+    };
+    log(&format!("Query received: \"{}\"", prompt_preview));
 
     // Get or create session
     let session_id = match request.session_id {
@@ -345,12 +361,14 @@ pub async fn query(
             // Verify session exists, create if not
             let sessions = state.sessions.read().await;
             if sessions.contains_key(&id) {
+                log(&format!("Using existing session: {}", &id[..8]));
                 id
             } else {
                 drop(sessions);
                 let new_id = Uuid::new_v4().to_string();
                 let mut sessions = state.sessions.write().await;
                 sessions.insert(new_id.clone(), Session::new());
+                log(&format!("Session {} not found, created new: {}", &id[..8], &new_id[..8]));
                 new_id
             }
         }
@@ -359,6 +377,7 @@ pub async fn query(
             let new_id = Uuid::new_v4().to_string();
             let mut sessions = state.sessions.write().await;
             sessions.insert(new_id.clone(), Session::new());
+            log(&format!("No session provided, created new: {}", &new_id[..8]));
             new_id
         }
     };
@@ -412,6 +431,9 @@ async fn run_agent_with_events(
     tx: mpsc::Sender<SseEvent>,
     cancel_rx: watch::Receiver<bool>,
 ) {
+    let session_short = &session_id[..8];
+    log(&format!("[{}] Agent loop starting", session_short));
+
     // Send session ID to client first
     let _ = tx.send(SseEvent::SessionId {
         session_id: session_id.clone(),
@@ -424,6 +446,7 @@ async fn run_agent_with_events(
             .map(|s| s.history.clone())
             .unwrap_or_default()
     };
+    log(&format!("[{}] Loaded {} messages from history", session_short, incoming_history.len()));
 
     // Prepare the prompt with DMN instructions if needed (only for first message in session)
     let final_prompt = if state.dmn && incoming_history.is_empty() {
@@ -490,9 +513,14 @@ async fn run_agent_with_events(
     });
 
     // Agent loop
+    let mut loop_iteration = 0;
     loop {
+        loop_iteration += 1;
+        log(&format!("[{}] Loop iteration {}", session_short, loop_iteration));
+
         // Check for cancellation
         if *cancel_rx.borrow() {
+            log(&format!("[{}] Query cancelled by user", session_short));
             let _ = tx.send(SseEvent::Error {
                 message: "Query cancelled".to_string(),
             }).await;
@@ -500,6 +528,12 @@ async fn run_agent_with_events(
         }
 
         // Call LLM
+        log(&format!("[{}] Calling LLM ({}) with {} messages",
+            session_short,
+            state.provider_info.resolved_model,
+            conversation_history.len()
+        ));
+
         let response = state
             .client
             .chat_completion(
@@ -511,13 +545,18 @@ async fn run_agent_with_events(
             .await;
 
         let response = match response {
-            Ok(r) => r,
+            Ok(r) => {
+                log(&format!("[{}] LLM response received", session_short));
+                r
+            }
             Err(e) => {
                 let error_msg = format!("{}", e);
+                log(&format!("[{}] LLM error: {}", session_short, error_msg));
 
                 // Check if this is a context exhaustion error and we haven't tried compaction yet
                 if is_context_exhausted_error(&error_msg) && !compaction_attempted {
                     compaction_attempted = true;
+                    log(&format!("[{}] Attempting context compaction", session_short));
 
                     // Attempt compaction
                     match compact_context(
@@ -532,6 +571,7 @@ async fn run_agent_with_events(
                             } else {
                                 format!("Context compacted via truncation (ratio: {:.1}%)", compacted.compaction_ratio * 100.0)
                             };
+                            log(&format!("[{}] {}", session_short, compaction_msg));
 
                             let _ = tx.send(SseEvent::Compacted {
                                 message: compaction_msg,
@@ -542,6 +582,7 @@ async fn run_agent_with_events(
                             continue;
                         }
                         Err(compact_err) => {
+                            log(&format!("[{}] Compaction failed: {}", session_short, compact_err));
                             let _ = tx.send(SseEvent::Error {
                                 message: format!("Context exhausted and compaction failed: {}", compact_err),
                             }).await;
@@ -568,6 +609,12 @@ async fn run_agent_with_events(
         // Send response content if present
         if let Some(content) = &choice.message.content {
             if !content.is_empty() {
+                let content_preview = if content.len() > 80 {
+                    format!("{}...", &content[..80])
+                } else {
+                    content.clone()
+                };
+                log(&format!("[{}] Response: \"{}\"", session_short, content_preview.replace('\n', " ")));
                 let _ = tx.send(SseEvent::Response {
                     content: content.clone(),
                 }).await;
@@ -576,17 +623,23 @@ async fn run_agent_with_events(
 
         // Check for tool calls
         let Some(tool_calls) = &choice.message.tool_calls else {
+            log(&format!("[{}] No tool calls, loop complete", session_short));
             break;
         };
 
         if tool_calls.is_empty() {
+            log(&format!("[{}] Empty tool calls, loop complete", session_short));
             break;
         }
+
+        log(&format!("[{}] Processing {} tool call(s)", session_short, tool_calls.len()));
 
         // Execute tool calls
         for tool_call in tool_calls {
             let tool_name = &tool_call.function.name;
             let arguments = &tool_call.function.arguments;
+
+            log(&format!("[{}] Tool call: {}", session_short, tool_name));
 
             // Send tool call event
             let _ = tx.send(SseEvent::ToolCall {
@@ -608,6 +661,13 @@ async fn run_agent_with_events(
                 Ok("Error: No MCP manager available".to_string())
             }
             .unwrap_or_else(|e| format!("Error: {}", e));
+
+            let result_preview = if result.len() > 80 {
+                format!("{}...", &result[..80])
+            } else {
+                result.clone()
+            };
+            log(&format!("[{}] Tool result: {} chars ({})", session_short, result.len(), result_preview.replace('\n', " ")));
 
             // Truncate result for display
             let (display_result, truncated) = if result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
@@ -639,9 +699,11 @@ async fn run_agent_with_events(
     {
         let mut sessions = state.sessions.write().await;
         if let Some(session) = sessions.get_mut(&session_id) {
-            session.history = conversation_history;
+            session.history = conversation_history.clone();
         }
     }
+
+    log(&format!("[{}] Query complete, saved {} messages to session", session_short, conversation_history.len()));
 
     // Clear cancel sender
     {
