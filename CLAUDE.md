@@ -367,6 +367,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.38**: Fix spinner terminal artifacts: explicit line clear after stopping spinner to prevent whitespace issues
 - **0.2.37**: Webapp: improved error display (HTTP errors, parse errors, connection closed without response)
 - **0.2.36**: Research mode: `--config` can now be used with `--research` to merge MCP servers (agents ignored)
 - **0.2.35**: Documentation: --webapp examples with custom host/port configuration in README and llms-full.txt

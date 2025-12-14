@@ -1,8 +1,10 @@
 use crate::models::Provider;
 use crate::provider::get_available_models;
 use colored::*;
+use crossterm::{cursor, execute, terminal};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
+use std::io::{stdout, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +35,15 @@ impl Spinner {
     /// Stop the spinner
     pub async fn stop(self) {
         self.0.finish_and_clear();
+
+        // Explicitly clear the line and reset cursor
+        let mut stdout = stdout();
+        let _ = execute!(
+            stdout,
+            cursor::MoveToColumn(0),
+            terminal::Clear(terminal::ClearType::CurrentLine)
+        );
+        let _ = stdout.flush();
     }
 }
 
@@ -76,8 +87,24 @@ impl ThinkingSpinner {
 
     /// Stop the thinking spinner
     pub fn stop(self) {
+        // Signal the background task to stop
         self.running.store(false, Ordering::Relaxed);
+
+        // Disable the steady tick first to prevent more updates
+        self.pb.disable_steady_tick();
+
+        // Clear the progress bar
         self.pb.finish_and_clear();
+
+        // Explicitly clear the line and reset cursor to column 0
+        // This handles any race conditions with the background task
+        let mut stdout = stdout();
+        let _ = execute!(
+            stdout,
+            cursor::MoveToColumn(0),
+            terminal::Clear(terminal::ClearType::CurrentLine)
+        );
+        let _ = stdout.flush();
     }
 }
 
