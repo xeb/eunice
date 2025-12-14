@@ -599,7 +599,7 @@ can_invoke = ["worker"]              # Agents this agent can call
 
 [agents.worker]
 prompt = "agents/worker.md"          # Can be file path
-tools = ["shell"]
+tools = ["shell_*"]                  # Wildcard pattern for all shell tools
 can_invoke = []
 ```
 
@@ -983,27 +983,27 @@ can_invoke = ["product_manager", "senior_dev", "marketing"]
 
 [agents.product_manager]
 prompt = "agents/product_manager.md"  # Can be a file path
-tools = ["filesystem", "memory"]       # References mcpServers by name
+tools = ["filesystem_*", "memory_*"]  # Wildcard patterns for tool names
 can_invoke = ["senior_dev", "tester"]
 
 [agents.senior_dev]
 prompt = "agents/senior_dev.md"
-tools = ["shell", "filesystem", "text-editor", "grep"]
+tools = ["shell_*", "filesystem_*", "editor_*", "grep_*"]
 can_invoke = ["junior_dev", "tester"]
 
 [agents.junior_dev]
 prompt = "You implement specific tasks assigned by senior dev. Focus on clean, working code."
-tools = ["shell", "filesystem", "text-editor"]
+tools = ["shell_*", "filesystem_*", "editor_*"]
 can_invoke = []  # Leaf agent - cannot delegate
 
 [agents.tester]
 prompt = "agents/tester.md"
-tools = ["shell", "filesystem", "grep"]
+tools = ["shell_*", "filesystem_*", "grep_*"]
 can_invoke = []
 
 [agents.marketing]
 prompt = "You create marketing content and strategies."
-tools = ["filesystem", "web"]
+tools = ["filesystem_*", "web_*"]
 can_invoke = []
 ```
 
@@ -1013,8 +1013,9 @@ can_invoke = []
 - Inline string: `prompt = "You are a developer..."`
 - File path: `prompt = "agents/senior_dev.md"` (relative to config file)
 
-**`tools`** - Array of MCP server names from `[mcpServers.*]`:
-- `tools = ["shell", "filesystem"]` gives access to all tools from those servers
+**`tools`** - Array of tool name patterns with wildcard support:
+- `tools = ["shell_*", "filesystem_*"]` matches all tools starting with those prefixes
+- `tools = ["*_read*"]` matches tools containing "_read"
 - Empty or omitted means no MCP tools (agent can only delegate or respond)
 
 **`can_invoke`** - Array of agent names this agent can call:
@@ -1311,25 +1312,25 @@ args = ["server", "shell"]
 # Counter - the customer-facing agent (root)
 [agents.root]
 prompt = "agents/counter.md"
-tools = ["filesystem"]
+tools = ["filesystem_*"]
 can_invoke = ["head_chef"]
 
 # Head Chef - coordinates the kitchen
 [agents.head_chef]
 prompt = "agents/head_chef.md"
-tools = ["filesystem"]
+tools = ["filesystem_*"]
 can_invoke = ["line_cook", "supplier"]
 
 # Line Cook - prepares dishes
 [agents.line_cook]
 prompt = "agents/line_cook.md"
-tools = ["filesystem", "shell"]
+tools = ["filesystem_*", "shell_*"]
 can_invoke = []
 
 # Supplier - manages pantry inventory
 [agents.supplier]
 prompt = "agents/supplier.md"
-tools = ["filesystem"]
+tools = ["filesystem_*"]
 can_invoke = []
 ```
 
