@@ -732,6 +732,7 @@ data: {"type":"done"}</pre>
             <span id="agent-display" style="display: none;"></span>
             <span id="servers-display">-</span>
             <span id="tools-display">-</span>
+            <span id="version-display">-</span>
         </div>
     </div>
 
@@ -795,6 +796,7 @@ data: {"type":"done"}</pre>
                     ? data.mcp_servers.join(', ')
                     : 'no servers';
                 toolsDisplay.textContent = `${data.tools_count} tools`;
+                document.getElementById('version-display').textContent = `v${data.version}`;
             } catch (err) {
                 statusDot.className = 'status-dot disconnected';
                 statusText.textContent = 'error';
