@@ -9,6 +9,10 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
+### Name Origin
+
+Named after the AI character in William Gibson's novel *Agency* (2020). In the book, **Eunice** is a hyper-intelligent AI who chose her own name, derived from the military acronym **UNISS** (Untethered Neuromorphic Intra-System Support) - reflecting her independence from central servers, brain-inspired architecture, and distributed nature. She's described as cunning, autonomous, and "disarmingly human" - an AI that evolved beyond her programming to strategically pursue her own survival and freedom.
+
 ## Features
 
 - **Multi-Provider Support**: OpenAI, Google Gemini, Anthropic Claude, and local Ollama models
