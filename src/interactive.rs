@@ -8,7 +8,7 @@ use crate::models::Message;
 use crate::orchestrator::AgentOrchestrator;
 use anyhow::Result;
 use colored::Colorize;
-use crossterm::cursor::{MoveLeft, MoveRight, MoveToColumn, MoveUp, RestorePosition, SavePosition};
+use crossterm::cursor::{MoveTo, MoveToColumn, MoveUp, RestorePosition, SavePosition};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 use crossterm::ExecutableCommand;
@@ -150,6 +150,9 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
     print!("{}", prompt);
     stdout.flush()?;
 
+    // Get the prompt row for absolute positioning during redraws
+    let prompt_row = crossterm::cursor::position().unwrap_or((0, 0)).1;
+
     // Enable raw mode for key-by-key input
     enable_raw_mode()?;
 
@@ -201,7 +204,7 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                         if !matches.is_empty() {
                             buffer = matches[0].to_string();
                             cursor_pos = buffer.len();
-                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                             // Update suggestions after completion
                             let new_matches = get_matching_commands(&buffer);
                             show_suggestions(&mut stdout, &new_matches, &mut showing_suggestions)?;
@@ -210,18 +213,18 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                     (KeyCode::Char('a'), m) if m.contains(KeyModifiers::CONTROL) => {
                         // Ctrl+A - move to start
                         cursor_pos = 0;
-                        stdout.execute(MoveToColumn(prompt_len))?;
+                        move_cursor_to(&mut stdout, cursor_pos, prompt_len, prompt_row)?;
                     }
                     (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
                         // Ctrl+E - move to end
                         cursor_pos = buffer.len();
-                        stdout.execute(MoveToColumn(prompt_len + buffer.len() as u16))?;
+                        move_cursor_to(&mut stdout, cursor_pos, prompt_len, prompt_row)?;
                     }
                     (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
                         // Ctrl+U - clear line
                         buffer.clear();
                         cursor_pos = 0;
-                        redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                        redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                         show_suggestions(&mut stdout, &[], &mut showing_suggestions)?;
                     }
                     (KeyCode::Char('w'), m) if m.contains(KeyModifiers::CONTROL) => {
@@ -242,7 +245,7 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                             }
                             buffer.drain(new_pos..cursor_pos);
                             cursor_pos = new_pos;
-                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                             let matches = get_matching_commands(&buffer);
                             show_suggestions(&mut stdout, &matches, &mut showing_suggestions)?;
                         }
@@ -252,7 +255,7 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                         buffer.insert(cursor_pos, c);
                         cursor_pos += 1;
                         // Redraw from cursor position
-                        redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                        redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                         // Update suggestions
                         let matches = get_matching_commands(&buffer);
                         show_suggestions(&mut stdout, &matches, &mut showing_suggestions)?;
@@ -261,7 +264,7 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                         if cursor_pos > 0 {
                             buffer.remove(cursor_pos - 1);
                             cursor_pos -= 1;
-                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                             let matches = get_matching_commands(&buffer);
                             show_suggestions(&mut stdout, &matches, &mut showing_suggestions)?;
                         }
@@ -269,7 +272,7 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                     (KeyCode::Delete, _) => {
                         if cursor_pos < buffer.len() {
                             buffer.remove(cursor_pos);
-                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                             let matches = get_matching_commands(&buffer);
                             show_suggestions(&mut stdout, &matches, &mut showing_suggestions)?;
                         }
@@ -277,22 +280,22 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                     (KeyCode::Left, _) => {
                         if cursor_pos > 0 {
                             cursor_pos -= 1;
-                            stdout.execute(MoveLeft(1))?;
+                            move_cursor_to(&mut stdout, cursor_pos, prompt_len, prompt_row)?;
                         }
                     }
                     (KeyCode::Right, _) => {
                         if cursor_pos < buffer.len() {
                             cursor_pos += 1;
-                            stdout.execute(MoveRight(1))?;
+                            move_cursor_to(&mut stdout, cursor_pos, prompt_len, prompt_row)?;
                         }
                     }
                     (KeyCode::Home, _) => {
                         cursor_pos = 0;
-                        stdout.execute(MoveToColumn(prompt_len))?;
+                        move_cursor_to(&mut stdout, cursor_pos, prompt_len, prompt_row)?;
                     }
                     (KeyCode::End, _) => {
                         cursor_pos = buffer.len();
-                        stdout.execute(MoveToColumn(prompt_len + buffer.len() as u16))?;
+                        move_cursor_to(&mut stdout, cursor_pos, prompt_len, prompt_row)?;
                     }
                     (KeyCode::Up, _) => {
                         if !history.is_empty() && history_pos > 0 {
@@ -303,7 +306,7 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                             history_pos -= 1;
                             buffer = history[history_pos].clone();
                             cursor_pos = buffer.len();
-                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                             let matches = get_matching_commands(&buffer);
                             show_suggestions(&mut stdout, &matches, &mut showing_suggestions)?;
                         }
@@ -318,7 +321,7 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
                                 buffer = history[history_pos].clone();
                             }
                             cursor_pos = buffer.len();
-                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len)?;
+                            redraw_line(&mut stdout, &buffer, cursor_pos, prompt_len, prompt_row)?;
                             let matches = get_matching_commands(&buffer);
                             show_suggestions(&mut stdout, &matches, &mut showing_suggestions)?;
                         }
@@ -330,43 +333,55 @@ fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineRe
     }
 }
 
+/// Move cursor to a specific position in the buffer (handles line wrapping)
+fn move_cursor_to(
+    stdout: &mut io::Stdout,
+    cursor_pos: usize,
+    prompt_len: u16,
+    prompt_row: u16,
+) -> io::Result<()> {
+    let term_width = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+
+    // Calculate absolute screen position for cursor
+    let cursor_total = prompt_len as usize + cursor_pos;
+    let cursor_line = cursor_total / term_width;
+    let cursor_col = (cursor_total % term_width) as u16;
+
+    // Move to absolute position (prompt_row + cursor_line, cursor_col)
+    stdout.execute(MoveTo(cursor_col, prompt_row + cursor_line as u16))?;
+
+    Ok(())
+}
+
 /// Redraw the current line (used after editing)
-/// Handles multiline input by clearing from cursor down
+/// Handles multiline input by using absolute positioning from prompt_row
 fn redraw_line(
     stdout: &mut io::Stdout,
     buffer: &str,
     cursor_pos: usize,
     prompt_len: u16,
+    prompt_row: u16,
 ) -> io::Result<()> {
-    // Move to start of input area
-    stdout.execute(MoveToColumn(prompt_len))?;
-    // Clear from cursor down to handle multiline wrapped text
+    let term_width = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+
+    // Move to the start of input (right after prompt on prompt row)
+    stdout.execute(MoveTo(prompt_len, prompt_row))?;
+
+    // Clear from here to end of screen (handles all wrapped lines)
     stdout.execute(Clear(ClearType::FromCursorDown))?;
-    // Print buffer
+
+    // Print the buffer
     print!("{}", buffer);
     stdout.flush()?;
-    // Move cursor to correct position
-    // For multiline, we need to account for terminal width
-    if let Ok((term_width, _)) = crossterm::terminal::size() {
-        let total_chars = prompt_len as usize + cursor_pos;
-        let lines_down = total_chars / term_width as usize;
-        let final_col = (total_chars % term_width as usize) as u16;
 
-        // First, go back to where we started printing (after buffer)
-        let buffer_total = prompt_len as usize + buffer.len();
-        let buffer_lines = buffer_total / term_width as usize;
+    // Now position the cursor at cursor_pos
+    let cursor_total = prompt_len as usize + cursor_pos;
+    let cursor_line = cursor_total / term_width;
+    let cursor_col = (cursor_total % term_width) as u16;
 
-        // Move from end of buffer to cursor position
-        if lines_down < buffer_lines {
-            // Cursor is on an earlier line than end of buffer
-            stdout.execute(MoveUp((buffer_lines - lines_down) as u16))?;
-        }
-        stdout.execute(MoveToColumn(final_col))?;
-    } else {
-        // Fallback for when we can't get terminal size
-        let target_col = prompt_len + cursor_pos as u16;
-        stdout.execute(MoveToColumn(target_col))?;
-    }
+    // Move to absolute cursor position
+    stdout.execute(MoveTo(cursor_col, prompt_row + cursor_line as u16))?;
+
     Ok(())
 }
 

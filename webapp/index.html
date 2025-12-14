@@ -992,6 +992,8 @@ data: {"type":"done"}</pre>
                         <div class="tool-result-content">${escapeHtml(event.result)}</div>
                         ${truncatedNotice}
                     `);
+                    // Re-add thinking indicator while waiting for next LLM response
+                    thinkingEl = addMessage('thinking', '<span class="cursor">|</span> Thinking... <span id="thinking-time">0</span>s');
                     break;
 
                 case 'response':
