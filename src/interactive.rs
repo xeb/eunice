@@ -145,8 +145,7 @@ enum LineResult {
 fn read_line_with_history(history: &[String], prompt: &str) -> io::Result<LineResult> {
     let mut stdout = io::stdout();
 
-    // Print prompt (with blank line above for suggestions)
-    println!(); // Reserve line for suggestions
+    // Print prompt
     print!("{}", prompt);
     stdout.flush()?;
 
