@@ -275,7 +275,7 @@ Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution
 
 - **shell**: Execute any shell command (grep, curl, wget, git, npm, cargo, etc.)
 - **filesystem**: File operations (read, write, list, search)
-- **browser** (optional): Browser automation via Chrome DevTools Protocol (requires Chrome and mcpz)
+- **browser** (optional): Browser automation via Chrome DevTools Protocol (use `is_available` to check first)
 - **interpret_image**: Built-in image analysis (always available)
 - **search_query**: Built-in web search with Google Search grounding (always available)
 

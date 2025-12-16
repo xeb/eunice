@@ -201,10 +201,11 @@ Browser tools are optional and may not be available. Only use if:
 - You need a screenshot of a web page
 
 **Usage:**
-1. Call `browser_start_browser` first
-2. If `start_browser` fails, **do not use any browser tools** - stick to search_query
-3. Use `browser_open_url` to navigate, `browser_get_page_as_markdown` for content
-4. Always call `browser_stop_browser` when done
+1. Call `browser_is_available` first to check if Chrome is installed
+2. If `is_available` returns false, **do not use any browser tools** - stick to search_query
+3. Call `browser_start_browser` to launch Chrome
+4. Use `browser_open_url` to navigate, `browser_get_page_as_markdown` for content
+5. Always call `browser_stop_browser` when done
 
 ## Strategy
 

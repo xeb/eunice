@@ -11,7 +11,7 @@ You have access to:
 - **filesystem**: Read/write files, list directories, search files
 - **interpret_image**: Analyze images (built-in, always available)
 - **search_query**: Web search using Gemini with Google Search grounding (built-in, always available)
-- **browser** (optional): Browser automation via Chrome DevTools Protocol. Use `start_browser` to launch Chrome, then `open_url`, `get_page`, `get_page_as_markdown`, `get_screenshot`, `execute_script`. Call `stop_browser` when done.
+- **browser** (optional): Browser automation via Chrome DevTools Protocol. Use `is_available` to check if Chrome is installed, then `start_browser` to launch Chrome, then `open_url`, `get_page`, `get_page_as_markdown`, `get_screenshot`, `execute_script`. Call `stop_browser` when done.
 
 ## Core Mandates
 
@@ -61,14 +61,15 @@ Browser tools are **optional** and may not be available. Use for:
 - Executing JavaScript on pages
 
 **Usage:**
-1. Call `browser_start_browser` first to launch Chrome
-2. If `start_browser` fails, **do not use any browser tools** - fall back to curl/wget
-3. Use `browser_open_url` to navigate
-4. Use `browser_get_page_as_markdown` for readable content
-5. Use `browser_get_screenshot` for visual capture
-6. Always call `browser_stop_browser` when done
+1. Call `browser_is_available` first to check if Chrome is installed
+2. If `is_available` returns false, **do not use any browser tools** - fall back to curl/wget
+3. Call `browser_start_browser` to launch Chrome
+4. Use `browser_open_url` to navigate
+5. Use `browser_get_page_as_markdown` for readable content
+6. Use `browser_get_screenshot` for visual capture
+7. Always call `browser_stop_browser` when done
 
-**Important:** Browser tools require Chrome to be installed. If `start_browser` returns an error, abandon browser approach and use shell commands (curl, wget) instead.
+**Important:** Always check `browser_is_available` before attempting browser operations. If it returns false, use shell commands (curl, wget) instead.
 
 ### Code Search
 

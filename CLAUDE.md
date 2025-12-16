@@ -369,6 +369,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.47**: Browser `is_available` tool for pre-checking Chrome availability
 - **0.2.46**: Browser automation MCP server for DMN and Research modes (optional, requires Chrome and mcpz)
 - **0.2.42**: Webapp: tabbed Preview/Code view for HTML and Markdown responses
 - **0.2.41**: Webapp: add console logging for debugging (sessions, queries, LLM calls, tool execution); improve spinner terminal cleanup
