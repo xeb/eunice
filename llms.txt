@@ -11,7 +11,7 @@ Eunice provides a single CLI for multiple AI providers with automatic model dete
 
 ## Configuration
 
-- [dmn_instructions.md](dmn_instructions.md): System instructions for autonomous Default Mode Network (DMN) mode
+- [dmn_instructions.md](dmn_instructions.md): System instructions for autonomous Default Mode Network (DMN) mode (includes browser automation)
 - [MULTIAGENT_DESIGN_1.md](MULTIAGENT_DESIGN_1.md): Multi-agent architecture design where agents invoke other agents as tools
 
 ## Examples

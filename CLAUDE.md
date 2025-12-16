@@ -39,7 +39,8 @@ User Input → Provider Detection → Client → API Request → Response
 
 4. **DMN Mode** (`src/config.rs`)
    - Default Mode Network: Autonomous batch execution
-   - Minimal tool set: shell + filesystem (interpret_image is built-in)
+   - Minimal tool set: shell + filesystem + browser (interpret_image is built-in)
+   - Browser automation (optional, requires Chrome and mcpz)
    - Shell provides access to grep, curl, wget, git, etc.
    - Includes comprehensive system instructions
 
@@ -278,9 +279,10 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 
 ### Implementation (`src/config.rs`)
 
-- `get_research_mcp_config()` - Returns embedded agent configuration
+- `get_research_mcp_config()` - Returns embedded agent configuration (filesystem + browser MCP servers)
 - `has_gemini_api_key()` - Checks for required API key
 - Embedded prompts: `RESEARCH_LEAD_PROMPT`, `RESEARCH_RESEARCHER_PROMPT`, etc.
+- Researcher agent has access to browser tools (optional, for JavaScript-heavy pages)
 
 ### Workflow
 
@@ -367,6 +369,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.46**: Browser automation MCP server for DMN and Research modes (optional, requires Chrome and mcpz)
 - **0.2.42**: Webapp: tabbed Preview/Code view for HTML and Markdown responses
 - **0.2.41**: Webapp: add console logging for debugging (sessions, queries, LLM calls, tool execution); improve spinner terminal cleanup
 - **0.2.40**: Webapp: display version number in status bar footer

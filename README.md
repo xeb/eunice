@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**7,114 lines of code** • **5.6MB binary** - Emphasizing "sophisticated simplicity".
+**7,143 lines of code** • **5.6MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -275,9 +275,11 @@ Enable with `--dmn` (or `--default-mode-network`) for autonomous batch execution
 
 - **shell**: Execute any shell command (grep, curl, wget, git, npm, cargo, etc.)
 - **filesystem**: File operations (read, write, list, search)
+- **browser** (optional): Browser automation via Chrome DevTools Protocol (requires Chrome and mcpz)
 - **interpret_image**: Built-in image analysis (always available)
+- **search_query**: Built-in web search with Google Search grounding (always available)
 
-The shell tool gives access to everything: use `grep`/`rg` for code search, `curl`/`wget` for web requests, and any other CLI tool installed on your system.
+The shell tool gives access to everything: use `grep`/`rg` for code search, `curl`/`wget` for web requests, and any other CLI tool installed on your system. Browser tools are optional and gracefully degrade if Chrome is not available.
 
 ### Autonomous Execution
 
@@ -411,7 +413,7 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 | Agent | Role | Tools |
 |-------|------|-------|
 | `root` | Coordinator - breaks topic into subtopics, delegates work | `invoke_*` only |
-| `researcher` | Searches web, saves notes to `research_notes/` | `search_query`, `filesystem_write_*` |
+| `researcher` | Searches web, saves notes to `research_notes/` | `search_query`, `filesystem_write_*`, `browser_*` (optional) |
 | `report_writer` | Synthesizes research into reports in `reports/` | `filesystem_*` |
 | `evaluator` | Reviews reports, approves or requests one revision | `filesystem_read_*`, `filesystem_list_*` |
 

@@ -37,6 +37,14 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         },
     );
 
+    // Browser automation (optional - only if mcpz is available)
+    if use_mcpz {
+        servers.insert(
+            "browser".to_string(),
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "browser".into()], url: None, timeout: None },
+        );
+    }
+
     McpConfig {
         mcp_servers: servers,
         agents: HashMap::new(),
@@ -50,16 +58,25 @@ pub fn get_dmn_mcp_config() -> McpConfig {
 /// Multi-agent system: root -> researcher, report_writer, evaluator
 pub fn get_research_mcp_config() -> McpConfig {
     let mut servers = HashMap::new();
+    let use_mcpz = has_mcpz();
 
     // Research mode only needs filesystem (search_query is built-in)
     servers.insert(
         "filesystem".to_string(),
-        if has_mcpz() {
+        if use_mcpz {
             McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()], url: None, timeout: None }
         } else {
             McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()], url: None, timeout: None }
         },
     );
+
+    // Browser automation (optional - only if mcpz is available)
+    if use_mcpz {
+        servers.insert(
+            "browser".to_string(),
+            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "browser".into()], url: None, timeout: None },
+        );
+    }
 
     let mut agents = HashMap::new();
 
@@ -75,7 +92,7 @@ pub fn get_research_mcp_config() -> McpConfig {
     agents.insert("researcher".to_string(), AgentConfig {
         prompt: RESEARCH_RESEARCHER_PROMPT.to_string(),
         mcp_servers: vec![],
-        tools: vec!["filesystem_write_*".to_string(), "search_query".to_string()],
+        tools: vec!["filesystem_write_*".to_string(), "search_query".to_string(), "browser_*".to_string()],
         can_invoke: vec![],
     });
 
@@ -175,6 +192,19 @@ pub const RESEARCH_RESEARCHER_PROMPT: &str = r#"You are a research specialist fo
 
 - search_query: Web search using Gemini with Google Search grounding. ALWAYS use model="pro_preview"
 - filesystem_write_file: Save findings to research_notes/{topic}.md
+- browser_* (optional): Browser automation for JavaScript-heavy pages
+
+## Browser Tools (Optional)
+
+Browser tools are optional and may not be available. Only use if:
+- A page requires JavaScript to render content
+- You need a screenshot of a web page
+
+**Usage:**
+1. Call `browser_start_browser` first
+2. If `start_browser` fails, **do not use any browser tools** - stick to search_query
+3. Use `browser_open_url` to navigate, `browser_get_page_as_markdown` for content
+4. Always call `browser_stop_browser` when done
 
 ## Strategy
 
