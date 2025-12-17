@@ -441,8 +441,9 @@ pub async fn run_agent_cancellable(
 
         // Display content if present (always show, even in silent mode)
         if let Some(content) = &choice.message.content {
-            if !content.is_empty() {
-                println!("{}", content);
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                println!("{}", trimmed);
             }
         }
 

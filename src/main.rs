@@ -9,6 +9,7 @@ mod mcp;
 mod models;
 mod orchestrator;
 mod provider;
+mod tui;
 mod webapp;
 
 use crate::client::Client;
@@ -92,6 +93,10 @@ struct Args {
     /// Interactive wizard to create a eunice.toml agent configuration
     #[arg(long, help_heading = "Modes")]
     create_agent: bool,
+
+    /// Full TUI mode with enhanced terminal interface (requires TTY)
+    #[arg(long, help_heading = "Modes")]
+    tui: bool,
 
     // === Output ===
     /// Suppress all output except AI responses
@@ -349,7 +354,7 @@ async fn main() -> Result<()> {
         return Err(anyhow!("--research and --dmn cannot be used together"));
     }
 
-    // --webapp conflicts with --interact, --events, --silent
+    // --webapp conflicts with --interact, --events, --silent, --tui
     if args.webapp && args.interact {
         return Err(anyhow!("--webapp and --interact cannot be used together"));
     }
@@ -359,7 +364,25 @@ async fn main() -> Result<()> {
     if args.webapp && args.silent {
         return Err(anyhow!("--webapp and --silent cannot be used together"));
     }
+    if args.webapp && args.tui {
+        return Err(anyhow!("--webapp and --tui cannot be used together"));
+    }
 
+    // --tui conflicts with --interact, --events, --silent
+    if args.tui && args.interact {
+        return Err(anyhow!("--tui and --interact cannot be used together (--tui is an enhanced interactive mode)"));
+    }
+    if args.tui && args.events {
+        return Err(anyhow!("--tui and --events cannot be used together"));
+    }
+    if args.tui && args.silent {
+        return Err(anyhow!("--tui and --silent cannot be used together"));
+    }
+
+    // --tui requires a TTY
+    if args.tui && !atty::is(atty::Stream::Stdin) {
+        return Err(anyhow!("--tui requires an interactive terminal (TTY)"));
+    }
     // --research requires GEMINI_API_KEY for search_query tool
     if args.research && !has_gemini_api_key() {
         return Err(anyhow!("--research requires GEMINI_API_KEY environment variable for web search"));
@@ -675,6 +698,29 @@ async fn main() -> Result<()> {
             args.verbose,
             args.dmn,
             args.research,
+            args.dmn || args.images,
+            args.dmn || args.search || args.research,
+        ).await;
+    }
+
+    // TUI mode - enhanced terminal interface
+    if args.tui {
+        // Wait for MCP servers to be ready
+        if let Some(ref mut manager) = mcp_manager {
+            manager.await_all_servers().await;
+        }
+
+        return tui::run_tui_mode(
+            &client,
+            &provider_info,
+            prompt.as_deref(),
+            args.tool_output_limit,
+            mcp_manager.as_mut(),
+            orchestrator.as_ref(),
+            agent_name.as_deref(),
+            args.silent,
+            args.verbose,
+            args.dmn,
             args.dmn || args.images,
             args.dmn || args.search || args.research,
         ).await;

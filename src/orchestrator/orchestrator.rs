@@ -314,10 +314,11 @@ impl AgentOrchestrator {
 
             // Capture content
             if let Some(content) = &choice.message.content {
-                if !content.is_empty() {
-                    final_response = content.clone();
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    final_response = trimmed.to_string();
                     if !silent {
-                        println!("{}{}", indent, content);
+                        println!("{}{}", indent, trimmed);
                     }
                 }
             }

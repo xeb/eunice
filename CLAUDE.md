@@ -399,6 +399,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.49**: TUI mode (`--tui`) using r3bl_tui for enhanced terminal interface with command menu, trimmed response output
 - **0.2.48**: Create Agent wizard (`--create-agent`) for interactive eunice.toml generation; simplified display output
 - **0.2.47**: Browser `is_available` tool for pre-checking Chrome availability
 - **0.2.46**: Browser automation MCP server for DMN and Research modes (optional, requires Chrome and mcpz)
