@@ -399,6 +399,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.52**: TUI mode: Escape/Ctrl+C cancellation support to stop generation mid-response
 - **0.2.51**: Add gemini-3-flash-preview as new default model; add gemini-3-flash and gemini-3-pro aliases
 - **0.2.50**: TUI DisplaySink refactor - all output routed through SharedWriter for proper terminal coordination
 - **0.2.49**: TUI mode (`--tui`) using r3bl_tui for enhanced terminal interface with command menu, trimmed response output

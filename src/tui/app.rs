@@ -1,6 +1,6 @@
 //! TUI application using r3bl_tui's readline_async for proper output coordination.
 
-use crate::agent;
+use crate::agent::{self, AgentResult};
 use crate::client::Client;
 use crate::compact;
 use crate::config::DMN_INSTRUCTIONS;
@@ -11,12 +11,15 @@ use crate::orchestrator::AgentOrchestrator;
 use crate::models::ProviderInfo;
 
 use anyhow::{anyhow, Result};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use r3bl_tui::{
     choose, height, DefaultIoDevices, HowToChoose, ReadlineAsyncContext, ReadlineEvent,
     SharedWriter, StyleSheet,
 };
 use std::io::Write;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::watch;
 
 /// ANSI color codes
 const PURPLE: &str = "\x1b[38;5;141m";  // Light purple
@@ -68,7 +71,7 @@ fn print_help(shared_writer: &mut SharedWriter) -> std::io::Result<()> {
     }
     writeln!(
         shared_writer,
-        "\n{DIM}Type / to see command menu, or Ctrl+D to exit{RESET}\n"
+        "\n{DIM}Type / for command menu, Ctrl+D to exit, Esc/Ctrl+C to stop generation{RESET}\n"
     )?;
     Ok(())
 }
@@ -302,6 +305,28 @@ pub async fn run_tui_mode(
     Ok(())
 }
 
+/// Monitor for Escape or Ctrl+C to cancel the running agent
+async fn monitor_cancel_keys(cancel_tx: watch::Sender<bool>) {
+    loop {
+        // Poll for events with a small timeout
+        if event::poll(Duration::from_millis(50)).unwrap_or(false) {
+            if let Ok(Event::Key(key_event)) = event::read() {
+                // Check for Escape key or Ctrl+C
+                if key_event.code == KeyCode::Esc
+                    || (key_event.code == KeyCode::Char('c')
+                        && key_event.modifiers.contains(KeyModifiers::CONTROL))
+                {
+                    let _ = cancel_tx.send(true);
+                    return;
+                }
+            }
+        }
+
+        // Yield to other tasks
+        tokio::task::yield_now().await;
+    }
+}
+
 /// Process a single prompt
 #[allow(clippy::too_many_arguments)]
 async fn process_prompt(
@@ -345,10 +370,19 @@ async fn process_prompt(
         None
     };
 
+    // Create cancellation channel
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+
+    // Spawn cancel key monitor
+    let cancel_handle = tokio::spawn(async move {
+        monitor_cancel_keys(cancel_tx).await;
+    });
+
     // Run the agent with the TuiDisplaySink - all output is coordinated through SharedWriter
     let result = match (orchestrator, agent_name) {
         (Some(orch), Some(name)) if mcp_manager.is_some() => {
             // Multi-agent mode - returns Result<String, Error>
+            // Note: Multi-agent mode doesn't support cancellation yet
             let manager = mcp_manager.as_deref_mut().unwrap();
             orch.run_agent(
                 client,
@@ -363,11 +397,11 @@ async fn process_prompt(
                 None,
             )
             .await
-            .map(|_| ())
+            .map(|_| None)
         }
         _ => {
-            // Single-agent mode - returns Result<AgentResult, Error>
-            agent::run_agent(
+            // Single-agent mode with cancellation support
+            agent::run_agent_cancellable(
                 client,
                 &provider_info.resolved_model,
                 &final_prompt,
@@ -377,19 +411,30 @@ async fn process_prompt(
                 conversation_history,
                 enable_image_tool,
                 enable_search_tool,
+                Some(cancel_rx),
                 compaction_config,
             )
             .await
-            .map(|_| ())
+            .map(|r| if r == AgentResult::Cancelled { Some(true) } else { None })
         }
     };
 
+    // Stop cancel key monitoring
+    cancel_handle.abort();
+
     // Handle result
     let mut sw = ctx.clone_shared_writer();
-    if let Err(e) = result {
-        writeln!(sw, "\n{YELLOW}Error: {}{RESET}\n", e)?;
-    } else {
-        writeln!(sw)?;
+    match result {
+        Ok(Some(true)) => {
+            // Cancelled
+            writeln!(sw, "\n{YELLOW}⚠ Stopped by user{RESET}\n")?;
+        }
+        Err(e) => {
+            writeln!(sw, "\n{YELLOW}Error: {}{RESET}\n", e)?;
+        }
+        _ => {
+            writeln!(sw)?;
+        }
     }
 
     Ok(())
