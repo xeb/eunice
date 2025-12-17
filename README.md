@@ -5,7 +5,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**7,143 lines of code** • **5.6MB binary** - Emphasizing "sophisticated simplicity".
+**6,547 lines of code** • **5.7MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -112,6 +112,7 @@ Options:
       --default-mode-network    Enable DMN mode with auto-loaded MCP tools [aliases: --dmn]
       --research                Enable Research mode with multi-agent orchestration (requires GEMINI_API_KEY)
       --webapp                  Start web server interface (default: 0.0.0.0:8811)
+      --create-agent            Interactive wizard to create a eunice.toml agent configuration
       --agent <NAME>            Run as specific agent (default: root if agents configured)
   -i, --interact                Interactive mode for multi-turn conversations
       --silent                  Suppress all output except AI responses
@@ -382,6 +383,77 @@ See [examples/remote_mcp](examples/remote_mcp) for connecting to a remote MCP se
 ### Example: Research Agent
 
 See [examples/research_agent](examples/research_agent) for a multi-agent research system with orchestrator-workers and evaluator patterns.
+
+## Create Agent Wizard
+
+Use `--create-agent` to interactively create a `eunice.toml` configuration file:
+
+```bash
+eunice --create-agent
+```
+
+### How It Works
+
+The wizard guides you through:
+
+1. **Agent Name**: Short identifier like 'researcher', 'chef', 'coder'
+2. **Agent Purpose**: Description of what the agent should do
+3. **Tool Selection**: Choose from available tools:
+   - Built-in: `interpret_image`, `search_query`
+   - MCP servers (if mcpz installed): `filesystem`, `shell`, `browser`, `sql`
+   - Press Enter for no tools (useful for coordinator agents)
+4. **Add More Agents**: Option to define multiple agents
+5. **Communication Pattern** (multi-agent only): How agents should invoke each other
+
+The wizard then uses AI to generate a complete `eunice.toml` with:
+- MCP server configurations
+- Detailed agent prompts
+- Appropriate tool patterns
+- `can_invoke` relationships based on your communication pattern
+
+### Example Session
+
+```
+=== Create Agent Configuration ===
+
+Step 1: Agent Name
+Agent name: coordinator
+
+Step 2: Agent Purpose
+What should this agent do? Break down tasks and delegate to specialists
+
+Step 3: Tool Selection
+Select tools (comma-separated numbers, 0 for ALL, Enter for none):
+[Enter - no tools, this is a coordinator]
+
+Add another agent? (y/N): y
+
+Step 1: Agent Name
+Agent name: coder
+
+Step 2: Agent Purpose
+What should this agent do? Write and test code
+
+Step 3: Tool Selection
+Select tools: 3,4
+[Selected: shell, filesystem]
+
+Add another agent? (y/N): n
+
+Step 4: Agent Communication
+How should these agents communicate with each other?
+Communication pattern: coordinator delegates to coder
+
+⋯ Generating configuration...
+
+=== Generated Configuration ===
+[mcpServers.shell]
+command = "mcpz"
+...
+
+File name (eunice.toml):
+✓ Configuration saved to eunice.toml
+```
 
 ## Research Mode
 

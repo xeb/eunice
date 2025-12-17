@@ -1,7 +1,7 @@
 use crate::client::Client;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::display;
-use crate::display::{Spinner, ThinkingSpinner};
+use crate::display::ThinkingSpinner;
 use crate::mcp::McpManager;
 use crate::models::{FunctionSpec, Message, Tool};
 use anyhow::{anyhow, Context, Result};
@@ -466,18 +466,11 @@ pub async fn run_agent_cancellable(
 
             // Display tool call
             if !silent {
-                display::print_tool_call(tool_name, arguments);
+                display::print_tool_call(tool_name);
             }
 
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
-
-            // Start spinner for tool execution
-            let spinner = if !silent {
-                Some(Spinner::start(&format!("Running {}", tool_name)))
-            } else {
-                None
-            };
 
             // Execute tool via MCP manager or built-in handlers
             let result = if tool_name == INTERPRET_IMAGE_TOOL_NAME {
@@ -490,11 +483,6 @@ pub async fn run_agent_cancellable(
                 Ok("Error: No MCP manager available".to_string())
             }
             .unwrap_or_else(|e| format!("Error: {}", e));
-
-            // Stop spinner
-            if let Some(spinner) = spinner {
-                spinner.stop().await;
-            }
 
             // Display result
             if !silent {

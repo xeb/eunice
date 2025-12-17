@@ -2,6 +2,7 @@ mod agent;
 mod client;
 mod compact;
 mod config;
+mod create_agent;
 mod display;
 mod interactive;
 mod mcp;
@@ -87,6 +88,10 @@ struct Args {
     /// Start web server interface (default: 0.0.0.0:8811)
     #[arg(long, help_heading = "Modes")]
     webapp: bool,
+
+    /// Interactive wizard to create a eunice.toml agent configuration
+    #[arg(long, help_heading = "Modes")]
+    create_agent: bool,
 
     // === Output ===
     /// Suppress all output except AI responses
@@ -319,6 +324,12 @@ async fn main() -> Result<()> {
     if args.llms_full_txt {
         print!("{}", LLMS_FULL_TXT);
         return Ok(());
+    }
+
+    // Handle --create-agent
+    if args.create_agent {
+        let model = args.model.as_deref().unwrap_or("gemini-3-pro-preview");
+        return create_agent::run_create_agent(model, args.verbose).await;
     }
 
     // Validate conflicting arguments
@@ -697,24 +708,10 @@ async fn main() -> Result<()> {
             if let Some(ref mut manager) = mcp_manager {
                 // Wait for servers to be ready before displaying info
                 if manager.has_pending_servers() {
-                    let mut names = manager.pending_server_names();
+                    let names = manager.pending_server_names();
                     display::debug(&format!("Waiting for MCP server(s) to initialize: {}", names.join(", ")), args.verbose);
-                    let spinner = display::Spinner::start(&format!(
-                        "Starting MCP server{}: {}",
-                        if names.len() > 1 { "s" } else { "" },
-                        names.join(", ")
-                    ));
-                    while !names.is_empty() {
-                        names = manager.await_next_pending_server().await;
-                        if !names.is_empty() {
-                            spinner.set_message(&format!(
-                                "Starting MCP server{}: {}",
-                                if names.len() > 1 { "s" } else { "" },
-                                names.join(", ")
-                            ));
-                        }
-                    }
-                    spinner.stop().await;
+                    println!("Starting MCP servers: {}...", names.join(", "));
+                    manager.await_all_servers().await;
                 }
                 let server_info = manager.get_server_info();
                 display::print_mcp_info(&server_info);

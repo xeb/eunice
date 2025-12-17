@@ -1,131 +1,27 @@
 use crate::models::Provider;
 use crate::provider::get_available_models;
 use colored::*;
-use crossterm::{cursor, execute, terminal};
-use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
-use std::io::{stdout, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 
-/// Spinner handle that can be used to stop the spinner
-pub struct Spinner(ProgressBar);
-
-impl Spinner {
-    /// Start a new spinner with a message
-    pub fn start(message: &str) -> Self {
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::default_spinner()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                .template("{spinner:.cyan} {msg}")
-                .unwrap(),
-        );
-        pb.set_message(message.to_string());
-        pb.enable_steady_tick(Duration::from_millis(80));
-        Self(pb)
-    }
-
-    /// Update the spinner message
-    pub fn set_message(&self, message: &str) {
-        self.0.set_message(message.to_string());
-    }
-
-    /// Stop the spinner
-    pub async fn stop(self) {
-        self.0.finish_and_clear();
-
-        // Force a complete terminal reset
-        let mut stdout = stdout();
-        let _ = execute!(
-            stdout,
-            cursor::MoveToColumn(0),
-            terminal::Clear(terminal::ClearType::CurrentLine),
-            cursor::MoveToColumn(0)
-        );
-        let _ = stdout.flush();
-
-        // Small yield to let any pending terminal operations complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
-}
-
-/// Thinking spinner that shows elapsed time
-pub struct ThinkingSpinner {
-    pb: ProgressBar,
-    running: Arc<AtomicBool>,
-}
+/// Thinking indicator (no animation to avoid terminal conflicts)
+pub struct ThinkingSpinner;
 
 impl ThinkingSpinner {
-    /// Start a new thinking spinner with elapsed time counter
+    /// Start thinking indicator - just prints once
     pub fn start() -> Self {
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::default_spinner()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                .template("{spinner:.yellow} {msg}")
-                .unwrap(),
-        );
-        pb.set_message("Thinking... 0s");
-
-        let running = Arc::new(AtomicBool::new(true));
-        let running_clone = running.clone();
-        let pb_clone = pb.clone();
-
-        // Spawn a task to update the elapsed time every second
-        tokio::spawn(async move {
-            let mut seconds = 0u64;
-            while running_clone.load(Ordering::Relaxed) {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                if running_clone.load(Ordering::Relaxed) {
-                    seconds += 1;
-                    pb_clone.set_message(format!("Thinking... {}s", seconds));
-                }
-            }
-        });
-
-        pb.enable_steady_tick(Duration::from_millis(80));
-        Self { pb, running }
+        println!("  {} Thinking...", "⋯".yellow());
+        Self
     }
 
-    /// Stop the thinking spinner
+    /// Stop thinking indicator - no-op since we already printed newline
     pub fn stop(self) {
-        // Signal the background task to stop first
-        self.running.store(false, Ordering::Relaxed);
-
-        // Disable the steady tick to prevent more updates
-        self.pb.disable_steady_tick();
-
-        // Clear the progress bar (this uses indicatif's internal clearing)
-        self.pb.finish_and_clear();
-
-        // Force a complete terminal reset:
-        // 1. Move to column 0
-        // 2. Clear the entire current line
-        // 3. Ensure cursor is at column 0 for next print
-        let mut stdout = stdout();
-        let _ = execute!(
-            stdout,
-            cursor::MoveToColumn(0),
-            terminal::Clear(terminal::ClearType::CurrentLine),
-            cursor::MoveToColumn(0)
-        );
-        let _ = stdout.flush();
-
-        // Small yield to let any pending terminal operations complete
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Nothing to clean up
     }
 }
 
 /// Print a tool call
-pub fn print_tool_call(tool_name: &str, arguments: &str) {
-    println!(
-        "{} {}({})",
-        "🔧".blue(),
-        tool_name.bright_blue(),
-        arguments.dimmed()
-    );
+pub fn print_tool_call(tool_name: &str) {
+    println!("  {} {}", "→".blue(), tool_name.bright_blue());
 }
 
 /// Print a tool result
@@ -134,12 +30,14 @@ pub fn print_tool_result(result: &str, limit: usize) {
     let output = if limit > 0 && lines.len() > limit {
         let truncated: Vec<&str> = lines.iter().take(limit).cloned().collect();
         let remaining = lines.len() - limit;
-        format!("{}\n{}", truncated.join("\n"), format!("...{} more lines", remaining).dimmed())
+        format!("{}\n    ...{} more lines", truncated.join("\n    "), remaining)
     } else {
-        result.to_string()
+        result.lines().map(|l| format!("    {}", l)).collect::<Vec<_>>().join("\n")
     };
 
-    println!("{} {}", "→".green(), output.green());
+    if !output.trim().is_empty() {
+        println!("{}", output.dimmed());
+    }
 }
 
 /// Print model information
@@ -240,7 +138,7 @@ pub fn print_user_stopped() {
 /// Print verbose debug message
 pub fn debug(message: &str, verbose: bool) {
     if verbose {
-        eprintln!("{}", message.dimmed());
+        eprintln!("  {}", message.dimmed());
     }
 }
 

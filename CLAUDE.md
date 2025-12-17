@@ -300,6 +300,35 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 - `--research --list-agents`: Show embedded agents
 - `--research --config eunice.toml`: Merge MCP servers from config (agents ignored)
 
+## Create Agent Wizard
+
+The `--create-agent` flag launches an interactive wizard for generating eunice.toml configuration files.
+
+### Implementation (`src/create_agent.rs`)
+
+1. `collect_agents()` - Interactive prompts for agent name, purpose, and tool selection
+2. `generate_prompt()` - Few-shot prompt with TOML examples for the model
+3. `get_output_filename()` - Handles file naming and overwrite confirmation
+4. `run_create_agent()` - Main flow with spinner animation during generation
+
+### Flow
+
+1. Agent name (short identifier like 'researcher')
+2. Agent purpose (description of what it does)
+3. Tool selection (numbered list, 0=ALL, Enter=none)
+4. Repeat for additional agents
+5. Communication pattern (if multiple agents)
+6. AI generates eunice.toml with few-shot prompting
+7. User confirms filename and saves
+
+### CLI Usage
+
+```bash
+eunice --create-agent                    # Uses default model (gemini-3-pro-preview)
+eunice --create-agent --model sonnet     # Use specific model
+eunice --create-agent --verbose          # Show prompt sent to model
+```
+
 ## Key Design Decisions
 
 1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
@@ -330,10 +359,11 @@ src/
 │   ├── server.rs        - Axum web server setup
 │   └── handlers.rs      - HTTP/SSE request handlers
 ├── provider.rs          - Provider detection
-├── display.rs           - Terminal UI with indicatif spinners
+├── display.rs           - Terminal UI output
 ├── interactive.rs       - Interactive REPL mode
 ├── agent.rs             - Single-agent loop with tool execution
 ├── config.rs            - Configuration loading
+├── create_agent.rs      - Interactive wizard for eunice.toml generation
 └── lib.rs               - Library exports
 
 webapp/
@@ -369,6 +399,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.48**: Create Agent wizard (`--create-agent`) for interactive eunice.toml generation; simplified display output
 - **0.2.47**: Browser `is_available` tool for pre-checking Chrome availability
 - **0.2.46**: Browser automation MCP server for DMN and Research modes (optional, requires Chrome and mcpz)
 - **0.2.42**: Webapp: tabbed Preview/Code view for HTML and Markdown responses

@@ -406,28 +406,12 @@ pub async fn interactive_mode(
     // Wait for MCP servers to be ready before showing prompt
     if let Some(ref mut manager) = mcp_manager {
         if manager.has_pending_servers() {
-            let mut names = manager.pending_server_names();
+            let names = manager.pending_server_names();
             display::debug(&format!("Waiting for MCP server(s) to initialize: {}", names.join(", ")), verbose);
             if !silent {
-                let spinner = display::Spinner::start(&format!(
-                    "Starting MCP server{}: {}",
-                    if names.len() > 1 { "s" } else { "" },
-                    names.join(", ")
-                ));
-                while !names.is_empty() {
-                    names = manager.await_next_pending_server().await;
-                    if !names.is_empty() {
-                        spinner.set_message(&format!(
-                            "Starting MCP server{}: {}",
-                            if names.len() > 1 { "s" } else { "" },
-                            names.join(", ")
-                        ));
-                    }
-                }
-                spinner.stop().await;
-            } else {
-                manager.await_all_servers().await;
+                println!("Starting MCP servers: {}...", names.join(", "));
             }
+            manager.await_all_servers().await;
         } else {
             manager.await_all_servers().await;
         }

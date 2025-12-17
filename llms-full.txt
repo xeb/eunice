@@ -103,6 +103,7 @@ Options:
       --silent                  Suppress all output except AI responses
       --verbose                 Enable verbose debug output
       --events                  Output JSON-RPC events to stdout
+      --create-agent            Interactive wizard to create eunice.toml
   -h, --help                    Print help
   -V, --version                 Print version
 ```
@@ -309,6 +310,26 @@ eunice --list-agents
 ### Example: Restaurant Simulation
 
 See [examples/real_multi_agent](examples/real_multi_agent) for a complete example simulating a restaurant with counter, chef, cook, and supplier agents.
+
+## Create Agent Wizard
+
+Generate `eunice.toml` configurations interactively with AI assistance:
+
+```bash
+eunice --create-agent
+```
+
+The wizard guides you through:
+
+1. **Agent Name**: Short identifier (e.g., `researcher`, `coder`)
+2. **Agent Purpose**: What the agent should do
+3. **Tool Selection**: Choose from available MCP tools (requires mcpz)
+   - Enter numbers separated by commas (e.g., `1,3,5`)
+   - Enter `0` to select ALL tools
+   - Press Enter with no selection for no tools
+4. **Agent Communication** (multi-agent only): How agents should interact
+
+The wizard uses AI to generate a complete TOML configuration based on your inputs.
 
 ## Project Structure
 

@@ -1,7 +1,7 @@
 use crate::agent::{self, SEARCH_QUERY_TOOL_NAME, INTERPRET_IMAGE_TOOL_NAME};
 use crate::client::Client;
 use crate::display;
-use crate::display::{Spinner, ThinkingSpinner};
+use crate::display::ThinkingSpinner;
 use crate::mcp::McpManager;
 use crate::models::{AgentConfig, McpConfig, Message, Tool, FunctionSpec};
 use anyhow::{anyhow, Result};
@@ -351,52 +351,16 @@ impl AgentOrchestrator {
                     ).await
                 } else if tool_name == SEARCH_QUERY_TOOL_NAME {
                     // Built-in search_query tool
-                    let spinner = if !silent {
-                        Some(Spinner::start(&format!("Running {}", tool_name)))
-                    } else {
-                        None
-                    };
-
-                    let result = agent::execute_search_query(args).await
-                        .unwrap_or_else(|e| format!("Error: {}", e));
-
-                    if let Some(spinner) = spinner {
-                        spinner.stop().await;
-                    }
-
-                    result
+                    agent::execute_search_query(args).await
+                        .unwrap_or_else(|e| format!("Error: {}", e))
                 } else if tool_name == INTERPRET_IMAGE_TOOL_NAME {
                     // Built-in interpret_image tool
-                    let spinner = if !silent {
-                        Some(Spinner::start(&format!("Running {}", tool_name)))
-                    } else {
-                        None
-                    };
-
-                    let result = agent::execute_interpret_image(client, model, args).await
-                        .unwrap_or_else(|e| format!("Error: {}", e));
-
-                    if let Some(spinner) = spinner {
-                        spinner.stop().await;
-                    }
-
-                    result
+                    agent::execute_interpret_image(client, model, args).await
+                        .unwrap_or_else(|e| format!("Error: {}", e))
                 } else {
                     // Regular MCP tool
-                    let spinner = if !silent {
-                        Some(Spinner::start(&format!("Running {}", tool_name)))
-                    } else {
-                        None
-                    };
-
-                    let result = mcp_manager.execute_tool(tool_name, args).await
-                        .unwrap_or_else(|e| format!("Error: {}", e));
-
-                    if let Some(spinner) = spinner {
-                        spinner.stop().await;
-                    }
-
-                    result
+                    mcp_manager.execute_tool(tool_name, args).await
+                        .unwrap_or_else(|e| format!("Error: {}", e))
                 };
 
                 if !silent && !self.is_invoke_tool(tool_name) {

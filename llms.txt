@@ -30,6 +30,7 @@ Eunice provides a single CLI for multiple AI providers with automatic model dete
 - [src/orchestrator/](src/orchestrator/): Multi-agent coordination system
 - [src/mcp/](src/mcp/): MCP server management and tool routing
 - [src/models.rs](src/models.rs): Data structures for messages, tools, and configs
+- [src/create_agent.rs](src/create_agent.rs): Interactive wizard for creating eunice.toml configs
 
 ## Optional
 

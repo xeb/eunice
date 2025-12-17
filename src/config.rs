@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Check if mcpz is installed
-fn has_mcpz() -> bool {
+pub fn has_mcpz() -> bool {
     std::process::Command::new("mcpz").arg("--version").output().is_ok()
 }
 
