@@ -44,6 +44,10 @@ Eunice is designed with these principles:
 
 6. **Functional over Cautious**: Prioritize getting things done over excessive safety warnings. Users running eunice have opted into autonomous execution. Don't be overly protective of the system it runs on.
 
+### December 2025 Disclaimer
+
+In December 2025, I decided to focus on Web-based and TUI features so threw simplicity out the window in favor of efficacy. The "~7,000 lines" above is now a nostalgic lie. We have a webapp now. And a TUI with SharedWriters. Sorry not sorry.
+
 ## Installation
 
 ### From crates.io
