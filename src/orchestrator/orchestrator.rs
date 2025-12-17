@@ -1,7 +1,6 @@
 use crate::agent::{self, SEARCH_QUERY_TOOL_NAME, INTERPRET_IMAGE_TOOL_NAME};
 use crate::client::Client;
-use crate::display;
-use crate::display::ThinkingSpinner;
+use crate::display_sink::{DisplayEvent, DisplaySink};
 use crate::mcp::McpManager;
 use crate::models::{AgentConfig, McpConfig, Message, Tool, FunctionSpec};
 use anyhow::{anyhow, Result};
@@ -9,6 +8,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::future::Future;
 
 /// Manages multi-agent orchestration
@@ -115,8 +115,7 @@ impl AgentOrchestrator {
         context: Option<&'a str>,
         mcp_manager: &'a mut McpManager,
         tool_output_limit: usize,
-        silent: bool,
-        verbose: bool,
+        display: Arc<dyn DisplaySink>,
         depth: usize,
         caller_agent: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
@@ -138,9 +137,17 @@ impl AgentOrchestrator {
             };
 
             // Display agent invocation (only for subagent calls, not root)
-            if !silent && depth > 0 {
+            if depth > 0 {
                 if let Some(caller) = caller_agent {
-                    display::print_agent_invoke(caller, agent_name, task, depth);
+                    let indent = "  ".repeat(depth);
+                    let task_preview = if task.len() > 60 {
+                        format!("{}...", &task[..57])
+                    } else {
+                        task.to_string()
+                    };
+                    display.write_event(DisplayEvent::Debug {
+                        message: format!("{}{}→{} {}", indent, caller, agent_name, task_preview),
+                    });
                 }
             }
 
@@ -158,15 +165,17 @@ impl AgentOrchestrator {
                 agent_name,
                 mcp_manager,
                 tool_output_limit,
-                silent,
-                verbose,
+                display.clone(),
                 &mut conversation_history,
                 depth,
             ).await?;
 
             // Show completion for subagent calls
-            if !silent && depth > 0 {
-                display::print_agent_complete(agent_name, depth);
+            if depth > 0 {
+                let indent = "  ".repeat(depth);
+                display.write_event(DisplayEvent::Debug {
+                    message: format!("{}←{} done", indent, agent_name),
+                });
             }
 
             Ok(result)
@@ -247,8 +256,7 @@ impl AgentOrchestrator {
         agent_name: &str,
         mcp_manager: &mut McpManager,
         tool_output_limit: usize,
-        silent: bool,
-        verbose: bool,
+        display: Arc<dyn DisplaySink>,
         conversation_history: &mut Vec<Message>,
         depth: usize,
     ) -> Result<String> {
@@ -279,14 +287,12 @@ impl AgentOrchestrator {
         let mut final_response = String::new();
 
         loop {
-            display::debug(&format!("{}Agent '{}' calling LLM...", indent, agent_name), verbose);
+            display.write_event(DisplayEvent::Debug {
+                message: format!("{}Agent '{}' calling LLM...", indent, agent_name),
+            });
 
-            // Start thinking spinner
-            let thinking_spinner = if !silent {
-                Some(ThinkingSpinner::start())
-            } else {
-                None
-            };
+            // Start thinking indicator
+            display.write_event(DisplayEvent::ThinkingStart);
 
             // Call the LLM
             let response = client
@@ -298,10 +304,8 @@ impl AgentOrchestrator {
                 )
                 .await;
 
-            // Stop thinking spinner
-            if let Some(spinner) = thinking_spinner {
-                spinner.stop();
-            }
+            // Stop thinking indicator
+            display.write_event(DisplayEvent::ThinkingStop);
 
             let response = response?;
             let choice = &response.choices[0];
@@ -312,14 +316,20 @@ impl AgentOrchestrator {
                 tool_calls: choice.message.tool_calls.clone(),
             });
 
-            // Capture content
+            // Capture and display content
             if let Some(content) = &choice.message.content {
                 let trimmed = content.trim();
                 if !trimmed.is_empty() {
                     final_response = trimmed.to_string();
-                    if !silent {
-                        println!("{}{}", indent, trimmed);
-                    }
+                    // For nested agents, prefix with indent
+                    let display_content = if depth > 0 {
+                        format!("{}{}", indent, trimmed)
+                    } else {
+                        trimmed.to_string()
+                    };
+                    display.write_event(DisplayEvent::Response {
+                        content: display_content,
+                    });
                 }
             }
 
@@ -337,9 +347,11 @@ impl AgentOrchestrator {
                 let tool_name = &tool_call.function.name;
                 let arguments = &tool_call.function.arguments;
 
-                // Only show tool icon for MCP tools, not invoke calls
-                if !silent && !self.is_invoke_tool(tool_name) {
-                    eprintln!("{}🔧 {}", indent, tool_name);
+                // Only show tool call for MCP tools, not invoke calls
+                if !self.is_invoke_tool(tool_name) {
+                    display.write_event(DisplayEvent::ToolCall {
+                        name: tool_name.clone(),
+                    });
                 }
 
                 let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
@@ -348,7 +360,7 @@ impl AgentOrchestrator {
                     // Handle agent invocation
                     self.handle_invoke(
                         client, model, tool_name, &args, mcp_manager,
-                        tool_output_limit, silent, verbose, depth, agent_name,
+                        tool_output_limit, display.clone(), depth, agent_name,
                     ).await
                 } else if tool_name == SEARCH_QUERY_TOOL_NAME {
                     // Built-in search_query tool
@@ -364,8 +376,11 @@ impl AgentOrchestrator {
                         .unwrap_or_else(|e| format!("Error: {}", e))
                 };
 
-                if !silent && !self.is_invoke_tool(tool_name) {
-                    display::print_tool_result(&result, tool_output_limit);
+                if !self.is_invoke_tool(tool_name) {
+                    display.write_event(DisplayEvent::ToolResult {
+                        result: result.clone(),
+                        limit: tool_output_limit,
+                    });
                 }
 
                 conversation_history.push(Message::Tool {
@@ -387,8 +402,7 @@ impl AgentOrchestrator {
         args: &serde_json::Value,
         mcp_manager: &mut McpManager,
         tool_output_limit: usize,
-        silent: bool,
-        verbose: bool,
+        display: Arc<dyn DisplaySink>,
         depth: usize,
         caller_agent: &str,
     ) -> String {
@@ -405,7 +419,7 @@ impl AgentOrchestrator {
 
         match self.run_agent(
             client, model, target_agent, task, context,
-            mcp_manager, tool_output_limit, silent, verbose, depth + 1, Some(caller_agent),
+            mcp_manager, tool_output_limit, display, depth + 1, Some(caller_agent),
         ).await {
             Ok(result) => result,
             Err(e) => format!("Agent '{}' failed: {}", target_agent, e),

@@ -4,6 +4,7 @@ use crate::agent;
 use crate::client::Client;
 use crate::compact;
 use crate::config::DMN_INSTRUCTIONS;
+use crate::display_sink::TuiDisplaySink;
 use crate::mcp::McpManager;
 use crate::models::Message;
 use crate::orchestrator::AgentOrchestrator;
@@ -15,6 +16,7 @@ use r3bl_tui::{
     SharedWriter, StyleSheet,
 };
 use std::io::Write;
+use std::sync::Arc;
 
 /// ANSI color codes
 const PURPLE: &str = "\x1b[38;5;141m";  // Light purple
@@ -110,7 +112,7 @@ pub async fn run_tui_mode(
     mut mcp_manager: Option<&mut McpManager>,
     orchestrator: Option<&AgentOrchestrator>,
     agent_name: Option<&str>,
-    silent: bool,
+    silent: bool,  // Used in fallback to interactive mode; TUI uses SharedWriter
     verbose: bool,
     dmn: bool,
     enable_image_tool: bool,
@@ -193,7 +195,6 @@ pub async fn run_tui_mode(
             &mut mcp_manager,
             orchestrator,
             agent_name,
-            silent,
             verbose,
             dmn,
             enable_image_tool,
@@ -278,7 +279,6 @@ pub async fn run_tui_mode(
                     &mut mcp_manager,
                     orchestrator,
                     agent_name,
-                    silent,
                     verbose,
                     dmn,
                     enable_image_tool,
@@ -313,7 +313,6 @@ async fn process_prompt(
     mcp_manager: &mut Option<&mut McpManager>,
     orchestrator: Option<&AgentOrchestrator>,
     agent_name: Option<&str>,
-    silent: bool,
     verbose: bool,
     dmn: bool,
     enable_image_tool: bool,
@@ -322,6 +321,12 @@ async fn process_prompt(
 ) -> Result<()> {
     let mut shared_writer = ctx.clone_shared_writer();
     writeln!(shared_writer)?;
+
+    // Create TuiDisplaySink using the SharedWriter for coordinated output
+    // This is the key change - all display output goes through the SharedWriter
+    let display: Arc<dyn crate::display_sink::DisplaySink> = Arc::new(
+        TuiDisplaySink::new(ctx.clone_shared_writer(), verbose)
+    );
 
     // Prepare the final prompt
     let final_prompt = if dmn {
@@ -340,7 +345,7 @@ async fn process_prompt(
         None
     };
 
-    // Run the agent (use silent param as passed - let agent handle its own display)
+    // Run the agent with the TuiDisplaySink - all output is coordinated through SharedWriter
     let result = match (orchestrator, agent_name) {
         (Some(orch), Some(name)) if mcp_manager.is_some() => {
             // Multi-agent mode - returns Result<String, Error>
@@ -353,8 +358,7 @@ async fn process_prompt(
                 None,
                 manager,
                 tool_output_limit,
-                silent,
-                verbose,
+                display,
                 0,
                 None,
             )
@@ -369,8 +373,7 @@ async fn process_prompt(
                 &final_prompt,
                 tool_output_limit,
                 mcp_manager.as_deref_mut(),
-                silent,
-                verbose,
+                display,
                 conversation_history,
                 enable_image_tool,
                 enable_search_tool,

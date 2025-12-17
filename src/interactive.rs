@@ -3,6 +3,7 @@ use crate::client::Client;
 use crate::compact::CompactionConfig;
 use crate::config::DMN_INSTRUCTIONS;
 use crate::display;
+use crate::display_sink::create_display_sink;
 use crate::mcp::McpManager;
 use crate::models::Message;
 use crate::orchestrator::AgentOrchestrator;
@@ -578,6 +579,9 @@ async fn run_prompt(
     conversation_history: &mut Vec<Message>,
     cancel_rx: Option<watch::Receiver<bool>>,
 ) -> Result<bool> {
+    // Create display sink for output
+    let display = create_display_sink(silent, verbose);
+
     // Use orchestrator if available (multi-agent mode)
     let use_multi_agent = orchestrator.is_some() && agent_name.is_some() && mcp_manager.is_some();
 
@@ -593,8 +597,7 @@ async fn run_prompt(
             None,
             manager,
             tool_output_limit,
-            silent,
-            verbose,
+            display,
             0,
             None, // No caller for root agent
         )
@@ -617,8 +620,7 @@ async fn run_prompt(
             &final_prompt,
             tool_output_limit,
             mcp_manager.as_deref_mut(),
-            silent,
-            verbose,
+            display,
             conversation_history,
             enable_image_tool,
             enable_search_tool,

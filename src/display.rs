@@ -3,9 +3,15 @@ use crate::provider::get_available_models;
 use colored::*;
 use std::env;
 
+// Note: ThinkingSpinner, print_tool_call, and print_tool_result are now handled
+// by DisplaySink trait in display_sink.rs. The functions below are kept for
+// non-TUI modes that haven't been migrated yet.
+
 /// Thinking indicator (no animation to avoid terminal conflicts)
+#[allow(dead_code)]
 pub struct ThinkingSpinner;
 
+#[allow(dead_code)]
 impl ThinkingSpinner {
     /// Start thinking indicator - just prints once
     pub fn start() -> Self {
@@ -20,11 +26,13 @@ impl ThinkingSpinner {
 }
 
 /// Print a tool call
+#[allow(dead_code)]
 pub fn print_tool_call(tool_name: &str) {
     println!("  {} {}", "→".blue(), tool_name.bright_blue());
 }
 
 /// Print a tool result
+#[allow(dead_code)]
 pub fn print_tool_result(result: &str, limit: usize) {
     let lines: Vec<&str> = result.lines().collect();
     let output = if limit > 0 && lines.len() > limit {
@@ -86,6 +94,7 @@ pub fn print_agent_info(agent_name: &str, tools_count: usize, subagents: &[Strin
 }
 
 /// Print agent invocation (when one agent calls another)
+#[allow(dead_code)]
 pub fn print_agent_invoke(from_agent: &str, to_agent: &str, task: &str, depth: usize) {
     let indent = "  ".repeat(depth);
     let task_preview = if task.len() > 60 {
@@ -104,6 +113,7 @@ pub fn print_agent_invoke(from_agent: &str, to_agent: &str, task: &str, depth: u
 }
 
 /// Print agent completion
+#[allow(dead_code)]
 pub fn print_agent_complete(agent_name: &str, depth: usize) {
     let indent = "  ".repeat(depth);
     println!(

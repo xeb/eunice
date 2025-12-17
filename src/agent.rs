@@ -1,11 +1,11 @@
 use crate::client::Client;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
-use crate::display;
-use crate::display::ThinkingSpinner;
+use crate::display_sink::{DisplayEvent, DisplaySink};
 use crate::mcp::McpManager;
 use crate::models::{FunctionSpec, Message, Tool};
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use std::sync::Arc;
 use tokio::sync::watch;
 
 // --- Built-in interpret_image tool ---
@@ -234,8 +234,7 @@ pub async fn run_agent(
     prompt: &str,
     tool_output_limit: usize,
     mcp_manager: Option<&mut McpManager>,
-    silent: bool,
-    verbose: bool,
+    display: Arc<dyn DisplaySink>,
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
     enable_search_tool: bool,
@@ -247,8 +246,7 @@ pub async fn run_agent(
         prompt,
         tool_output_limit,
         mcp_manager,
-        silent,
-        verbose,
+        display,
         conversation_history,
         enable_image_tool,
         enable_search_tool,
@@ -265,14 +263,14 @@ pub async fn run_agent_cancellable(
     prompt: &str,
     tool_output_limit: usize,
     mut mcp_manager: Option<&mut McpManager>,
-    silent: bool,
-    verbose: bool,
+    display: Arc<dyn DisplaySink>,
     conversation_history: &mut Vec<Message>,
     enable_image_tool: bool,
     enable_search_tool: bool,
     cancel_rx: Option<watch::Receiver<bool>>,
     compaction_config: Option<CompactionConfig>,
 ) -> Result<AgentResult> {
+    let _verbose = display.is_verbose(); // Used by display sink internally
     // Build the prompt, including any failed server info
     let final_prompt = if let Some(ref manager) = mcp_manager {
         let failed = manager.get_failed_servers();
@@ -298,7 +296,9 @@ pub async fn run_agent_cancellable(
         content: final_prompt.clone(),
     });
 
-    display::debug(&format!("Sending prompt: {}", final_prompt), verbose);
+    display.write_event(DisplayEvent::Debug {
+        message: format!("Sending prompt: {}", final_prompt),
+    });
 
     // Track if we've already tried compression this loop iteration
     let mut compaction_attempted = false;
@@ -325,14 +325,12 @@ pub async fn run_agent_cancellable(
 
         let tools_option = if tools.is_empty() { None } else { Some(tools.as_slice()) };
 
-        display::debug("Calling LLM...", verbose);
+        display.write_event(DisplayEvent::Debug {
+            message: "Calling LLM...".to_string(),
+        });
 
-        // Start thinking spinner
-        let thinking_spinner = if !silent {
-            Some(ThinkingSpinner::start())
-        } else {
-            None
-        };
+        // Start thinking indicator
+        display.write_event(DisplayEvent::ThinkingStart);
 
         // Call the LLM with optional cancellation support
         let response = {
@@ -346,26 +344,17 @@ pub async fn run_agent_cancellable(
             if let Some(ref mut rx) = cancel_rx.clone() {
                 tokio::select! {
                     result = api_call => {
-                        // Stop thinking spinner
-                        if let Some(spinner) = thinking_spinner {
-                            spinner.stop();
-                        }
+                        display.write_event(DisplayEvent::ThinkingStop);
                         result
                     }
                     _ = rx.changed() => {
-                        // Stop thinking spinner and return cancelled
-                        if let Some(spinner) = thinking_spinner {
-                            spinner.stop();
-                        }
+                        display.write_event(DisplayEvent::ThinkingStop);
                         return Ok(AgentResult::Cancelled);
                     }
                 }
             } else {
                 let result = api_call.await;
-                // Stop thinking spinner
-                if let Some(spinner) = thinking_spinner {
-                    spinner.stop();
-                }
+                display.write_event(DisplayEvent::ThinkingStop);
                 result
             }
         };
@@ -386,27 +375,25 @@ pub async fn run_agent_cancellable(
                 {
                     let config = compaction_config.as_ref().unwrap();
                     if config.enabled {
-                        if !silent {
-                            eprintln!(
-                                "⚠️  Context exhausted. Compacting conversation history..."
-                            );
-                        }
+                        display.write_event(DisplayEvent::Debug {
+                            message: "⚠️  Context exhausted. Compacting conversation history...".to_string(),
+                        });
 
                         // Attempt compaction
                         match compact_context(client, model, conversation_history, config).await {
                             Ok(compacted) => {
-                                if !silent {
-                                    let method = if compacted.used_full_summarization {
-                                        "full summarization"
-                                    } else {
-                                        "lightweight compaction"
-                                    };
-                                    eprintln!(
+                                let method = if compacted.used_full_summarization {
+                                    "full summarization"
+                                } else {
+                                    "lightweight compaction"
+                                };
+                                display.write_event(DisplayEvent::Debug {
+                                    message: format!(
                                         "✓ Compacted to {:.0}% of original size using {}",
                                         compacted.compaction_ratio * 100.0,
                                         method
-                                    );
-                                }
+                                    ),
+                                });
 
                                 // Replace conversation history with compacted version
                                 conversation_history.clear();
@@ -416,9 +403,9 @@ pub async fn run_agent_cancellable(
                                 continue; // Retry with compacted context
                             }
                             Err(compact_err) => {
-                                if !silent {
-                                    eprintln!("✗ Compaction failed: {}", compact_err);
-                                }
+                                display.write_event(DisplayEvent::Error {
+                                    message: format!("Compaction failed: {}", compact_err),
+                                });
                                 return Err(e); // Return original error
                             }
                         }
@@ -439,26 +426,31 @@ pub async fn run_agent_cancellable(
         };
         conversation_history.push(assistant_message);
 
-        // Display content if present (always show, even in silent mode)
+        // Display content if present (always show)
         if let Some(content) = &choice.message.content {
-            let trimmed = content.trim();
-            if !trimmed.is_empty() {
-                println!("{}", trimmed);
-            }
+            display.write_event(DisplayEvent::Response {
+                content: content.clone(),
+            });
         }
 
         // Check for tool calls
         let Some(tool_calls) = &choice.message.tool_calls else {
-            display::debug("No tool calls, agent loop complete", verbose);
+            display.write_event(DisplayEvent::Debug {
+                message: "No tool calls, agent loop complete".to_string(),
+            });
             break;
         };
 
         if tool_calls.is_empty() {
-            display::debug("Empty tool calls, agent loop complete", verbose);
+            display.write_event(DisplayEvent::Debug {
+                message: "Empty tool calls, agent loop complete".to_string(),
+            });
             break;
         }
 
-        display::debug(&format!("Processing {} tool call(s)", tool_calls.len()), verbose);
+        display.write_event(DisplayEvent::Debug {
+            message: format!("Processing {} tool call(s)", tool_calls.len()),
+        });
 
         // Execute each tool call
         for tool_call in tool_calls {
@@ -466,9 +458,9 @@ pub async fn run_agent_cancellable(
             let arguments = &tool_call.function.arguments;
 
             // Display tool call
-            if !silent {
-                display::print_tool_call(tool_name);
-            }
+            display.write_event(DisplayEvent::ToolCall {
+                name: tool_name.clone(),
+            });
 
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
@@ -486,9 +478,10 @@ pub async fn run_agent_cancellable(
             .unwrap_or_else(|e| format!("Error: {}", e));
 
             // Display result
-            if !silent {
-                display::print_tool_result(&result, tool_output_limit);
-            }
+            display.write_event(DisplayEvent::ToolResult {
+                result: result.clone(),
+                limit: tool_output_limit,
+            });
 
             // Add tool result to history
             conversation_history.push(Message::Tool {

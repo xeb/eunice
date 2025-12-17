@@ -4,6 +4,7 @@ mod compact;
 mod config;
 mod create_agent;
 mod display;
+mod display_sink;
 mod interactive;
 mod mcp;
 mod models;
@@ -14,6 +15,7 @@ mod webapp;
 
 use crate::client::Client;
 use crate::config::{get_dmn_mcp_config, get_research_mcp_config, has_gemini_api_key, load_mcp_config, DMN_INSTRUCTIONS, LLMS_TXT, LLMS_FULL_TXT};
+use crate::display_sink::create_display_sink;
 use crate::mcp::McpManager;
 use crate::models::{McpConfig, Message};
 use crate::orchestrator::AgentOrchestrator;
@@ -784,6 +786,9 @@ async fn main() -> Result<()> {
             }
         }
 
+        // Create display sink for output
+        let display = create_display_sink(args.silent, args.verbose);
+
         // Run in multi-agent mode or single-agent mode
         if let (Some(ref orch), Some(ref name), Some(ref mut manager)) = (&orchestrator, &agent_name, &mut mcp_manager) {
             // Multi-agent mode
@@ -795,8 +800,7 @@ async fn main() -> Result<()> {
                 None,
                 manager,
                 args.tool_output_limit,
-                args.silent,
-                args.verbose,
+                display,
                 0,
                 None, // No caller for root agent
             ).await?;
@@ -821,14 +825,16 @@ async fn main() -> Result<()> {
                 None
             };
 
+            // Create display sink for single-agent mode
+            let display = create_display_sink(args.silent, args.verbose);
+
             agent::run_agent(
                 &client,
                 &provider_info.resolved_model,
                 &final_prompt,
                 args.tool_output_limit,
                 mcp_manager.as_mut(),
-                args.silent,
-                args.verbose,
+                display,
                 &mut conversation_history,
                 args.dmn || args.images,
                 args.dmn || args.search || args.research,
