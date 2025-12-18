@@ -16,6 +16,7 @@ pub struct HttpMcpServer {
     session_id: Option<String>,
     pub tools: Vec<Tool>,
     request_id: AtomicI64,
+    timeout_secs: u64,
     verbose: bool,
 }
 
@@ -64,6 +65,7 @@ impl HttpMcpServer {
             session_id: None,
             tools: Vec::new(),
             request_id: AtomicI64::new(1),
+            timeout_secs: timeout,
             verbose,
         };
 
@@ -247,9 +249,9 @@ impl HttpMcpServer {
         };
 
         let response = self
-            .send_request(&request)
+            .send_request_detailed(&request)
             .await
-            .with_context(|| format!("HTTP request to '{}' failed for tool '{}'", self.url, tool_name))?;
+            .map_err(|e| anyhow!("HTTP MCP tool '{}' at '{}' failed: {}", tool_name, self.url, e))?;
 
         if let Some(error) = response.error {
             return Err(anyhow!(
@@ -278,7 +280,155 @@ impl HttpMcpServer {
         }
     }
 
-    /// Send a JSON-RPC request and get the response
+    /// Send a JSON-RPC request and get the response with detailed error messages
+    /// This method provides specific error details for tool calls:
+    /// - Timeout vs connection refused vs HTTP status errors
+    /// - Response body for non-2xx responses
+    async fn send_request_detailed(&mut self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
+        if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': POST {} method={}",
+                self.name, self.url, request.method
+            );
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': request body: {}",
+                self.name,
+                serde_json::to_string(request).unwrap_or_else(|_| "<serialize error>".to_string())
+            );
+        }
+
+        let mut req_builder = self
+            .client
+            .post(&self.url)
+            .header("Content-Type", "application/json")
+            .header("Accept", MCP_ACCEPT_HEADER);
+
+        // Add session ID if we have one
+        if let Some(ref session_id) = self.session_id {
+            req_builder = req_builder.header("mcp-session-id", session_id);
+        }
+
+        // Send request with detailed error handling
+        let response = match req_builder.json(request).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                // Provide specific error details
+                if e.is_timeout() {
+                    return Err(anyhow!("Request timed out after {}s", self.timeout_secs));
+                } else if e.is_connect() {
+                    return Err(anyhow!("Connection refused - server may be down or unreachable"));
+                } else if e.is_request() {
+                    return Err(anyhow!("Request error: {}", e));
+                } else {
+                    return Err(anyhow!("Network error: {}", e));
+                }
+            }
+        };
+
+        // Check for HTTP errors with detailed status and body
+        let status = response.status();
+        if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': response status: {}",
+                self.name, status
+            );
+        }
+
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_default();
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': error response body: {}",
+                    self.name,
+                    if error_body.is_empty() { "<empty>" } else { &error_body }
+                );
+            }
+
+            // Provide detailed HTTP error with status code and body
+            let status_text = status.canonical_reason().unwrap_or("Unknown");
+            if error_body.is_empty() {
+                return Err(anyhow!("HTTP {} {} - no response body", status.as_u16(), status_text));
+            } else {
+                // Truncate very long error bodies
+                let truncated_body = if error_body.len() > 500 {
+                    format!("{}... (truncated)", &error_body[..500])
+                } else {
+                    error_body
+                };
+                return Err(anyhow!("HTTP {} {} - response: {}", status.as_u16(), status_text, truncated_body));
+            }
+        }
+
+        // Extract session ID from response headers if present
+        if let Some(session_id) = response.headers().get("mcp-session-id") {
+            if let Ok(id) = session_id.to_str() {
+                self.session_id = Some(id.to_string());
+                if self.verbose {
+                    eprintln!(
+                        "  [verbose] HTTP MCP '{}': received session ID: {}",
+                        self.name, id
+                    );
+                }
+            }
+        }
+
+        // Check Content-Type to determine response format
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
+        if self.verbose {
+            eprintln!(
+                "  [verbose] HTTP MCP '{}': Content-Type: '{}'",
+                self.name,
+                if content_type.is_empty() { "<not set>" } else { content_type }
+            );
+        }
+
+        let json_response: JsonRpcResponse = if content_type.contains("text/event-stream") {
+            // Parse SSE format
+            let body = response
+                .text()
+                .await
+                .context("Failed to read SSE response body")?;
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': SSE response body:\n{}",
+                    self.name, body
+                );
+            }
+            parse_sse_response(&body)?
+        } else {
+            // Read body as text first so we can log it
+            let body = response
+                .text()
+                .await
+                .context("Failed to read response body")?;
+            if self.verbose {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': JSON response body: {}",
+                    self.name, body
+                );
+            }
+            serde_json::from_str(&body)
+                .with_context(|| format!("Failed to parse JSON-RPC response: {}", body))?
+        };
+
+        if self.verbose {
+            if let Some(ref error) = json_response.error {
+                eprintln!(
+                    "  [verbose] HTTP MCP '{}': JSON-RPC error: {} (code: {})",
+                    self.name, error.message, error.code
+                );
+            }
+        }
+
+        Ok(json_response)
+    }
+
+    /// Send a JSON-RPC request and get the response (for initialization, uses generic errors)
     async fn send_request(&mut self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
         if self.verbose {
             eprintln!(

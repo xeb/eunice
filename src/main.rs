@@ -64,10 +64,6 @@ struct Args {
     list_mcp_servers: bool,
 
     // === Modes ===
-    /// Interactive mode for multi-turn conversations
-    #[arg(long, short = 'i', help_heading = "Modes")]
-    interact: bool,
-
     /// Enable DMN (Default Mode Network) with auto-loaded MCP tools
     #[arg(long = "default-mode-network", visible_alias = "dmn", help_heading = "Modes")]
     dmn: bool,
@@ -356,10 +352,7 @@ async fn main() -> Result<()> {
         return Err(anyhow!("--research and --dmn cannot be used together"));
     }
 
-    // --webapp conflicts with --interact, --events, --silent, --tui
-    if args.webapp && args.interact {
-        return Err(anyhow!("--webapp and --interact cannot be used together"));
-    }
+    // --webapp conflicts with --events, --silent, --tui
     if args.webapp && args.events {
         return Err(anyhow!("--webapp and --events cannot be used together"));
     }
@@ -370,10 +363,7 @@ async fn main() -> Result<()> {
         return Err(anyhow!("--webapp and --tui cannot be used together"));
     }
 
-    // --tui conflicts with --interact, --events, --silent
-    if args.tui && args.interact {
-        return Err(anyhow!("--tui and --interact cannot be used together (--tui is an enhanced interactive mode)"));
-    }
+    // --tui conflicts with --events, --silent
     if args.tui && args.events {
         return Err(anyhow!("--tui and --events cannot be used together"));
     }
@@ -614,8 +604,8 @@ async fn main() -> Result<()> {
     // Resolve prompt
     let prompt = resolve_prompt(&args)?;
 
-    // Determine if we need interactive mode
-    let interactive = args.interact || prompt.is_none();
+    // Determine if we need TUI mode (when no prompt given and TTY available)
+    let use_tui = args.tui || (prompt.is_none() && atty::is(atty::Stream::Stdin));
 
     // Select model
     let model = match &args.model {
@@ -705,8 +695,8 @@ async fn main() -> Result<()> {
         ).await;
     }
 
-    // TUI mode - enhanced terminal interface
-    if args.tui {
+    // TUI mode - enhanced terminal interface (auto-launch when no prompt given)
+    if use_tui {
         // Wait for MCP servers to be ready
         if let Some(ref mut manager) = mcp_manager {
             manager.await_all_servers().await;
@@ -728,120 +718,101 @@ async fn main() -> Result<()> {
         ).await;
     }
 
-    // Run appropriate mode
-    if interactive {
-        interactive::interactive_mode(
+    // Single-shot mode
+    let prompt = prompt.unwrap();
+
+    // Show model/MCP info
+    if !args.silent {
+        display::print_model_info(&provider_info.resolved_model, &provider_info.provider);
+
+        if let Some(ref mut manager) = mcp_manager {
+            // Wait for servers to be ready before displaying info
+            if manager.has_pending_servers() {
+                let names = manager.pending_server_names();
+                display::debug(&format!("Waiting for MCP server(s) to initialize: {}", names.join(", ")), args.verbose);
+                println!("Starting MCP servers: {}...", names.join(", "));
+                manager.await_all_servers().await;
+            }
+            let server_info = manager.get_server_info();
+            display::print_mcp_info(&server_info);
+        }
+
+        if args.dmn {
+            display::print_dmn_mode();
+        }
+
+        if args.research {
+            display::print_research_mode();
+        }
+
+        // Show agent info if in multi-agent mode
+        if let (Some(ref orch), Some(ref name), Some(ref manager)) = (&orchestrator, &agent_name, &mcp_manager) {
+            if let Some(agent) = orch.get_agent(name) {
+                // Count tools this agent has access to
+                let all_tools = manager.get_tools();
+                let tools_count = all_tools.iter().filter(|t| {
+                    agent.tools.iter().any(|p| crate::mcp::tool_matches_pattern(&t.function.name, p))
+                }).count();
+                display::print_agent_info(name, tools_count, &agent.can_invoke);
+            }
+        }
+    }
+
+    // Create display sink for output
+    let display = create_display_sink(args.silent, args.verbose);
+
+    // Run in multi-agent mode or single-agent mode
+    if let (Some(ref orch), Some(ref name), Some(ref mut manager)) = (&orchestrator, &agent_name, &mut mcp_manager) {
+        // Multi-agent mode
+        orch.run_agent(
             &client,
             &provider_info.resolved_model,
-            prompt.as_deref(),
+            name,
+            &prompt,
+            None,
+            manager,
             args.tool_output_limit,
-            mcp_manager.as_mut(),
-            orchestrator.as_ref(),
-            agent_name.as_deref(),
-            args.silent,
-            args.verbose,
-            args.dmn,
-            args.dmn || args.images,
-            args.dmn || args.search || args.research,
-        )
-        .await?;
+            display,
+            0,
+            None, // No caller for root agent
+        ).await?;
     } else {
-        // Single-shot mode
-        let prompt = prompt.unwrap();
+        // Single-agent mode (original behavior)
+        // Inject DMN instructions if needed
+        let final_prompt = if args.dmn {
+            format!(
+                "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
+                DMN_INSTRUCTIONS, prompt
+            )
+        } else {
+            prompt
+        };
 
-        // Show model/MCP info
-        if !args.silent {
-            display::print_model_info(&provider_info.resolved_model, &provider_info.provider);
+        let mut conversation_history: Vec<Message> = Vec::new();
 
-            if let Some(ref mut manager) = mcp_manager {
-                // Wait for servers to be ready before displaying info
-                if manager.has_pending_servers() {
-                    let names = manager.pending_server_names();
-                    display::debug(&format!("Waiting for MCP server(s) to initialize: {}", names.join(", ")), args.verbose);
-                    println!("Starting MCP servers: {}...", names.join(", "));
-                    manager.await_all_servers().await;
-                }
-                let server_info = manager.get_server_info();
-                display::print_mcp_info(&server_info);
-            }
+        // Enable compaction in DMN mode by default
+        let compaction_config = if args.dmn {
+            Some(compact::CompactionConfig::default())
+        } else {
+            None
+        };
 
-            if args.dmn {
-                display::print_dmn_mode();
-            }
-
-            if args.research {
-                display::print_research_mode();
-            }
-
-            // Show agent info if in multi-agent mode
-            if let (Some(ref orch), Some(ref name), Some(ref manager)) = (&orchestrator, &agent_name, &mcp_manager) {
-                if let Some(agent) = orch.get_agent(name) {
-                    // Count tools this agent has access to
-                    let all_tools = manager.get_tools();
-                    let tools_count = all_tools.iter().filter(|t| {
-                        agent.tools.iter().any(|p| crate::mcp::tool_matches_pattern(&t.function.name, p))
-                    }).count();
-                    display::print_agent_info(name, tools_count, &agent.can_invoke);
-                }
-            }
-        }
-
-        // Create display sink for output
+        // Create display sink for single-agent mode
         let display = create_display_sink(args.silent, args.verbose);
 
-        // Run in multi-agent mode or single-agent mode
-        if let (Some(ref orch), Some(ref name), Some(ref mut manager)) = (&orchestrator, &agent_name, &mut mcp_manager) {
-            // Multi-agent mode
-            orch.run_agent(
-                &client,
-                &provider_info.resolved_model,
-                name,
-                &prompt,
-                None,
-                manager,
-                args.tool_output_limit,
-                display,
-                0,
-                None, // No caller for root agent
-            ).await?;
-        } else {
-            // Single-agent mode (original behavior)
-            // Inject DMN instructions if needed
-            let final_prompt = if args.dmn {
-                format!(
-                    "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
-                    DMN_INSTRUCTIONS, prompt
-                )
-            } else {
-                prompt
-            };
-
-            let mut conversation_history: Vec<Message> = Vec::new();
-
-            // Enable compaction in DMN mode by default
-            let compaction_config = if args.dmn {
-                Some(compact::CompactionConfig::default())
-            } else {
-                None
-            };
-
-            // Create display sink for single-agent mode
-            let display = create_display_sink(args.silent, args.verbose);
-
-            agent::run_agent(
-                &client,
-                &provider_info.resolved_model,
-                &final_prompt,
-                args.tool_output_limit,
-                mcp_manager.as_mut(),
-                display,
-                &mut conversation_history,
-                args.dmn || args.images,
-                args.dmn || args.search || args.research,
-                compaction_config,
-            )
-            .await?;
-        }
+        agent::run_agent(
+            &client,
+            &provider_info.resolved_model,
+            &final_prompt,
+            args.tool_output_limit,
+            mcp_manager.as_mut(),
+            display,
+            &mut conversation_history,
+            args.dmn || args.images,
+            args.dmn || args.search || args.research,
+            compaction_config,
+        )
+        .await?;
     }
 
     // Cleanup MCP servers
@@ -949,13 +920,6 @@ mod tests {
         let args = Args::try_parse_from(["eunice", "--research"]).unwrap();
         assert!(args.research);
         assert!(!args.dmn);
-    }
-
-    #[test]
-    fn test_args_research_with_interact() {
-        let args = Args::try_parse_from(["eunice", "--research", "-i"]).unwrap();
-        assert!(args.research);
-        assert!(args.interact);
     }
 
     #[test]

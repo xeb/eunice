@@ -575,6 +575,10 @@ pub async fn run_tui_mode(
         }
     }
 
+    // Clear any prompt that r3bl_tui might print during cleanup
+    // This prevents the extra "> " appearing after "Goodbye!"
+    execute!(std::io::stdout(), cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+
     Ok(())
 }
 
