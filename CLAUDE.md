@@ -399,6 +399,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.54**: DMN mode is now a proper agent (shows in `--dmn --list-agents`) consistent with `--research`
 - **0.2.53**: TUI mode: Bracketed paste support for multiline paste (via Ctrl+Shift+V or terminal paste)
 - **0.2.52**: TUI mode: Escape/Ctrl+C cancellation support to stop generation mid-response
 - **0.2.51**: Add gemini-3-flash-preview as new default model; add gemini-3-flash and gemini-3-pro aliases

@@ -14,7 +14,7 @@ pub fn has_gemini_api_key() -> bool {
 }
 
 /// Embedded DMN (Default Mode Network) MCP configuration
-/// Minimal set: shell + filesystem (interpret_image is built-in)
+/// Minimal set: shell + filesystem + root agent (interpret_image and search_query are built-in)
 pub fn get_dmn_mcp_config() -> McpConfig {
     let mut servers = HashMap::new();
     let use_mcpz = has_mcpz();
@@ -45,9 +45,18 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         );
     }
 
+    // DMN root agent
+    let mut agents = HashMap::new();
+    agents.insert("root".to_string(), AgentConfig {
+        prompt: DMN_INSTRUCTIONS.to_string(),
+        mcp_servers: vec![],
+        tools: vec!["*".to_string()],  // Access to all tools
+        can_invoke: vec![],
+    });
+
     McpConfig {
         mcp_servers: servers,
-        agents: HashMap::new(),
+        agents,
         allowed_tools: Vec::new(),
         denied_tools: Vec::new(),
         webapp: None,
@@ -323,7 +332,15 @@ mod tests {
         let config = get_dmn_mcp_config();
         assert!(config.mcp_servers.contains_key("shell"));
         assert!(config.mcp_servers.contains_key("filesystem"));
-        assert!(config.agents.is_empty());
+
+        // DMN has a root agent
+        assert_eq!(config.agents.len(), 1);
+        assert!(config.agents.contains_key("root"));
+
+        let root = config.agents.get("root").unwrap();
+        assert!(root.prompt.contains("DMN")); // Should contain DMN instructions
+        assert!(root.tools.contains(&"*".to_string())); // Has access to all tools
+        assert!(root.can_invoke.is_empty()); // Single agent, no sub-agents
     }
 
     #[test]
