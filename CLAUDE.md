@@ -399,6 +399,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.55**: TUI mode: Fix line rendering (use crossterm directly instead of SharedWriter for in-place editing)
 - **0.2.54**: DMN mode is now a proper agent (shows in `--dmn --list-agents`) consistent with `--research`
 - **0.2.53**: TUI mode: Bracketed paste support for multiline paste (via Ctrl+Shift+V or terminal paste)
 - **0.2.52**: TUI mode: Escape/Ctrl+C cancellation support to stop generation mid-response

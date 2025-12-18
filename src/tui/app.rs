@@ -11,7 +11,12 @@ use crate::orchestrator::AgentOrchestrator;
 use crate::models::ProviderInfo;
 
 use anyhow::{anyhow, Result};
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyModifiers},
+    execute,
+    terminal::{Clear, ClearType},
+};
 use r3bl_tui::{
     choose, height, DefaultIoDevices, HowToChoose, ReadlineAsyncContext, ReadlineEvent,
     SharedWriter, StyleSheet,
@@ -206,29 +211,35 @@ impl LineEditor {
     }
 }
 
-/// Render the prompt and current line
-fn render_line(writer: &mut SharedWriter, editor: &LineEditor) -> std::io::Result<()> {
-    // Move to beginning and clear line
-    write!(writer, "\r\x1b[K")?;
+/// Render the prompt and current line directly to stdout
+/// We use crossterm directly because SharedWriter doesn't handle
+/// in-place line editing with escape sequences properly.
+fn render_line(editor: &LineEditor) -> std::io::Result<()> {
+    let mut stdout = std::io::stdout();
+
+    // Move to beginning of line and clear it
+    execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+
     // Print prompt and line
-    write!(writer, "{PURPLE}>{RESET} {}", editor.line)?;
+    write!(stdout, "{PURPLE}>{RESET} {}", editor.line)?;
+
     // Move cursor to correct position
     let prompt_len = 2; // "> "
     let display_cursor = prompt_len + editor.line[..editor.cursor].chars().count();
-    write!(writer, "\r\x1b[{}C", display_cursor)?;
-    writer.flush()
+    execute!(stdout, cursor::MoveToColumn(display_cursor as u16))?;
+
+    stdout.flush()
 }
 
 /// Custom readline with bracketed paste support
 ///
-/// Uses SharedWriter for output coordination while managing our own line state.
-/// This allows us to properly handle Event::Paste which r3bl_tui ignores.
-async fn read_line_with_paste(ctx: &mut ReadlineAsyncContext) -> Result<ReadlineEvent> {
+/// Uses crossterm directly for line editing (SharedWriter doesn't handle
+/// in-place editing properly). SharedWriter is still used for final output.
+async fn read_line_with_paste(_ctx: &mut ReadlineAsyncContext) -> Result<ReadlineEvent> {
     let mut editor = LineEditor::new();
-    let mut writer = ctx.clone_shared_writer();
 
     // Initial render
-    render_line(&mut writer, &editor)?;
+    render_line(&editor)?;
 
     loop {
         // Poll for events with a small timeout
@@ -241,7 +252,7 @@ async fn read_line_with_paste(ctx: &mut ReadlineAsyncContext) -> Result<Readline
                     // For multiline paste, join lines with spaces to preserve content
                     let processed = text.lines().collect::<Vec<_>>().join(" ");
                     editor.insert_str(&processed);
-                    render_line(&mut writer, &editor)?;
+                    render_line(&editor)?;
                 }
 
                 Event::Key(key_event) => {
@@ -249,31 +260,34 @@ async fn read_line_with_paste(ctx: &mut ReadlineAsyncContext) -> Result<Readline
                     if key_event.modifiers.contains(KeyModifiers::CONTROL) {
                         match key_event.code {
                             KeyCode::Char('c') => {
-                                writeln!(writer, "\r\x1b[K{PURPLE}>{RESET} ^C")?;
+                                // Clear line and print ^C, then newline
+                                let mut stdout = std::io::stdout();
+                                execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+                                writeln!(stdout, "{PURPLE}>{RESET} ^C")?;
                                 return Ok(ReadlineEvent::Interrupted);
                             }
                             KeyCode::Char('d') => {
                                 if editor.line.is_empty() {
-                                    writeln!(writer)?;
+                                    println!();
                                     return Ok(ReadlineEvent::Eof);
                                 }
                                 // If there's content, Ctrl+D does nothing
                             }
                             KeyCode::Char('a') => {
                                 editor.move_home();
-                                render_line(&mut writer, &editor)?;
+                                render_line(&editor)?;
                             }
                             KeyCode::Char('e') => {
                                 editor.move_end();
-                                render_line(&mut writer, &editor)?;
+                                render_line(&editor)?;
                             }
                             KeyCode::Char('u') => {
                                 editor.clear();
-                                render_line(&mut writer, &editor)?;
+                                render_line(&editor)?;
                             }
                             KeyCode::Char('w') => {
                                 editor.delete_word_backward();
-                                render_line(&mut writer, &editor)?;
+                                render_line(&editor)?;
                             }
                             _ => {}
                         }
@@ -283,36 +297,39 @@ async fn read_line_with_paste(ctx: &mut ReadlineAsyncContext) -> Result<Readline
                     match key_event.code {
                         KeyCode::Enter => {
                             let line = editor.take_line();
-                            writeln!(writer, "\r\x1b[K{PURPLE}>{RESET} {}", line)?;
+                            // Print the final line and move to next line
+                            let mut stdout = std::io::stdout();
+                            execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
+                            writeln!(stdout, "{PURPLE}>{RESET} {}", line)?;
                             return Ok(ReadlineEvent::Line(line));
                         }
                         KeyCode::Char(c) => {
                             editor.insert_char(c);
-                            render_line(&mut writer, &editor)?;
+                            render_line(&editor)?;
                         }
                         KeyCode::Backspace => {
                             editor.backspace();
-                            render_line(&mut writer, &editor)?;
+                            render_line(&editor)?;
                         }
                         KeyCode::Delete => {
                             editor.delete();
-                            render_line(&mut writer, &editor)?;
+                            render_line(&editor)?;
                         }
                         KeyCode::Left => {
                             editor.move_left();
-                            render_line(&mut writer, &editor)?;
+                            render_line(&editor)?;
                         }
                         KeyCode::Right => {
                             editor.move_right();
-                            render_line(&mut writer, &editor)?;
+                            render_line(&editor)?;
                         }
                         KeyCode::Home => {
                             editor.move_home();
-                            render_line(&mut writer, &editor)?;
+                            render_line(&editor)?;
                         }
                         KeyCode::End => {
                             editor.move_end();
-                            render_line(&mut writer, &editor)?;
+                            render_line(&editor)?;
                         }
                         KeyCode::Up | KeyCode::Down => {
                             // TODO: History navigation (would need history access)
@@ -322,7 +339,7 @@ async fn read_line_with_paste(ctx: &mut ReadlineAsyncContext) -> Result<Readline
                 }
 
                 Event::Resize(_, _) => {
-                    render_line(&mut writer, &editor)?;
+                    render_line(&editor)?;
                     return Ok(ReadlineEvent::Resized);
                 }
 
