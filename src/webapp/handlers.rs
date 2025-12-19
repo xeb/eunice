@@ -1,4 +1,4 @@
-use super::server::{AppState, Session};
+use super::server::{AppState, Session, SessionStore};
 use crate::agent;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::config::DMN_INSTRUCTIONS;
@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::{broadcast, mpsc, watch};
+use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
@@ -378,8 +378,99 @@ pub async fn clear_session(
     Json(ClearSessionResponse { cleared: false })
 }
 
+/// Request for session events (reconnection)
+#[derive(Deserialize)]
+pub struct SessionEventsRequest {
+    session_id: String,
+}
+
+/// Session events endpoint - replay stored events and subscribe to live events if query is running
+/// This allows users to reconnect and see events that happened while they were disconnected
+pub async fn session_events(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SessionEventsRequest>,
+) -> Sse<impl Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
+    let session_id = request.session_id;
+    let session_short = if session_id.len() >= 8 { &session_id[..8] } else { &session_id };
+    log(&format!("[{}] Session events requested (reconnection)", session_short));
+
+    // Get stored events and check if query is running
+    let (stored_events, broadcast_rx) = {
+        let sessions = state.sessions.read().await;
+        if let Some(session) = sessions.get(&session_id) {
+            let events = session.events.clone();
+            let rx = session.event_tx.as_ref().map(|tx| tx.subscribe());
+            log(&format!("[{}] Found {} stored events, query_running: {}",
+                session_short, events.len(), session.query_running));
+            (events, rx)
+        } else {
+            log(&format!("[{}] Session not found", session_short));
+            (Vec::new(), None)
+        }
+    };
+
+    // Check if there's a live query to subscribe to
+    let has_live = broadcast_rx.is_some();
+
+    // Wrap in async stream that handles both replay and live
+    let (tx, rx) = mpsc::channel::<SseEvent>(100);
+
+    if let Some(broadcast_rx) = broadcast_rx {
+        let tx_clone = tx.clone();
+        let session_short_owned = session_short.to_string();
+        tokio::spawn(async move {
+            let mut stream = BroadcastStream::new(broadcast_rx);
+            while let Some(Ok(event)) = stream.next().await {
+                if tx_clone.send(event).await.is_err() {
+                    break;  // Receiver dropped
+                }
+            }
+            log(&format!("[{}] Live event subscription ended", session_short_owned));
+        });
+    }
+
+    // First send replay events, then live events
+    let tx_replay = tx.clone();
+    tokio::spawn(async move {
+        // Send all stored events first
+        for event in stored_events {
+            if tx_replay.send(event).await.is_err() {
+                return;  // Receiver dropped
+            }
+        }
+        // If no live events, send Done to close the stream
+        if !has_live {
+            let _ = tx_replay.send(SseEvent::Done).await;
+        }
+    });
+
+    // Convert channel to SSE stream
+    let combined_stream = ReceiverStream::new(rx).map(|event| {
+        let data = serde_json::to_string(&event).unwrap_or_default();
+        let event_type = match &event {
+            SseEvent::Thinking { .. } => "thinking",
+            SseEvent::ToolCall { .. } => "tool_call",
+            SseEvent::ToolResult { .. } => "tool_result",
+            SseEvent::Response { .. } => "response",
+            SseEvent::Error { .. } => "error",
+            SseEvent::SessionId { .. } => "session_id",
+            SseEvent::Compacted { .. } => "compacted",
+            SseEvent::Done => "done",
+        };
+        Ok(axum::response::sse::Event::default()
+            .event(event_type)
+            .data(data))
+    });
+
+    Sse::new(combined_stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("ping"),
+    )
+}
+
 /// SSE event types
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SseEvent {
     Thinking { elapsed_seconds: u64 },
@@ -392,6 +483,40 @@ pub enum SseEvent {
     /// Context was compacted due to size limits
     Compacted { message: String },
     Done,
+}
+
+/// Helper to send events to multiple destinations
+/// - mpsc channel (current SSE stream subscriber)
+/// - session store (for replay on reconnect)
+/// - broadcast channel (for re-subscribers while query is running)
+struct EventSender {
+    tx: mpsc::Sender<SseEvent>,
+    sessions: SessionStore,
+    session_id: String,
+    broadcast_tx: broadcast::Sender<SseEvent>,
+}
+
+impl EventSender {
+    async fn send(&self, event: SseEvent) {
+        // Store in session for replay
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(&self.session_id) {
+                session.events.push(event.clone());
+            }
+        }
+
+        // Broadcast to any re-subscribers (ignore errors - no subscribers is fine)
+        let _ = self.broadcast_tx.send(event.clone());
+
+        // Send to current SSE stream (ignore errors - client may have disconnected)
+        let _ = self.tx.send(event).await;
+    }
+
+    /// Clone the mpsc sender for use in spawned tasks (e.g., thinking timer)
+    fn tx_clone(&self) -> mpsc::Sender<SseEvent> {
+        self.tx.clone()
+    }
 }
 
 /// Query endpoint handler - returns SSE stream
@@ -471,9 +596,30 @@ pub async fn query(
         }
     };
 
+    // Create broadcast channel for this query (for re-subscribers)
+    let (broadcast_tx, _) = broadcast::channel::<SseEvent>(100);
+
+    // Set up session for this query: clear old events, store broadcast sender, mark as running
+    {
+        let mut sessions = state.sessions.write().await;
+        if let Some(session) = sessions.get_mut(&session_id) {
+            session.events.clear();
+            session.event_tx = Some(broadcast_tx.clone());
+            session.query_running = true;
+        }
+    }
+
+    // Create event sender that stores events and broadcasts to re-subscribers
+    let event_sender = EventSender {
+        tx,
+        sessions: state.sessions.clone(),
+        session_id: session_id.clone(),
+        broadcast_tx,
+    };
+
     // Spawn agent task
     tokio::spawn(async move {
-        run_agent_with_events(state_clone, prompt, session_id, tx, cancel_rx).await;
+        run_agent_with_events(state_clone, prompt, session_id, event_sender, cancel_rx).await;
     });
 
     // Convert channel to SSE stream
@@ -517,14 +663,14 @@ async fn run_agent_with_events(
     state: Arc<AppState>,
     prompt: String,
     session_id: String,
-    tx: mpsc::Sender<SseEvent>,
+    event_sender: EventSender,
     cancel_rx: watch::Receiver<bool>,
 ) {
     let session_short = &session_id[..8];
     log(&format!("[{}] Agent loop starting", session_short));
 
     // Send session ID to client first
-    let _ = tx.send(SseEvent::SessionId {
+    event_sender.send(SseEvent::SessionId {
         session_id: session_id.clone(),
     }).await;
 
@@ -578,8 +724,8 @@ async fn run_agent_with_events(
     let compaction_config = CompactionConfig::default();
     let mut compaction_attempted = false;
 
-    // Thinking timer
-    let tx_thinking = tx.clone();
+    // Thinking timer - uses raw mpsc sender (not stored/broadcast since it's high-frequency)
+    let tx_thinking = event_sender.tx_clone();
     let cancel_rx_thinking = cancel_rx.clone();
     let thinking_handle = tokio::spawn(async move {
         let mut seconds = 0u64;
@@ -610,7 +756,7 @@ async fn run_agent_with_events(
         // Check for cancellation
         if *cancel_rx.borrow() {
             log(&format!("[{}] Query cancelled by user", session_short));
-            let _ = tx.send(SseEvent::Error {
+            event_sender.send(SseEvent::Error {
                 message: "Query cancelled".to_string(),
             }).await;
             break;
@@ -662,7 +808,7 @@ async fn run_agent_with_events(
                             };
                             log(&format!("[{}] {}", session_short, compaction_msg));
 
-                            let _ = tx.send(SseEvent::Compacted {
+                            event_sender.send(SseEvent::Compacted {
                                 message: compaction_msg,
                             }).await;
 
@@ -672,14 +818,14 @@ async fn run_agent_with_events(
                         }
                         Err(compact_err) => {
                             log(&format!("[{}] Compaction failed: {}", session_short, compact_err));
-                            let _ = tx.send(SseEvent::Error {
+                            event_sender.send(SseEvent::Error {
                                 message: format!("Context exhausted and compaction failed: {}", compact_err),
                             }).await;
                             break;
                         }
                     }
                 } else {
-                    let _ = tx.send(SseEvent::Error {
+                    event_sender.send(SseEvent::Error {
                         message: format!("API error: {}", e),
                     }).await;
                     break;
@@ -704,7 +850,7 @@ async fn run_agent_with_events(
                     content.clone()
                 };
                 log(&format!("[{}] Response: \"{}\"", session_short, content_preview.replace('\n', " ")));
-                let _ = tx.send(SseEvent::Response {
+                event_sender.send(SseEvent::Response {
                     content: content.clone(),
                 }).await;
             }
@@ -731,7 +877,7 @@ async fn run_agent_with_events(
             log(&format!("[{}] Tool call: {}", session_short, tool_name));
 
             // Send tool call event
-            let _ = tx.send(SseEvent::ToolCall {
+            event_sender.send(SseEvent::ToolCall {
                 name: tool_name.clone(),
                 arguments: arguments.clone(),
             }).await;
@@ -767,7 +913,7 @@ async fn run_agent_with_events(
             };
 
             // Send tool result event
-            let _ = tx.send(SseEvent::ToolResult {
+            event_sender.send(SseEvent::ToolResult {
                 name: tool_name.clone(),
                 result: display_result,
                 truncated,
@@ -784,11 +930,13 @@ async fn run_agent_with_events(
     // Stop thinking timer
     thinking_handle.abort();
 
-    // Save updated history to session store
+    // Save updated history to session store and mark query as complete
     {
         let mut sessions = state.sessions.write().await;
         if let Some(session) = sessions.get_mut(&session_id) {
             session.history = conversation_history.clone();
+            session.query_running = false;
+            session.event_tx = None;  // Clear broadcast sender
         }
     }
 
@@ -801,5 +949,5 @@ async fn run_agent_with_events(
     }
 
     // Send done event
-    let _ = tx.send(SseEvent::Done).await;
+    event_sender.send(SseEvent::Done).await;
 }

@@ -1387,9 +1387,90 @@ data: {"type":"done"}</pre>
             }
         }
 
+        // Reconnect to live events if there's an active query
+        // This allows users to close the tab and reopen to see events that happened
+        async function reconnectToEvents() {
+            if (!sessionId) return;
+
+            console.log('[webapp] Reconnecting to session events:', sessionId.substring(0, 8));
+
+            try {
+                const response = await fetch('/api/session/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+
+                if (!response.ok) {
+                    console.error('[webapp] Failed to reconnect:', response.status);
+                    return;
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let hasReceivedEvents = false;
+
+                // Add "Reconnecting..." indicator if we receive events
+                let reconnectingMsg = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data:')) {
+                            const jsonStr = line.substring(5).trim();
+                            if (jsonStr === 'ping') continue;
+                            if (!jsonStr) continue;
+
+                            try {
+                                const event = JSON.parse(jsonStr);
+
+                                // Show reconnecting message on first event (if not Done)
+                                if (!hasReceivedEvents && event.type !== 'done' && event.type !== 'session_id') {
+                                    hasReceivedEvents = true;
+                                    reconnectingMsg = addMessage('system', 'Reconnected - replaying events from background query...');
+                                    isRunning = true;
+                                    submitBtn.textContent = 'Cancel';
+                                    submitBtn.classList.add('cancel');
+                                }
+
+                                // Handle the event
+                                handleEvent(event);
+
+                                // If we got a done event, clean up
+                                if (event.type === 'done') {
+                                    isRunning = false;
+                                    submitBtn.textContent = 'Send';
+                                    submitBtn.classList.remove('cancel');
+                                    if (reconnectingMsg) {
+                                        // Update the message to show completion
+                                        reconnectingMsg.innerHTML = 'Background query completed - events restored';
+                                    }
+                                    return;
+                                }
+                            } catch (parseErr) {
+                                console.error('[webapp] Failed to parse event:', parseErr, jsonStr);
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('[webapp] Error reconnecting to events:', err);
+            }
+        }
+
         // Initialize
         fetchStatus();
-        restoreSessionHistory();
+        restoreSessionHistory().then(() => {
+            // After restoring history, try to reconnect to live events
+            reconnectToEvents();
+        });
         queryInput.focus();
     </script>
 </body>

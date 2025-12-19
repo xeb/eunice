@@ -9,18 +9,30 @@ use axum::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{watch, Mutex, RwLock};
+use tokio::sync::{broadcast, watch, Mutex, RwLock};
 
-use super::handlers;
+use super::handlers::{self, SseEvent};
 
 /// Session data stored on the server
 pub struct Session {
+    /// Conversation history (messages for LLM context)
     pub history: Vec<Message>,
+    /// All events from the current/last query (for replay on reconnect)
+    pub events: Vec<SseEvent>,
+    /// Broadcast sender for live event subscription (Some if query is running)
+    pub event_tx: Option<broadcast::Sender<SseEvent>>,
+    /// Whether a query is currently running
+    pub query_running: bool,
 }
 
 impl Session {
     pub fn new() -> Self {
-        Self { history: Vec::new() }
+        Self {
+            history: Vec::new(),
+            events: Vec::new(),
+            event_tx: None,
+            query_running: false,
+        }
     }
 }
 
@@ -87,6 +99,7 @@ pub async fn run_server(
         .route("/api/session/new", post(handlers::new_session))
         .route("/api/session/history", post(handlers::get_session_history))
         .route("/api/session/clear", post(handlers::clear_session))
+        .route("/api/session/events", post(handlers::session_events))
         .with_state(state);
 
     let addr = format!("{}:{}", webapp_config.host, webapp_config.port);

@@ -399,6 +399,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.57**: Webapp event replay: reconnect to see events that happened while browser was closed; agents continue running when tab closes
 - **0.2.56**: HTTP MCP detailed errors (timeout/status/body), remove --interact flag (TUI auto-launches when no prompt given), fix TUI exit prompt
 - **0.2.55**: TUI mode: Fix line rendering (use crossterm directly instead of SharedWriter for in-place editing)
 - **0.2.54**: DMN mode is now a proper agent (shows in `--dmn --list-agents`) consistent with `--research`

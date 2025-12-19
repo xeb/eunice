@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "0.2.56"
+version = "0.2.57"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
@@ -50,7 +50,7 @@ base64 = "0.22.1"
 # Web server (for --webapp mode)
 axum = { version = "0.8", features = ["macros"] }
 tower-http = { version = "0.6", features = ["cors"] }
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"
 
 # Full TUI framework
