@@ -15,7 +15,7 @@ pub enum DisplayEvent {
     /// Thinking indicator stopped
     ThinkingStop,
     /// Tool call being made
-    ToolCall { name: String },
+    ToolCall { name: String, arguments: String },
     /// Tool result received
     ToolResult { result: String, limit: usize },
     /// Response content from LLM
@@ -58,8 +58,20 @@ impl DisplaySink for StdDisplaySink {
             DisplayEvent::ThinkingStop => {
                 // No-op for standard output
             }
-            DisplayEvent::ToolCall { name } => {
+            DisplayEvent::ToolCall { name, arguments } => {
                 println!("  {} {}", "→".blue(), name.bright_blue());
+                // Show arguments in grey if not empty
+                if !arguments.is_empty() {
+                    // Pretty-print JSON if possible, otherwise show as-is
+                    let display_args = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&arguments) {
+                        serde_json::to_string_pretty(&parsed).unwrap_or(arguments)
+                    } else {
+                        arguments
+                    };
+                    for line in display_args.lines() {
+                        println!("    {}", line.dimmed());
+                    }
+                }
             }
             DisplayEvent::ToolResult { result, limit } => {
                 let lines: Vec<&str> = result.lines().collect();
@@ -161,8 +173,20 @@ impl DisplaySink for TuiDisplaySink {
             DisplayEvent::ThinkingStop => {
                 // No-op
             }
-            DisplayEvent::ToolCall { name } => {
+            DisplayEvent::ToolCall { name, arguments } => {
                 let _ = writeln!(writer, "  {BLUE}→{RESET} {BRIGHT_BLUE}{}{RESET}", name);
+                // Show arguments in grey if not empty
+                if !arguments.is_empty() {
+                    // Pretty-print JSON if possible, otherwise show as-is
+                    let display_args = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&arguments) {
+                        serde_json::to_string_pretty(&parsed).unwrap_or(arguments)
+                    } else {
+                        arguments
+                    };
+                    for line in display_args.lines() {
+                        let _ = writeln!(writer, "    {DIM}{}{RESET}", line);
+                    }
+                }
             }
             DisplayEvent::ToolResult { result, limit } => {
                 let lines: Vec<&str> = result.lines().collect();

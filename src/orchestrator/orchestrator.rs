@@ -351,6 +351,7 @@ impl AgentOrchestrator {
                 if !self.is_invoke_tool(tool_name) {
                     display.write_event(DisplayEvent::ToolCall {
                         name: tool_name.clone(),
+                        arguments: arguments.clone(),
                     });
                 }
 

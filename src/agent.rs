@@ -457,9 +457,10 @@ pub async fn run_agent_cancellable(
             let tool_name = &tool_call.function.name;
             let arguments = &tool_call.function.arguments;
 
-            // Display tool call
+            // Display tool call with arguments
             display.write_event(DisplayEvent::ToolCall {
                 name: tool_name.clone(),
+                arguments: arguments.clone(),
             });
 
             // Parse arguments
