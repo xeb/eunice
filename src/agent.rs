@@ -366,7 +366,8 @@ pub async fn run_agent_cancellable(
                 r
             }
             Err(e) => {
-                let error_msg = e.to_string();
+                // Use {:#} to get full error chain from anyhow
+                let error_msg = format!("{:#}", e);
 
                 // Check if this is a context exhaustion error and we can compact
                 if is_context_exhausted_error(&error_msg)
@@ -404,7 +405,7 @@ pub async fn run_agent_cancellable(
                             }
                             Err(compact_err) => {
                                 display.write_event(DisplayEvent::Error {
-                                    message: format!("Compaction failed: {}", compact_err),
+                                    message: format!("Compaction failed: {:#}", compact_err),
                                 });
                                 return Err(e); // Return original error
                             }

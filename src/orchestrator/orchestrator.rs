@@ -423,7 +423,7 @@ impl AgentOrchestrator {
             mcp_manager, tool_output_limit, display, depth + 1, Some(caller_agent),
         ).await {
             Ok(result) => result,
-            Err(e) => format!("Agent '{}' failed: {}", target_agent, e),
+            Err(e) => format!("Agent '{}' failed: {:#}", target_agent, e),
         }
     }
 }

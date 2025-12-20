@@ -862,7 +862,8 @@ async fn run_agent_with_events(
                 r
             }
             Err(e) => {
-                let error_msg = format!("{}", e);
+                // Use {:#} to get full error chain from anyhow
+                let error_msg = format!("{:#}", e);
                 log(&format!("[{}] LLM error: {}", session_short, error_msg));
 
                 // Check if this is a context exhaustion error and we haven't tried compaction yet
@@ -894,16 +895,16 @@ async fn run_agent_with_events(
                             continue;
                         }
                         Err(compact_err) => {
-                            log(&format!("[{}] Compaction failed: {}", session_short, compact_err));
+                            log(&format!("[{}] Compaction failed: {:#}", session_short, compact_err));
                             event_sender.send(SseEvent::Error {
-                                message: format!("Context exhausted and compaction failed: {}", compact_err),
+                                message: format!("Context exhausted and compaction failed: {:#}", compact_err),
                             }).await;
                             break;
                         }
                     }
                 } else {
                     event_sender.send(SseEvent::Error {
-                        message: format!("API error: {}", e),
+                        message: format!("API error: {:#}", e),
                     }).await;
                     break;
                 }
