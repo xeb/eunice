@@ -462,4 +462,4 @@ When the user says "publish":
 4. Git tag (e.g., `v0.2.1`)
 5. Git push (with tags)
 6. `cargo publish`
-7. After publish completes, install from crates.io: `cargo install eunice`
+7. After publish completes, install from git: `cargo install --git ssh://git@github.com/xeb/eunice.git`
