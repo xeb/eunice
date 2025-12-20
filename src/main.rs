@@ -325,12 +325,14 @@ fn run_update() -> Result<()> {
         return Err(anyhow!("cargo is not installed. Please install Rust/Cargo first."));
     }
 
-    // Run cargo install from git
+    // Run cargo install from git with SSH
+    // Set CARGO_NET_GIT_FETCH_WITH_CLI=true to use system git (with SSH keys)
     let status = Command::new("cargo")
+        .env("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
         .args([
             "install",
             "--git",
-            "https://github.com/xeb/eunice.git",
+            "ssh://git@github.com/xeb/eunice.git",
             "--force",
         ])
         .stdout(Stdio::inherit())
