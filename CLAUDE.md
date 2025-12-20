@@ -453,13 +453,12 @@ When adding features:
 - **0.1.1**: Added native Gemini API support, 429 retry, spinners, unit tests
 - **0.1.0**: Initial release with multi-provider support and MCP integration
 
-## Publishing
+## Releasing
 
-When the user says "publish":
+When the user says "publish" or "release":
 1. Run `cargo test` - all tests must pass
 2. Update LOC and binary size in README.md
-3. Git commit with descriptive message
-4. Git tag (e.g., `v0.2.1`)
-5. Git push (with tags)
-6. `cargo publish`
-7. After publish completes, install from git: `cargo install --git ssh://git@github.com/xeb/eunice.git`
+3. Bump version in Cargo.toml
+4. Git commit with descriptive message
+5. Git push
+6. Install locally: `cargo install --path .`
