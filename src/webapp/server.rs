@@ -1,43 +1,18 @@
 use crate::client::Client;
+use crate::config::has_mcpz;
 use crate::mcp::McpManager;
-use crate::models::{Message, ProviderInfo, WebappConfig};
+use crate::models::{ProviderInfo, WebappConfig};
 use crate::orchestrator::AgentOrchestrator;
 use anyhow::Result;
 use axum::{
     routing::{get, post},
     Router,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, watch, Mutex, RwLock};
+use tokio::sync::{watch, Mutex};
 
-use super::handlers::{self, SseEvent};
-
-/// Session data stored on the server
-pub struct Session {
-    /// Conversation history (messages for LLM context)
-    pub history: Vec<Message>,
-    /// All events from the current/last query (for replay on reconnect)
-    pub events: Vec<SseEvent>,
-    /// Broadcast sender for live event subscription (Some if query is running)
-    pub event_tx: Option<broadcast::Sender<SseEvent>>,
-    /// Whether a query is currently running
-    pub query_running: bool,
-}
-
-impl Session {
-    pub fn new() -> Self {
-        Self {
-            history: Vec::new(),
-            events: Vec::new(),
-            event_tx: None,
-            query_running: false,
-        }
-    }
-}
-
-/// In-memory session store
-pub type SessionStore = Arc<RwLock<HashMap<String, Session>>>;
+use super::handlers;
+use super::persistence::SessionStorage;
 
 /// Shared application state
 #[allow(dead_code)]
@@ -55,8 +30,8 @@ pub struct AppState {
     pub enable_search_tool: bool,
     /// Active query cancellation sender
     pub cancel_tx: Arc<Mutex<Option<watch::Sender<bool>>>>,
-    /// In-memory session store
-    pub sessions: SessionStore,
+    /// Session storage (SQLite if mcpz available, otherwise in-memory)
+    pub storage: SessionStorage,
 }
 
 /// Run the webapp server
@@ -74,6 +49,16 @@ pub async fn run_server(
     enable_image_tool: bool,
     enable_search_tool: bool,
 ) -> Result<()> {
+    // Initialize storage based on mcpz availability
+    let mcpz_available = has_mcpz();
+    let storage = SessionStorage::new(mcpz_available)?;
+
+    if storage.is_persistent() {
+        println!("Session persistence enabled (SQLite)");
+    } else {
+        println!("Session persistence disabled (in-memory only)");
+    }
+
     let state = Arc::new(AppState {
         client: Arc::new(client),
         provider_info,
@@ -87,7 +72,7 @@ pub async fn run_server(
         enable_image_tool,
         enable_search_tool,
         cancel_tx: Arc::new(Mutex::new(None)),
-        sessions: Arc::new(RwLock::new(HashMap::new())),
+        storage,
     });
 
     let app = Router::new()
@@ -96,7 +81,9 @@ pub async fn run_server(
         .route("/api/config", get(handlers::config))
         .route("/api/query", post(handlers::query))
         .route("/api/cancel", post(handlers::cancel))
+        .route("/api/sessions", get(handlers::list_sessions))
         .route("/api/session/new", post(handlers::new_session))
+        .route("/api/session/delete", post(handlers::delete_session))
         .route("/api/session/history", post(handlers::get_session_history))
         .route("/api/session/clear", post(handlers::clear_session))
         .route("/api/session/events", post(handlers::session_events))

@@ -1,4 +1,5 @@
-use super::server::{AppState, Session, SessionStore};
+use super::persistence::SessionMetadata;
+use super::server::AppState;
 use crate::agent;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::config::DMN_INSTRUCTIONS;
@@ -18,7 +19,6 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 use tokio_stream::StreamExt;
-use uuid::Uuid;
 
 /// Log a webapp event with timestamp
 fn log(event: &str) {
@@ -70,6 +70,8 @@ pub struct StatusResponse {
     tools_count: usize,
     /// Authenticated user from proxy headers (if present)
     authenticated_user: Option<String>,
+    /// Whether session persistence is enabled (SQLite)
+    persistence_enabled: bool,
 }
 
 /// Status endpoint handler
@@ -115,6 +117,7 @@ pub async fn status(
         mcp_servers: servers,
         tools_count,
         authenticated_user,
+        persistence_enabled: state.storage.is_persistent(),
     })
 }
 
@@ -245,20 +248,96 @@ pub struct QueryRequest {
 #[derive(Serialize)]
 pub struct NewSessionResponse {
     session_id: String,
+    session_name: String,
 }
 
 /// Create a new session
-pub async fn new_session(State(state): State<Arc<AppState>>) -> Json<NewSessionResponse> {
-    let session_id = Uuid::new_v4().to_string();
+pub async fn new_session(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Json<NewSessionResponse> {
+    let user_id = extract_user_identity(&headers);
 
-    // Create session in store
-    {
-        let mut sessions = state.sessions.write().await;
-        sessions.insert(session_id.clone(), Session::new());
+    match state.storage.create_session(user_id.as_deref()).await {
+        Ok(session) => {
+            log(&format!("New session created: {} ({})", session.name, &session.id[..8]));
+            Json(NewSessionResponse {
+                session_id: session.id,
+                session_name: session.name,
+            })
+        }
+        Err(e) => {
+            log(&format!("Failed to create session: {}", e));
+            // Return empty session on error
+            Json(NewSessionResponse {
+                session_id: String::new(),
+                session_name: String::new(),
+            })
+        }
     }
+}
 
-    log(&format!("New session created: {}", &session_id[..8]));
-    Json(NewSessionResponse { session_id })
+/// List sessions response
+#[derive(Serialize)]
+pub struct ListSessionsResponse {
+    sessions: Vec<SessionMetadata>,
+    persistent: bool,
+}
+
+/// List all sessions for the current user
+pub async fn list_sessions(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Json<ListSessionsResponse> {
+    let user_id = extract_user_identity(&headers);
+
+    match state.storage.list_sessions(user_id.as_deref()).await {
+        Ok(sessions) => {
+            log(&format!("Listed {} sessions", sessions.len()));
+            Json(ListSessionsResponse {
+                sessions,
+                persistent: state.storage.is_persistent(),
+            })
+        }
+        Err(e) => {
+            log(&format!("Failed to list sessions: {}", e));
+            Json(ListSessionsResponse {
+                sessions: vec![],
+                persistent: state.storage.is_persistent(),
+            })
+        }
+    }
+}
+
+/// Delete session request
+#[derive(Deserialize)]
+pub struct DeleteSessionRequest {
+    session_id: String,
+}
+
+/// Delete session response
+#[derive(Serialize)]
+pub struct DeleteSessionResponse {
+    deleted: bool,
+}
+
+/// Delete a session
+pub async fn delete_session(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<DeleteSessionRequest>,
+) -> Json<DeleteSessionResponse> {
+    match state.storage.delete_session(&request.session_id).await {
+        Ok(deleted) => {
+            if deleted {
+                log(&format!("Deleted session: {}", &request.session_id[..8.min(request.session_id.len())]));
+            }
+            Json(DeleteSessionResponse { deleted })
+        }
+        Err(e) => {
+            log(&format!("Failed to delete session: {}", e));
+            Json(DeleteSessionResponse { deleted: false })
+        }
+    }
 }
 
 /// Session history request
@@ -296,61 +375,65 @@ pub async fn get_session_history(
     State(state): State<Arc<AppState>>,
     Json(request): Json<SessionHistoryRequest>,
 ) -> Json<SessionHistoryResponse> {
-    // Check for authenticated user - if present, use their session instead
-    let session_key = if let Some(user) = extract_user_identity(&headers) {
-        format!("user:{}", user)
+    // Determine session ID - for authenticated users, get their most recent session
+    let session_id = if let Some(user) = extract_user_identity(&headers) {
+        // Get or create user session
+        match state.storage.get_or_create_user_session(&user).await {
+            Ok(session) => session.id,
+            Err(_) => return Json(SessionHistoryResponse { exists: false, messages: vec![] }),
+        }
     } else {
         request.session_id.clone()
     };
 
-    let sessions = state.sessions.read().await;
+    // Get history from storage
+    match state.storage.get_history(&session_id).await {
+        Ok(history) if !history.is_empty() => {
+            let messages: Vec<HistoryMessage> = history.iter().map(|msg| {
+                match msg {
+                    Message::User { content } => HistoryMessage::User {
+                        content: content.clone(),
+                    },
+                    Message::Assistant { content, tool_calls } => HistoryMessage::Assistant {
+                        content: content.clone(),
+                        tool_calls: tool_calls.as_ref().map(|tcs| {
+                            tcs.iter().map(|tc| HistoryToolCall {
+                                name: tc.function.name.clone(),
+                                arguments: tc.function.arguments.clone(),
+                            }).collect()
+                        }),
+                    },
+                    Message::Tool { tool_call_id, content } => {
+                        // Try to find the tool name from the corresponding tool call
+                        let name = history.iter()
+                            .filter_map(|m| {
+                                if let Message::Assistant { tool_calls: Some(tcs), .. } = m {
+                                    tcs.iter().find(|tc| tc.id == *tool_call_id).map(|tc| tc.function.name.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .next()
+                            .unwrap_or_else(|| "unknown".to_string());
 
-    if let Some(session) = sessions.get(&session_key) {
-        let messages: Vec<HistoryMessage> = session.history.iter().map(|msg| {
-            match msg {
-                Message::User { content } => HistoryMessage::User {
-                    content: content.clone(),
-                },
-                Message::Assistant { content, tool_calls } => HistoryMessage::Assistant {
-                    content: content.clone(),
-                    tool_calls: tool_calls.as_ref().map(|tcs| {
-                        tcs.iter().map(|tc| HistoryToolCall {
-                            name: tc.function.name.clone(),
-                            arguments: tc.function.arguments.clone(),
-                        }).collect()
-                    }),
-                },
-                Message::Tool { tool_call_id, content } => {
-                    // Try to find the tool name from the corresponding tool call
-                    let name = session.history.iter()
-                        .filter_map(|m| {
-                            if let Message::Assistant { tool_calls: Some(tcs), .. } = m {
-                                tcs.iter().find(|tc| tc.id == *tool_call_id).map(|tc| tc.function.name.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .next()
-                        .unwrap_or_else(|| "unknown".to_string());
-
-                    HistoryMessage::Tool {
-                        tool_call_id: tool_call_id.clone(),
-                        name,
-                        result: content.clone(),
+                        HistoryMessage::Tool {
+                            tool_call_id: tool_call_id.clone(),
+                            name,
+                            result: content.clone(),
+                        }
                     }
                 }
-            }
-        }).collect();
+            }).collect();
 
-        Json(SessionHistoryResponse {
-            exists: true,
-            messages,
-        })
-    } else {
-        Json(SessionHistoryResponse {
+            Json(SessionHistoryResponse {
+                exists: true,
+                messages,
+            })
+        }
+        _ => Json(SessionHistoryResponse {
             exists: false,
             messages: vec![],
-        })
+        }),
     }
 }
 
@@ -367,12 +450,14 @@ pub async fn clear_session(
 ) -> Json<ClearSessionResponse> {
     // Check for authenticated user
     if let Some(user) = extract_user_identity(&headers) {
-        let session_key = format!("user:{}", user);
-        let mut sessions = state.sessions.write().await;
-        if let Some(session) = sessions.get_mut(&session_key) {
-            session.history.clear();
-            log(&format!("Cleared session history for: {}", user));
-            return Json(ClearSessionResponse { cleared: true });
+        match state.storage.clear_user_session(&user).await {
+            Ok(()) => {
+                log(&format!("Cleared session history for: {}", user));
+                return Json(ClearSessionResponse { cleared: true });
+            }
+            Err(e) => {
+                log(&format!("Failed to clear session for {}: {}", user, e));
+            }
         }
     }
     Json(ClearSessionResponse { cleared: false })
@@ -394,39 +479,39 @@ pub async fn session_events(
     let session_short = if session_id.len() >= 8 { &session_id[..8] } else { &session_id };
     log(&format!("[{}] Session events requested (reconnection)", session_short));
 
-    // Get stored events and check if query is running
-    let (stored_events, broadcast_rx) = {
-        let sessions = state.sessions.read().await;
-        if let Some(session) = sessions.get(&session_id) {
-            let events = session.events.clone();
-            let rx = session.event_tx.as_ref().map(|tx| tx.subscribe());
-            log(&format!("[{}] Found {} stored events, query_running: {}",
-                session_short, events.len(), session.query_running));
-            (events, rx)
-        } else {
-            log(&format!("[{}] Session not found", session_short));
-            (Vec::new(), None)
-        }
+    // Get stored events and check if query is running from storage
+    let (stored_events, broadcast_rx, query_running) = if let Some((events, event_tx, running)) =
+        state.storage.get_runtime_state(&session_id).await
+    {
+        let rx = event_tx.as_ref().map(|tx| tx.subscribe());
+        log(&format!("[{}] Found {} stored events, query_running: {}",
+            session_short, events.len(), running));
+        (events, rx, running)
+    } else {
+        log(&format!("[{}] Session not found", session_short));
+        (Vec::new(), None, false)
     };
 
     // Check if there's a live query to subscribe to
-    let has_live = broadcast_rx.is_some();
+    let has_live = broadcast_rx.is_some() && query_running;
 
     // Wrap in async stream that handles both replay and live
     let (tx, rx) = mpsc::channel::<SseEvent>(100);
 
     if let Some(broadcast_rx) = broadcast_rx {
-        let tx_clone = tx.clone();
-        let session_short_owned = session_short.to_string();
-        tokio::spawn(async move {
-            let mut stream = BroadcastStream::new(broadcast_rx);
-            while let Some(Ok(event)) = stream.next().await {
-                if tx_clone.send(event).await.is_err() {
-                    break;  // Receiver dropped
+        if query_running {
+            let tx_clone = tx.clone();
+            let session_short_owned = session_short.to_string();
+            tokio::spawn(async move {
+                let mut stream = BroadcastStream::new(broadcast_rx);
+                while let Some(Ok(event)) = stream.next().await {
+                    if tx_clone.send(event).await.is_err() {
+                        break;  // Receiver dropped
+                    }
                 }
-            }
-            log(&format!("[{}] Live event subscription ended", session_short_owned));
-        });
+                log(&format!("[{}] Live event subscription ended", session_short_owned));
+            });
+        }
     }
 
     // First send replay events, then live events
@@ -491,7 +576,7 @@ pub enum SseEvent {
 /// - broadcast channel (for re-subscribers while query is running)
 struct EventSender {
     tx: mpsc::Sender<SseEvent>,
-    sessions: SessionStore,
+    state: Arc<AppState>,
     session_id: String,
     broadcast_tx: broadcast::Sender<SseEvent>,
 }
@@ -499,12 +584,7 @@ struct EventSender {
 impl EventSender {
     async fn send(&self, event: SseEvent) {
         // Store in session for replay
-        {
-            let mut sessions = self.sessions.write().await;
-            if let Some(session) = sessions.get_mut(&self.session_id) {
-                session.events.push(event.clone());
-            }
-        }
+        self.state.storage.push_runtime_event(&self.session_id, event.clone()).await;
 
         // Broadcast to any re-subscribers (ignore errors - no subscribers is fine)
         let _ = self.broadcast_tx.send(event.clone());
@@ -550,48 +630,51 @@ pub async fn query(
     // Check for authenticated user from proxy headers
     let authenticated_user = extract_user_identity(&headers);
 
-    // Get or create session
-    // If authenticated, use user identity as session key for persistent per-user sessions
+    // Get or create session using storage layer
     let session_id = if let Some(ref user) = authenticated_user {
-        // Use a hash of the user identity as session key for privacy in logs
-        let user_session_key = format!("user:{}", user);
-        let sessions = state.sessions.read().await;
-        if sessions.contains_key(&user_session_key) {
-            log(&format!("Using authenticated session for: {}", user));
-            drop(sessions);
-            user_session_key
-        } else {
-            drop(sessions);
-            let mut sessions = state.sessions.write().await;
-            sessions.insert(user_session_key.clone(), Session::new());
-            log(&format!("Created new authenticated session for: {}", user));
-            user_session_key
+        // Get or create session for authenticated user
+        match state.storage.get_or_create_user_session(user).await {
+            Ok(session) => {
+                log(&format!("Using authenticated session for: {} ({})", user, session.name));
+                session.id
+            }
+            Err(e) => {
+                log(&format!("Failed to get/create session for {}: {}", user, e));
+                // Create fallback session
+                match state.storage.create_session(Some(user)).await {
+                    Ok(s) => s.id,
+                    Err(_) => uuid::Uuid::new_v4().to_string(),
+                }
+            }
         }
     } else {
-        // Anonymous session (original behavior)
+        // Anonymous session
         match request.session_id {
             Some(id) => {
-                // Verify session exists, create if not
-                let sessions = state.sessions.read().await;
-                if sessions.contains_key(&id) {
-                    log(&format!("Using existing session: {}", &id[..8]));
-                    id
-                } else {
-                    drop(sessions);
-                    let new_id = Uuid::new_v4().to_string();
-                    let mut sessions = state.sessions.write().await;
-                    sessions.insert(new_id.clone(), Session::new());
-                    log(&format!("Session {} not found, created new: {}", &id[..8], &new_id[..8]));
-                    new_id
+                // Ensure session exists
+                match state.storage.ensure_session(&id, None).await {
+                    Ok(session) => {
+                        log(&format!("Using session: {} ({})", &id[..8.min(id.len())], session.name));
+                        session.id
+                    }
+                    Err(e) => {
+                        log(&format!("Failed to ensure session: {}", e));
+                        id
+                    }
                 }
             }
             None => {
                 // Create new session
-                let new_id = Uuid::new_v4().to_string();
-                let mut sessions = state.sessions.write().await;
-                sessions.insert(new_id.clone(), Session::new());
-                log(&format!("No session provided, created new: {}", &new_id[..8]));
-                new_id
+                match state.storage.create_session(None).await {
+                    Ok(session) => {
+                        log(&format!("Created new session: {} ({})", &session.id[..8], session.name));
+                        session.id
+                    }
+                    Err(e) => {
+                        log(&format!("Failed to create session: {}", e));
+                        uuid::Uuid::new_v4().to_string()
+                    }
+                }
             }
         }
     };
@@ -600,19 +683,18 @@ pub async fn query(
     let (broadcast_tx, _) = broadcast::channel::<SseEvent>(100);
 
     // Set up session for this query: clear old events, store broadcast sender, mark as running
-    {
-        let mut sessions = state.sessions.write().await;
-        if let Some(session) = sessions.get_mut(&session_id) {
-            session.events.clear();
-            session.event_tx = Some(broadcast_tx.clone());
-            session.query_running = true;
-        }
-    }
+    state.storage.clear_runtime_events(&session_id).await;
+    state.storage.set_runtime_state(
+        &session_id,
+        Vec::new(),
+        Some(broadcast_tx.clone()),
+        true,
+    ).await;
 
     // Create event sender that stores events and broadcasts to re-subscribers
     let event_sender = EventSender {
         tx,
-        sessions: state.sessions.clone(),
+        state: state.clone(),
         session_id: session_id.clone(),
         broadcast_tx,
     };
@@ -674,13 +756,8 @@ async fn run_agent_with_events(
         session_id: session_id.clone(),
     }).await;
 
-    // Load existing history from session store
-    let incoming_history = {
-        let sessions = state.sessions.read().await;
-        sessions.get(&session_id)
-            .map(|s| s.history.clone())
-            .unwrap_or_default()
-    };
+    // Load existing history from storage
+    let incoming_history = state.storage.get_history(&session_id).await.unwrap_or_default();
     log(&format!("[{}] Loaded {} messages from history", session_short, incoming_history.len()));
 
     // Prepare the prompt with DMN instructions if needed (only for first message in session)
@@ -930,14 +1007,18 @@ async fn run_agent_with_events(
     // Stop thinking timer
     thinking_handle.abort();
 
-    // Save updated history to session store and mark query as complete
-    {
-        let mut sessions = state.sessions.write().await;
-        if let Some(session) = sessions.get_mut(&session_id) {
-            session.history = conversation_history.clone();
-            session.query_running = false;
-            session.event_tx = None;  // Clear broadcast sender
-        }
+    // Save updated history to storage and mark query as complete
+    let _ = state.storage.set_history(&session_id, &conversation_history).await;
+    state.storage.set_runtime_state(&session_id, Vec::new(), None, false).await;
+
+    // Persist events to storage (for SQLite mode)
+    for msg in &conversation_history {
+        let (event_type, content) = match msg {
+            Message::User { .. } => ("user_message", serde_json::to_string(msg).unwrap_or_default()),
+            Message::Assistant { .. } => ("assistant_message", serde_json::to_string(msg).unwrap_or_default()),
+            Message::Tool { .. } => ("tool_message", serde_json::to_string(msg).unwrap_or_default()),
+        };
+        let _ = state.storage.append_event(&session_id, event_type, &content).await;
     }
 
     log(&format!("[{}] Query complete, saved {} messages to session", session_short, conversation_history.len()));

@@ -399,6 +399,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.59**: Webapp SQLite session persistence (if mcpz installed), hamburger menu with session list, cyberpunk session names
 - **0.2.58**: Display tool call arguments in grey underneath tool name in TUI and CLI output
 - **0.2.57**: Webapp event replay: reconnect to see events that happened while browser was closed; agents continue running when tab closes
 - **0.2.56**: HTTP MCP detailed errors (timeout/status/body), remove --interact flag (TUI auto-launches when no prompt given), fix TUI exit prompt

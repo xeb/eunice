@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "0.2.58"
+version = "0.2.59"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
@@ -56,6 +56,10 @@ futures = "0.3"
 # Full TUI framework
 r3bl_tui = "0.7"
 atty = "0.2"
+
+# Session persistence (SQLite)
+rusqlite = { version = "0.32", features = ["bundled"] }
+rand = "0.8"
 
 [profile.release]
 lto = true
