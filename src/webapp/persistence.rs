@@ -728,6 +728,7 @@ pub fn format_relative_time(timestamp: i64, now: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::Message;
 
     #[test]
     fn test_format_relative_time() {
@@ -758,5 +759,213 @@ mod tests {
         assert_eq!(NOUNS.len(), 32);
         // Total combinations
         assert_eq!(ADJECTIVES.len() * NOUNS.len(), 1024);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_create_session() {
+        let storage = SessionStorage::new(false).unwrap();
+        assert!(!storage.is_persistent());
+
+        let session = storage.create_session(None).await.unwrap();
+        assert!(!session.id.is_empty());
+        assert!(session.name.contains('-'));
+        assert!(session.user_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_create_session_with_user() {
+        let storage = SessionStorage::new(false).unwrap();
+        let session = storage.create_session(Some("user@example.com")).await.unwrap();
+        assert_eq!(session.user_id, Some("user@example.com".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_get_session() {
+        let storage = SessionStorage::new(false).unwrap();
+        let session = storage.create_session(None).await.unwrap();
+
+        let retrieved = storage.get_session(&session.id).await.unwrap();
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().id, session.id);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_get_nonexistent_session() {
+        let storage = SessionStorage::new(false).unwrap();
+        let retrieved = storage.get_session("nonexistent-id").await.unwrap();
+        assert!(retrieved.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_set_and_get_history() {
+        let storage = SessionStorage::new(false).unwrap();
+        let session = storage.create_session(None).await.unwrap();
+
+        // Set history
+        let history = vec![
+            Message::User { content: "Hello".to_string() },
+            Message::Assistant { content: Some("Hi there!".to_string()), tool_calls: None },
+        ];
+        storage.set_history(&session.id, &history).await.unwrap();
+
+        // Get history
+        let retrieved = storage.get_history(&session.id).await.unwrap();
+        assert_eq!(retrieved.len(), 2);
+
+        match &retrieved[0] {
+            Message::User { content } => assert_eq!(content, "Hello"),
+            _ => panic!("Expected User message"),
+        }
+        match &retrieved[1] {
+            Message::Assistant { content, .. } => assert_eq!(content, &Some("Hi there!".to_string())),
+            _ => panic!("Expected Assistant message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_multiple_sessions_independent_history() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        // Create two sessions
+        let session1 = storage.create_session(None).await.unwrap();
+        let session2 = storage.create_session(None).await.unwrap();
+
+        // Set different history for each
+        let history1 = vec![Message::User { content: "Session 1 message".to_string() }];
+        let history2 = vec![
+            Message::User { content: "Session 2 message".to_string() },
+            Message::Assistant { content: Some("Session 2 response".to_string()), tool_calls: None },
+        ];
+
+        storage.set_history(&session1.id, &history1).await.unwrap();
+        storage.set_history(&session2.id, &history2).await.unwrap();
+
+        // Verify each session has its own history
+        let retrieved1 = storage.get_history(&session1.id).await.unwrap();
+        let retrieved2 = storage.get_history(&session2.id).await.unwrap();
+
+        assert_eq!(retrieved1.len(), 1);
+        assert_eq!(retrieved2.len(), 2);
+
+        match &retrieved1[0] {
+            Message::User { content } => assert_eq!(content, "Session 1 message"),
+            _ => panic!("Expected User message"),
+        }
+        match &retrieved2[0] {
+            Message::User { content } => assert_eq!(content, "Session 2 message"),
+            _ => panic!("Expected User message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_list_sessions() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        // Create sessions
+        let _session1 = storage.create_session(None).await.unwrap();
+        let _session2 = storage.create_session(None).await.unwrap();
+
+        let sessions = storage.list_sessions(None).await.unwrap();
+        assert_eq!(sessions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_list_sessions_by_user() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        // Create sessions for different users
+        let _session1 = storage.create_session(Some("user1@example.com")).await.unwrap();
+        let _session2 = storage.create_session(Some("user1@example.com")).await.unwrap();
+        let _session3 = storage.create_session(Some("user2@example.com")).await.unwrap();
+
+        // List sessions for user1
+        let user1_sessions = storage.list_sessions(Some("user1@example.com")).await.unwrap();
+        assert_eq!(user1_sessions.len(), 2);
+
+        // List sessions for user2
+        let user2_sessions = storage.list_sessions(Some("user2@example.com")).await.unwrap();
+        assert_eq!(user2_sessions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_delete_session() {
+        let storage = SessionStorage::new(false).unwrap();
+        let session = storage.create_session(None).await.unwrap();
+
+        // Verify session exists
+        assert!(storage.get_session(&session.id).await.unwrap().is_some());
+
+        // Delete session
+        let deleted = storage.delete_session(&session.id).await.unwrap();
+        assert!(deleted);
+
+        // Verify session is gone
+        assert!(storage.get_session(&session.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_delete_nonexistent_session() {
+        let storage = SessionStorage::new(false).unwrap();
+        let deleted = storage.delete_session("nonexistent-id").await.unwrap();
+        assert!(!deleted);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_get_or_create_user_session() {
+        let storage = SessionStorage::new(false).unwrap();
+        let user_id = "user@example.com";
+
+        // First call creates a new session
+        let session1 = storage.get_or_create_user_session(user_id).await.unwrap();
+        assert_eq!(session1.user_id, Some(user_id.to_string()));
+
+        // Second call returns the same session
+        let session2 = storage.get_or_create_user_session(user_id).await.unwrap();
+        assert_eq!(session1.id, session2.id);
+    }
+
+    #[tokio::test]
+    async fn test_memory_storage_switching_sessions_preserves_history() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        // Create two sessions with history
+        let session1 = storage.create_session(None).await.unwrap();
+        let session2 = storage.create_session(None).await.unwrap();
+
+        let history1 = vec![
+            Message::User { content: "First session query".to_string() },
+            Message::Assistant { content: Some("First session response".to_string()), tool_calls: None },
+        ];
+        let history2 = vec![
+            Message::User { content: "Second session query".to_string() },
+            Message::Assistant { content: Some("Second session response".to_string()), tool_calls: None },
+        ];
+
+        storage.set_history(&session1.id, &history1).await.unwrap();
+        storage.set_history(&session2.id, &history2).await.unwrap();
+
+        // Simulate switching: get history for session1
+        let retrieved1 = storage.get_history(&session1.id).await.unwrap();
+        assert_eq!(retrieved1.len(), 2);
+        match &retrieved1[0] {
+            Message::User { content } => assert!(content.contains("First session")),
+            _ => panic!("Expected User message"),
+        }
+
+        // Switch to session2
+        let retrieved2 = storage.get_history(&session2.id).await.unwrap();
+        assert_eq!(retrieved2.len(), 2);
+        match &retrieved2[0] {
+            Message::User { content } => assert!(content.contains("Second session")),
+            _ => panic!("Expected User message"),
+        }
+
+        // Switch back to session1 - history should be preserved
+        let retrieved1_again = storage.get_history(&session1.id).await.unwrap();
+        assert_eq!(retrieved1_again.len(), 2);
+        match &retrieved1_again[0] {
+            Message::User { content } => assert!(content.contains("First session")),
+            _ => panic!("Expected User message"),
+        }
     }
 }
