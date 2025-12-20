@@ -125,6 +125,10 @@ struct Args {
     /// Disable MCP even if eunice.json exists
     #[arg(long, help_heading = "Advanced")]
     no_mcp: bool,
+
+    /// Update eunice to the latest version from GitHub
+    #[arg(long, help_heading = "Advanced")]
+    update: bool,
 }
 
 /// Print MCP server info for help output
@@ -304,6 +308,44 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
     Ok(None)
 }
 
+/// Update eunice to the latest version from GitHub
+fn run_update() -> Result<()> {
+    use std::process::{Command, Stdio};
+
+    println!("Updating eunice from GitHub...");
+    println!("Current version: {}", VERSION);
+    println!();
+
+    // Check if cargo is available
+    let cargo_check = Command::new("cargo")
+        .arg("--version")
+        .output();
+
+    if cargo_check.is_err() {
+        return Err(anyhow!("cargo is not installed. Please install Rust/Cargo first."));
+    }
+
+    // Run cargo install from git
+    let status = Command::new("cargo")
+        .args([
+            "install",
+            "--git",
+            "https://github.com/xeb/eunice.git",
+            "--force",
+        ])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if status.success() {
+        println!();
+        println!("Update complete! Run 'eunice --version' to verify.");
+        Ok(())
+    } else {
+        Err(anyhow!("Update failed. Check the output above for details."))
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Handle --help with MCP server info before clap parses
@@ -315,6 +357,11 @@ async fn main() -> Result<()> {
     if args.list_models {
         display::print_model_list();
         return Ok(());
+    }
+
+    // Handle --update
+    if args.update {
+        return run_update();
     }
 
     // Handle --llms-txt
