@@ -375,12 +375,17 @@ pub async fn get_session_history(
     State(state): State<Arc<AppState>>,
     Json(request): Json<SessionHistoryRequest>,
 ) -> Json<SessionHistoryResponse> {
-    // Determine session ID - for authenticated users, get their most recent session
-    let session_id = if let Some(user) = extract_user_identity(&headers) {
-        // Get or create user session
-        match state.storage.get_or_create_user_session(&user).await {
-            Ok(session) => session.id,
-            Err(_) => return Json(SessionHistoryResponse { exists: false, messages: vec![] }),
+    // Use the requested session ID directly - the frontend knows which session to load
+    // For authenticated users, sessions are already filtered by user in list_sessions
+    let session_id = if request.session_id.is_empty() {
+        // No session ID provided - for authenticated users, get their most recent session
+        if let Some(user) = extract_user_identity(&headers) {
+            match state.storage.get_or_create_user_session(&user).await {
+                Ok(session) => session.id,
+                Err(_) => return Json(SessionHistoryResponse { exists: false, messages: vec![] }),
+            }
+        } else {
+            return Json(SessionHistoryResponse { exists: false, messages: vec![] });
         }
     } else {
         request.session_id.clone()
