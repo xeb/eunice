@@ -68,10 +68,19 @@
             align-items: center;
         }
 
+        .header-top {
+            gap: 12px;
+        }
+
+        .header-spacer {
+            flex: 1;
+        }
+
         .header-info-row {
             display: flex;
             gap: 8px;
             flex-wrap: wrap;
+            align-items: center;
         }
 
         .logo {
@@ -660,19 +669,30 @@
             }
 
             header {
-                flex-direction: column;
+                padding: 16px 0 12px;
                 gap: 8px;
-                align-items: flex-start;
+            }
+
+            .header-top {
+                gap: 8px;
             }
 
             .logo {
                 font-size: 14px;
+                letter-spacing: 0.2em;
             }
 
-            .status {
-                font-size: 10px;
-                gap: 8px;
-                flex-wrap: wrap;
+            .btn-menu {
+                padding: 8px;
+            }
+
+            .btn-menu svg {
+                width: 20px;
+                height: 20px;
+            }
+
+            .header-info-row {
+                gap: 6px;
             }
 
             .model-badge {
@@ -680,9 +700,49 @@
                 padding: 2px 6px;
             }
 
+            .header-info {
+                font-size: 9px;
+                padding: 2px 4px;
+            }
+
             .btn-api {
                 font-size: 10px;
-                padding: 2px 6px;
+                padding: 4px 8px;
+            }
+
+            .connection-status {
+                font-size: 10px;
+            }
+
+            /* Session drawer mobile */
+            .session-drawer {
+                width: 85vw;
+                max-width: 320px;
+                left: -85vw;
+            }
+
+            .session-drawer.open {
+                left: 0;
+            }
+
+            .drawer-header {
+                padding: 12px;
+            }
+
+            .drawer-title {
+                font-size: 11px;
+            }
+
+            .session-item {
+                padding: 10px 12px;
+            }
+
+            .session-name {
+                font-size: 12px;
+            }
+
+            .session-meta {
+                font-size: 10px;
             }
 
             .message {
@@ -876,110 +936,30 @@
 
     <div class="container">
         <header>
-            <div class="header-row">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <button class="btn-menu" id="menu-btn" title="Sessions">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="3" y1="6" x2="21" y2="6"></line>
-                            <line x1="3" y1="12" x2="21" y2="12"></line>
-                            <line x1="3" y1="18" x2="21" y2="18"></line>
-                        </svg>
-                    </button>
-                    <div class="logo">E U N I C E</div>
-                </div>
-                <div class="status">
-                    <span class="model-badge" id="model-badge">loading...</span>
-                    <button class="btn-api btn-new" id="new-btn">NEW</button>
-                    <button class="btn-api" id="config-btn">CONFIG</button>
-                    <button class="btn-api" id="api-btn">API</button>
-                    <div class="connection-status">
-                        <div class="status-dot loading" id="status-dot"></div>
-                        <span id="status-text">connecting</span>
-                    </div>
+            <div class="header-row header-top">
+                <button class="btn-menu" id="menu-btn" title="Sessions">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                </button>
+                <div class="logo">E U N I C E</div>
+                <div class="header-spacer"></div>
+                <button class="btn-api btn-new" id="new-btn">NEW</button>
+                <div class="connection-status">
+                    <div class="status-dot loading" id="status-dot"></div>
+                    <span id="status-text">connecting</span>
                 </div>
             </div>
             <div class="header-info-row">
+                <span class="model-badge" id="model-badge">loading...</span>
                 <span class="header-info" id="mode-display"></span>
                 <span class="header-info" id="agent-display" style="display: none;"></span>
                 <span class="header-info" id="tools-display">-</span>
                 <span class="header-info" id="servers-display">-</span>
             </div>
         </header>
-
-        <!-- API Spec Modal -->
-        <div class="modal-overlay" id="api-modal">
-            <div class="modal">
-                <div class="modal-header">
-                    <span class="modal-title">A P I   S P E C</span>
-                    <button class="modal-close" id="modal-close">&times;</button>
-                </div>
-
-                <div class="api-endpoint">
-                    <h3><span class="api-method get">GET</span> /api/status</h3>
-                    <p>Returns server status, model info, and available tools.</p>
-                    <div class="api-curl" id="curl-status"></div>
-                    <details class="api-response">
-                        <summary>Example Response</summary>
-                        <pre>{
-  "version": "0.2.29",
-  "model": "gemini-3-pro-preview",
-  "provider": "Gemini",
-  "mode": "dmn",
-  "agent": null,
-  "mcp_servers": ["shell", "filesystem"],
-  "tools_count": 12
-}</pre>
-                    </details>
-                </div>
-
-                <div class="api-endpoint">
-                    <h3><span class="api-method post">POST</span> /api/query</h3>
-                    <p>Submit a query. Returns Server-Sent Events (SSE) stream with tool calls, results, and response.</p>
-                    <div class="api-curl" id="curl-query"></div>
-                    <details class="api-response">
-                        <summary>SSE Event Types</summary>
-                        <pre>event: thinking
-data: {"type":"thinking","elapsed_seconds":1}
-
-event: tool_call
-data: {"type":"tool_call","name":"shell_execute","arguments":"{\"command\":\"ls\"}"}
-
-event: tool_result
-data: {"type":"tool_result","name":"shell_execute","result":"file1.txt\nfile2.txt","truncated":false}
-
-event: response
-data: {"type":"response","content":"The directory contains 2 files."}
-
-event: done
-data: {"type":"done"}</pre>
-                    </details>
-                </div>
-
-                <div class="api-endpoint">
-                    <h3><span class="api-method post">POST</span> /api/cancel</h3>
-                    <p>Cancel the currently running query.</p>
-                    <div class="api-curl" id="curl-cancel"></div>
-                    <details class="api-response">
-                        <summary>Example Response</summary>
-                        <pre>{"cancelled": true}</pre>
-                    </details>
-                </div>
-            </div>
-        </div>
-
-        <!-- Config Modal -->
-        <div class="modal-overlay" id="config-modal">
-            <div class="modal">
-                <div class="modal-header">
-                    <span class="modal-title">C O N F I G U R A T I O N</span>
-                    <button class="modal-close" id="config-modal-close">&times;</button>
-                </div>
-
-                <div id="config-content">
-                    <p style="color: var(--text-muted);">Loading configuration...</p>
-                </div>
-            </div>
-        </div>
 
         <div class="messages" id="messages"></div>
 
@@ -1022,8 +1002,48 @@ data: {"type":"done"}</pre>
         // Session management - stored in localStorage for persistence across tab closes
         // When authenticated via proxy, server handles sessions per-user automatically
         const SESSION_KEY = 'eunice_session_id';
+        const SESSION_NAME_KEY = 'eunice_session_name';
         let sessionId = localStorage.getItem(SESSION_KEY);
         let authenticatedUser = null;  // Set if user is authenticated via proxy
+
+        // Check if session name is in URL hash (e.g., /#/sprawl-molly)
+        function getSessionFromUrl() {
+            const hash = window.location.hash;
+            if (hash && hash.startsWith('#/')) {
+                return hash.substring(2);  // Remove '#/'
+            }
+            return null;
+        }
+
+        // Update URL to reflect current session
+        function updateSessionUrl(sessionName) {
+            if (sessionName) {
+                window.history.replaceState(null, '', '#/' + sessionName);
+            } else {
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+        }
+
+        // Check if message content contains system instructions (DMN mode)
+        function isSystemInstructionMessage(content) {
+            if (!content) return false;
+            // DMN instructions start with this marker
+            return content.includes('# DMN: DEFAULT MODE NETWORK') ||
+                   content.includes('You are now in DMN (Default Mode Network) autonomous batch mode');
+        }
+
+        // Extract user's actual prompt from a DMN-wrapped message
+        function extractUserPrompt(content) {
+            if (!content) return content;
+            const marker = '# USER REQUEST\n\n';
+            const endMarker = '\n\n---\n\nYou are now in DMN';
+            const startIdx = content.indexOf(marker);
+            const endIdx = content.indexOf(endMarker);
+            if (startIdx !== -1 && endIdx !== -1) {
+                return content.substring(startIdx + marker.length, endIdx);
+            }
+            return content;
+        }
 
         // Auto-resize textarea
         queryInput.addEventListener('input', () => {
@@ -1376,128 +1396,8 @@ data: {"type":"done"}</pre>
             });
         }
 
-        // API Modal
-        const apiBtn = document.getElementById('api-btn');
-        const apiModal = document.getElementById('api-modal');
-        const modalClose = document.getElementById('modal-close');
-
-        function updateCurlExamples() {
-            const baseUrl = window.location.origin;
-
-            document.getElementById('curl-status').textContent =
-                `curl ${baseUrl}/api/status`;
-
-            document.getElementById('curl-query').textContent =
-                `curl -X POST ${baseUrl}/api/query \\
-  -H "Content-Type: application/json" \\
-  -d '{"prompt": "What files are in the current directory?"}'`;
-
-            document.getElementById('curl-cancel').textContent =
-                `curl -X POST ${baseUrl}/api/cancel`;
-        }
-
-        apiBtn.addEventListener('click', () => {
-            updateCurlExamples();
-            apiModal.classList.add('visible');
-        });
-
-        modalClose.addEventListener('click', () => {
-            apiModal.classList.remove('visible');
-        });
-
-        apiModal.addEventListener('click', (e) => {
-            if (e.target === apiModal) {
-                apiModal.classList.remove('visible');
-            }
-        });
-
-        // Config Modal
-        const configBtn = document.getElementById('config-btn');
-        const configModal = document.getElementById('config-modal');
-        const configModalClose = document.getElementById('config-modal-close');
-        const configContent = document.getElementById('config-content');
-
-        async function fetchConfig() {
-            try {
-                const res = await fetch('/api/config');
-                const data = await res.json();
-
-                let html = '';
-
-                // Agents section
-                html += '<div class="api-endpoint"><h3>Agents</h3>';
-                if (data.agents.length === 0) {
-                    html += '<p>No agents configured</p>';
-                } else {
-                    html += '<div class="api-curl">';
-                    for (const agent of data.agents) {
-                        const tools = agent.tools.length > 0 ? agent.tools.join(', ') : 'no tools';
-                        const invokes = agent.can_invoke.length > 0
-                            ? ` → can invoke: ${agent.can_invoke.join(', ')}`
-                            : '';
-                        html += `${agent.name}: [${tools}]${invokes}\n`;
-                    }
-                    html += '</div>';
-                }
-                html += '</div>';
-
-                // Servers section
-                html += '<div class="api-endpoint"><h3>MCP Servers</h3>';
-                if (data.servers.length === 0) {
-                    html += '<p>No MCP servers configured</p>';
-                } else {
-                    html += '<div class="api-curl">';
-                    for (const server of data.servers) {
-                        html += `${server.name} [${server.transport}] ${server.tool_count} tools\n`;
-                    }
-                    html += '</div>';
-                }
-                html += '</div>';
-
-                // Tools section
-                html += '<div class="api-endpoint"><h3>Tools (' + data.tools.length + ')</h3>';
-                if (data.tools.length === 0) {
-                    html += '<p>No tools available</p>';
-                } else {
-                    html += '<div class="api-curl" style="max-height: 300px; overflow-y: auto;">';
-                    for (const tool of data.tools) {
-                        const desc = tool.description ? ` - ${tool.description.substring(0, 60)}${tool.description.length > 60 ? '...' : ''}` : '';
-                        html += `${tool.name}${desc}\n`;
-                    }
-                    html += '</div>';
-                }
-                html += '</div>';
-
-                configContent.innerHTML = html;
-            } catch (err) {
-                configContent.innerHTML = `<p style="color: var(--neon-coral);">Error loading config: ${err.message}</p>`;
-            }
-        }
-
-        configBtn.addEventListener('click', () => {
-            fetchConfig();
-            configModal.classList.add('visible');
-        });
-
         // NEW button reference
         const newBtn = document.getElementById('new-btn');
-
-        configModalClose.addEventListener('click', () => {
-            configModal.classList.remove('visible');
-        });
-
-        configModal.addEventListener('click', (e) => {
-            if (e.target === configModal) {
-                configModal.classList.remove('visible');
-            }
-        });
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                apiModal.classList.remove('visible');
-                configModal.classList.remove('visible');
-            }
-        });
 
         // Restore session history on page load
         async function restoreSessionHistory() {
@@ -1523,7 +1423,14 @@ data: {"type":"done"}</pre>
                 for (const msg of data.messages) {
                     switch (msg.role) {
                         case 'user':
-                            addMessage('user', escapeHtml(msg.content));
+                            // Filter out system instructions, extract actual user prompt
+                            let userContent = msg.content;
+                            if (isSystemInstructionMessage(userContent)) {
+                                userContent = extractUserPrompt(userContent);
+                            }
+                            if (userContent && userContent.trim()) {
+                                addMessage('user', escapeHtml(userContent));
+                            }
                             break;
 
                         case 'assistant':
@@ -1643,12 +1550,6 @@ data: {"type":"done"}</pre>
         let currentSessionName = null;
         let persistenceEnabled = false;
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
         function openDrawer() {
             sessionDrawer.classList.add('open');
             drawerOverlay.classList.add('visible');
@@ -1700,7 +1601,8 @@ data: {"type":"done"}</pre>
                     sessionList.querySelectorAll('.session-info').forEach(el => {
                         el.addEventListener('click', () => {
                             const item = el.closest('.session-item');
-                            selectSession(item.dataset.id);
+                            const name = item.querySelector('.session-name').textContent;
+                            selectSession(item.dataset.id, name);
                         });
                     });
 
@@ -1717,9 +1619,12 @@ data: {"type":"done"}</pre>
             }
         }
 
-        async function selectSession(id) {
+        async function selectSession(id, name) {
             sessionId = id;
+            currentSessionName = name;
             localStorage.setItem(SESSION_KEY, sessionId);
+            localStorage.setItem(SESSION_NAME_KEY, name);
+            updateSessionUrl(name);
             closeDrawer();
 
             // Clear messages and restore history
@@ -1758,6 +1663,8 @@ data: {"type":"done"}</pre>
                 sessionId = data.session_id;
                 currentSessionName = data.session_name;
                 localStorage.setItem(SESSION_KEY, sessionId);
+                localStorage.setItem(SESSION_NAME_KEY, currentSessionName);
+                updateSessionUrl(currentSessionName);
 
                 // Clear messages
                 messagesEl.innerHTML = '';
@@ -1784,13 +1691,52 @@ data: {"type":"done"}</pre>
             queryInput.focus();
         });
 
-        // Initialize
-        fetchStatus();
-        restoreSessionHistory().then(() => {
-            // After restoring history, try to reconnect to live events
+        // Find session by name from server
+        async function findSessionByName(name) {
+            try {
+                const res = await fetch('/api/sessions');
+                const data = await res.json();
+                return data.sessions.find(s => s.name === name);
+            } catch (err) {
+                console.error('[webapp] Failed to find session by name:', err);
+                return null;
+            }
+        }
+
+        // Initialize - check URL for session name first
+        async function init() {
+            await fetchStatus();
+
+            // Check if there's a session name in URL
+            const urlSessionName = getSessionFromUrl();
+            if (urlSessionName) {
+                console.log('[webapp] Loading session from URL:', urlSessionName);
+                const session = await findSessionByName(urlSessionName);
+                if (session) {
+                    sessionId = session.id;
+                    currentSessionName = session.name;
+                    localStorage.setItem(SESSION_KEY, sessionId);
+                    localStorage.setItem(SESSION_NAME_KEY, session.name);
+                } else {
+                    // Session not found, clear URL
+                    console.log('[webapp] Session not found:', urlSessionName);
+                    updateSessionUrl(null);
+                }
+            } else if (sessionId) {
+                // Have session ID from localStorage, update URL with name
+                const savedName = localStorage.getItem(SESSION_NAME_KEY);
+                if (savedName) {
+                    currentSessionName = savedName;
+                    updateSessionUrl(savedName);
+                }
+            }
+
+            await restoreSessionHistory();
             reconnectToEvents();
-        });
-        queryInput.focus();
+            queryInput.focus();
+        }
+
+        init();
     </script>
 </body>
 </html>
