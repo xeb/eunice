@@ -106,6 +106,7 @@ impl AgentOrchestrator {
     }
 
     /// Get the effective model for an agent (agent's model or default)
+    #[allow(dead_code)]  // Used in tests and available for future use
     pub fn get_agent_model(&self, agent_name: &str, default_model: &str) -> String {
         self.agents.get(agent_name)
             .and_then(|a| a.model.as_ref())
