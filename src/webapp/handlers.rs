@@ -636,40 +636,42 @@ pub async fn query(
     let authenticated_user = extract_user_identity(&headers);
 
     // Get or create session using storage layer
-    let session_id = if let Some(ref user) = authenticated_user {
-        // Get or create session for authenticated user
-        match state.storage.get_or_create_user_session(user).await {
-            Ok(session) => {
-                log(&format!("Using authenticated session for: {} ({})", user, session.name));
-                session.id
-            }
-            Err(e) => {
-                log(&format!("Failed to get/create session for {}: {}", user, e));
-                // Create fallback session
-                match state.storage.create_session(Some(user)).await {
-                    Ok(s) => s.id,
-                    Err(_) => uuid::Uuid::new_v4().to_string(),
+    // IMPORTANT: Always respect request.session_id if provided - user chose that session!
+    let session_id = match request.session_id {
+        Some(ref id) if !id.is_empty() => {
+            // User specified a session - use it (ensure it exists)
+            let user_ref = authenticated_user.as_deref();
+            match state.storage.ensure_session(id, user_ref).await {
+                Ok(session) => {
+                    log(&format!("Using specified session: {} ({})", &id[..8.min(id.len())], session.name));
+                    session.id
+                }
+                Err(e) => {
+                    log(&format!("Failed to ensure session {}: {}", id, e));
+                    id.clone()
                 }
             }
         }
-    } else {
-        // Anonymous session
-        match request.session_id {
-            Some(id) => {
-                // Ensure session exists
-                match state.storage.ensure_session(&id, None).await {
+        _ => {
+            // No session specified - get or create one
+            if let Some(ref user) = authenticated_user {
+                // Get or create session for authenticated user
+                match state.storage.get_or_create_user_session(user).await {
                     Ok(session) => {
-                        log(&format!("Using session: {} ({})", &id[..8.min(id.len())], session.name));
+                        log(&format!("Using authenticated session for: {} ({})", user, session.name));
                         session.id
                     }
                     Err(e) => {
-                        log(&format!("Failed to ensure session: {}", e));
-                        id
+                        log(&format!("Failed to get/create session for {}: {}", user, e));
+                        // Create fallback session
+                        match state.storage.create_session(Some(user)).await {
+                            Ok(s) => s.id,
+                            Err(_) => uuid::Uuid::new_v4().to_string(),
+                        }
                     }
                 }
-            }
-            None => {
-                // Create new session
+            } else {
+                // Create new anonymous session
                 match state.storage.create_session(None).await {
                     Ok(session) => {
                         log(&format!("Created new session: {} ({})", &session.id[..8], session.name));

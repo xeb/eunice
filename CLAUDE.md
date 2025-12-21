@@ -411,6 +411,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.67**: Fix session switching: respect session_id from request instead of always using most recent
 - **0.2.66**: Per-agent models: agents can specify their own `model` in config, validated at startup
 - **0.2.59**: Webapp SQLite session persistence (if mcpz installed), hamburger menu with session list, cyberpunk session names
 - **0.2.58**: Display tool call arguments in grey underneath tool name in TUI and CLI output
