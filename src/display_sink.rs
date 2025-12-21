@@ -18,6 +18,10 @@ pub enum DisplayEvent {
     ToolCall { name: String, arguments: String },
     /// Tool result received
     ToolResult { result: String, limit: usize },
+    /// Agent being invoked (multi-agent mode)
+    AgentInvoke { agent_name: String, task: String },
+    /// Agent invocation result (multi-agent mode)
+    AgentResult { agent_name: String, result: String, limit: usize },
     /// Response content from LLM
     Response { content: String },
     /// Error message
@@ -91,6 +95,41 @@ impl DisplaySink for StdDisplaySink {
                         .join("\n")
                 };
 
+                if !output.trim().is_empty() {
+                    println!("{}", output.dimmed());
+                }
+            }
+            DisplayEvent::AgentInvoke { agent_name, task } => {
+                println!("  {} {} {}", "🔀".cyan(), "invoke".cyan(), agent_name.bright_cyan());
+                // Show task in grey
+                let task_preview = if task.len() > 200 {
+                    format!("{}...", &task[..200])
+                } else {
+                    task
+                };
+                for line in task_preview.lines() {
+                    println!("    {}", line.dimmed());
+                }
+            }
+            DisplayEvent::AgentResult { agent_name, result, limit } => {
+                println!("  {} {} {}", "✓".green(), "returned".green(), agent_name.bright_green());
+                // Show truncated result
+                let lines: Vec<&str> = result.lines().collect();
+                let output = if limit > 0 && lines.len() > limit {
+                    let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
+                    let remaining = lines.len() - limit;
+                    format!(
+                        "{}\n    ...{} more lines",
+                        truncated.join("\n    "),
+                        remaining
+                    )
+                } else {
+                    result
+                        .lines()
+                        .map(|l| format!("    {}", l))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
                 if !output.trim().is_empty() {
                     println!("{}", output.dimmed());
                 }
@@ -206,6 +245,45 @@ impl DisplaySink for TuiDisplaySink {
                         .join("\n")
                 };
 
+                if !output.trim().is_empty() {
+                    let _ = writeln!(writer, "{DIM}{}{RESET}", output);
+                }
+            }
+            DisplayEvent::AgentInvoke { agent_name, task } => {
+                const CYAN: &str = "\x1b[36m";
+                const BRIGHT_CYAN: &str = "\x1b[96m";
+                let _ = writeln!(writer, "  {CYAN}🔀 invoke{RESET} {BRIGHT_CYAN}{}{RESET}", agent_name);
+                // Show task in grey
+                let task_preview = if task.len() > 200 {
+                    format!("{}...", &task[..200])
+                } else {
+                    task
+                };
+                for line in task_preview.lines() {
+                    let _ = writeln!(writer, "    {DIM}{}{RESET}", line);
+                }
+            }
+            DisplayEvent::AgentResult { agent_name, result, limit } => {
+                const GREEN: &str = "\x1b[32m";
+                const BRIGHT_GREEN: &str = "\x1b[92m";
+                let _ = writeln!(writer, "  {GREEN}✓ returned{RESET} {BRIGHT_GREEN}{}{RESET}", agent_name);
+                // Show truncated result
+                let lines: Vec<&str> = result.lines().collect();
+                let output = if limit > 0 && lines.len() > limit {
+                    let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
+                    let remaining = lines.len() - limit;
+                    format!(
+                        "{}\n    ...{} more lines",
+                        truncated.join("\n    "),
+                        remaining
+                    )
+                } else {
+                    result
+                        .lines()
+                        .map(|l| format!("    {}", l))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
                 if !output.trim().is_empty() {
                     let _ = writeln!(writer, "{DIM}{}{RESET}", output);
                 }

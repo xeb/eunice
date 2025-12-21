@@ -541,6 +541,8 @@ pub async fn session_events(
             SseEvent::Thinking { .. } => "thinking",
             SseEvent::ToolCall { .. } => "tool_call",
             SseEvent::ToolResult { .. } => "tool_result",
+            SseEvent::AgentInvoke { .. } => "agent_invoke",
+            SseEvent::AgentResult { .. } => "agent_result",
             SseEvent::Response { .. } => "response",
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
@@ -566,6 +568,10 @@ pub enum SseEvent {
     Thinking { elapsed_seconds: u64 },
     ToolCall { name: String, arguments: String },
     ToolResult { name: String, result: String, truncated: bool },
+    /// Agent being invoked (multi-agent mode)
+    AgentInvoke { agent_name: String, task: String },
+    /// Agent invocation completed (multi-agent mode)
+    AgentResult { agent_name: String, result: String, truncated: bool },
     Response { content: String },
     Error { message: String },
     /// Session ID confirmation (sent at start of query)
@@ -601,6 +607,87 @@ impl EventSender {
     /// Clone the mpsc sender for use in spawned tasks (e.g., thinking timer)
     fn tx_clone(&self) -> mpsc::Sender<SseEvent> {
         self.tx.clone()
+    }
+}
+
+use crate::display_sink::{DisplayEvent, DisplaySink};
+
+/// Display sink for webapp that converts DisplayEvents to SseEvents
+pub struct WebappDisplaySink {
+    tx: mpsc::Sender<SseEvent>,
+    #[allow(dead_code)]  // May be used for future truncation
+    tool_output_limit: usize,
+}
+
+impl WebappDisplaySink {
+    pub fn new(tx: mpsc::Sender<SseEvent>, tool_output_limit: usize) -> Self {
+        Self { tx, tool_output_limit }
+    }
+}
+
+impl DisplaySink for WebappDisplaySink {
+    fn write_event(&self, event: DisplayEvent) {
+        let sse_event = match event {
+            DisplayEvent::ThinkingStart => {
+                // Thinking is handled by a separate timer in the webapp
+                return;
+            }
+            DisplayEvent::ThinkingStop => {
+                return;
+            }
+            DisplayEvent::ToolCall { name, arguments } => {
+                SseEvent::ToolCall { name, arguments }
+            }
+            DisplayEvent::ToolResult { result, limit } => {
+                let (display_result, truncated) = if result.lines().count() > limit && limit > 0 {
+                    let lines: Vec<&str> = result.lines().take(limit).collect();
+                    (lines.join("\n"), true)
+                } else {
+                    (result, false)
+                };
+                SseEvent::ToolResult {
+                    name: String::new(),  // Name is sent with ToolCall
+                    result: display_result,
+                    truncated,
+                }
+            }
+            DisplayEvent::AgentInvoke { agent_name, task } => {
+                SseEvent::AgentInvoke { agent_name, task }
+            }
+            DisplayEvent::AgentResult { agent_name, result, limit } => {
+                let (display_result, truncated) = if result.lines().count() > limit && limit > 0 {
+                    let lines: Vec<&str> = result.lines().take(limit).collect();
+                    (lines.join("\n"), true)
+                } else {
+                    (result, false)
+                };
+                SseEvent::AgentResult {
+                    agent_name,
+                    result: display_result,
+                    truncated,
+                }
+            }
+            DisplayEvent::Response { content } => {
+                SseEvent::Response { content }
+            }
+            DisplayEvent::Error { message } => {
+                SseEvent::Error { message }
+            }
+            DisplayEvent::Debug { .. } => {
+                // Don't send debug events to webapp
+                return;
+            }
+            DisplayEvent::Newline => {
+                return;
+            }
+        };
+
+        // Use blocking send since write_event is not async
+        let _ = self.tx.try_send(sse_event);
+    }
+
+    fn is_verbose(&self) -> bool {
+        false
     }
 }
 
@@ -718,6 +805,8 @@ pub async fn query(
             SseEvent::Thinking { .. } => "thinking",
             SseEvent::ToolCall { .. } => "tool_call",
             SseEvent::ToolResult { .. } => "tool_result",
+            SseEvent::AgentInvoke { .. } => "agent_invoke",
+            SseEvent::AgentResult { .. } => "agent_result",
             SseEvent::Response { .. } => "response",
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
@@ -794,6 +883,14 @@ async fn run_agent_with_events(
     }
     if state.enable_search_tool {
         tools.push(agent::get_search_query_tool_spec());
+    }
+
+    // Add invoke tools if orchestrator is present (multi-agent mode)
+    let current_agent = state.agent_name.as_deref().unwrap_or("root");
+    if let Some(ref orchestrator) = state.orchestrator {
+        let invoke_tools = orchestrator.get_invoke_tools(current_agent);
+        log(&format!("[{}] Adding {} invoke tools for agent '{}'", session_short, invoke_tools.len(), current_agent));
+        tools.extend(invoke_tools);
     }
 
     let tools_option = if tools.is_empty() { None } else { Some(tools) };
@@ -961,48 +1058,107 @@ async fn run_agent_with_events(
 
             log(&format!("[{}] Tool call: {}", session_short, tool_name));
 
-            // Send tool call event
-            event_sender.send(SseEvent::ToolCall {
-                name: tool_name.clone(),
-                arguments: arguments.clone(),
-            }).await;
-
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
 
-            // Execute tool
-            let result = if tool_name == agent::INTERPRET_IMAGE_TOOL_NAME {
-                agent::execute_interpret_image(&state.client, &state.provider_info.resolved_model, args).await
-            } else if tool_name == agent::SEARCH_QUERY_TOOL_NAME {
-                agent::execute_search_query(args).await
-            } else if let Some(ref mut manager) = *mcp_guard {
-                manager.execute_tool(tool_name, args).await
-            } else {
-                Ok("Error: No MCP manager available".to_string())
-            }
-            .unwrap_or_else(|e| format!("Error: {}", e));
+            // Check if this is an invoke call (multi-agent mode)
+            let is_invoke = state.orchestrator.as_ref()
+                .map(|o| o.is_invoke_tool(tool_name))
+                .unwrap_or(false);
 
-            let result_preview = if result.len() > 80 {
-                format!("{}...", &result[..80])
+            let result = if is_invoke {
+                // Handle agent invocation
+                let target_agent = state.orchestrator.as_ref()
+                    .and_then(|o| o.get_invoke_target(tool_name))
+                    .unwrap_or("unknown");
+                let task = args.get("task").and_then(|t| t.as_str()).unwrap_or("");
+
+                log(&format!("[{}] Invoking agent '{}' with task: {}", session_short, target_agent, task));
+
+                // Send agent invoke event
+                event_sender.send(SseEvent::AgentInvoke {
+                    agent_name: target_agent.to_string(),
+                    task: task.to_string(),
+                }).await;
+
+                // Create display sink for the subagent
+                let display = Arc::new(WebappDisplaySink::new(event_sender.tx_clone(), state.tool_output_limit));
+
+                // Execute the invoke through orchestrator
+                let invoke_result = if let (Some(ref orchestrator), Some(ref mut manager)) = (&state.orchestrator, mcp_guard.as_mut()) {
+                    orchestrator.handle_invoke_webapp(
+                        &state.client,
+                        &state.provider_info.resolved_model,
+                        tool_name,
+                        &args,
+                        manager,
+                        state.tool_output_limit,
+                        display,
+                        0,  // depth
+                        current_agent,
+                    ).await
+                } else {
+                    "Error: Orchestrator not available".to_string()
+                };
+
+                // Send agent result event
+                let (display_result, truncated) = if invoke_result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
+                    let lines: Vec<&str> = invoke_result.lines().take(state.tool_output_limit).collect();
+                    (lines.join("\n"), true)
+                } else {
+                    (invoke_result.clone(), false)
+                };
+
+                event_sender.send(SseEvent::AgentResult {
+                    agent_name: target_agent.to_string(),
+                    result: display_result,
+                    truncated,
+                }).await;
+
+                invoke_result
             } else {
-                result.clone()
+                // Regular tool call
+                event_sender.send(SseEvent::ToolCall {
+                    name: tool_name.clone(),
+                    arguments: arguments.clone(),
+                }).await;
+
+                // Execute tool
+                let tool_result = if tool_name == agent::INTERPRET_IMAGE_TOOL_NAME {
+                    agent::execute_interpret_image(&state.client, &state.provider_info.resolved_model, args).await
+                } else if tool_name == agent::SEARCH_QUERY_TOOL_NAME {
+                    agent::execute_search_query(args).await
+                } else if let Some(ref mut manager) = *mcp_guard {
+                    manager.execute_tool(tool_name, args).await
+                } else {
+                    Ok("Error: No MCP manager available".to_string())
+                }
+                .unwrap_or_else(|e| format!("Error: {}", e));
+
+                let result_preview = if tool_result.len() > 80 {
+                    format!("{}...", &tool_result[..80])
+                } else {
+                    tool_result.clone()
+                };
+                log(&format!("[{}] Tool result: {} chars ({})", session_short, tool_result.len(), result_preview.replace('\n', " ")));
+
+                // Truncate result for display
+                let (display_result, truncated) = if tool_result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
+                    let lines: Vec<&str> = tool_result.lines().take(state.tool_output_limit).collect();
+                    (lines.join("\n"), true)
+                } else {
+                    (tool_result.clone(), false)
+                };
+
+                // Send tool result event
+                event_sender.send(SseEvent::ToolResult {
+                    name: tool_name.clone(),
+                    result: display_result,
+                    truncated,
+                }).await;
+
+                tool_result
             };
-            log(&format!("[{}] Tool result: {} chars ({})", session_short, result.len(), result_preview.replace('\n', " ")));
-
-            // Truncate result for display
-            let (display_result, truncated) = if result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
-                let lines: Vec<&str> = result.lines().take(state.tool_output_limit).collect();
-                (lines.join("\n"), true)
-            } else {
-                (result.clone(), false)
-            };
-
-            // Send tool result event
-            event_sender.send(SseEvent::ToolResult {
-                name: tool_name.clone(),
-                result: display_result,
-                truncated,
-            }).await;
 
             // Add tool result to history
             conversation_history.push(Message::Tool {

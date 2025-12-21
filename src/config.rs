@@ -48,6 +48,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
     // DMN root agent
     let mut agents = HashMap::new();
     agents.insert("root".to_string(), AgentConfig {
+        description: "Autonomous task executor with shell, filesystem, and browser access".to_string(),
         prompt: DMN_INSTRUCTIONS.to_string(),
         model: None,
         mcp_servers: vec![],
@@ -92,6 +93,7 @@ pub fn get_research_mcp_config() -> McpConfig {
 
     // Root agent (lead coordinator)
     agents.insert("root".to_string(), AgentConfig {
+        description: "Research coordinator that breaks topics into subtasks and delegates to specialist agents".to_string(),
         prompt: RESEARCH_LEAD_PROMPT.to_string(),
         model: None,
         mcp_servers: vec![],
@@ -101,6 +103,7 @@ pub fn get_research_mcp_config() -> McpConfig {
 
     // Researcher agent
     agents.insert("researcher".to_string(), AgentConfig {
+        description: "Web researcher that searches for information and saves detailed notes to research_notes/".to_string(),
         prompt: RESEARCH_RESEARCHER_PROMPT.to_string(),
         model: None,
         mcp_servers: vec![],
@@ -110,6 +113,7 @@ pub fn get_research_mcp_config() -> McpConfig {
 
     // Report writer agent
     agents.insert("report_writer".to_string(), AgentConfig {
+        description: "Report writer that synthesizes research notes into comprehensive reports in reports/".to_string(),
         prompt: RESEARCH_REPORT_WRITER_PROMPT.to_string(),
         model: None,
         mcp_servers: vec![],
@@ -119,6 +123,7 @@ pub fn get_research_mcp_config() -> McpConfig {
 
     // Evaluator agent
     agents.insert("evaluator".to_string(), AgentConfig {
+        description: "Quality evaluator that reviews reports and provides APPROVED or NEEDS_REVISION verdict".to_string(),
         prompt: RESEARCH_EVALUATOR_PROMPT.to_string(),
         model: None,
         mcp_servers: vec![],

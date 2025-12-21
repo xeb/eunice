@@ -219,6 +219,47 @@
             max-height: 100px;
         }
 
+        /* Agent invocation styles (multi-agent mode) */
+        .message.agent-invoke {
+            border-left-color: var(--neon-magenta);
+            background: linear-gradient(90deg, rgba(230, 0, 126, 0.1) 0%, transparent 100%);
+        }
+
+        .message.agent-result {
+            border-left-color: var(--neon-mint);
+            background: linear-gradient(90deg, rgba(0, 255, 163, 0.1) 0%, transparent 100%);
+        }
+
+        .agent-icon {
+            margin-right: 6px;
+        }
+
+        .agent-label {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-right: 6px;
+        }
+
+        .agent-name {
+            font-weight: 600;
+            color: var(--neon-magenta);
+        }
+
+        .agent-task {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-top: 4px;
+            font-style: italic;
+        }
+
+        .agent-result-content {
+            white-space: pre-wrap;
+            font-size: 13px;
+            margin-top: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
         .truncated-notice {
             color: var(--text-muted);
             font-size: 12px;
@@ -1245,6 +1286,34 @@
                         ${truncatedNotice}
                     `);
                     // Re-add thinking indicator while waiting for next LLM response
+                    thinkingEl = addMessage('thinking', '<span class="cursor">|</span> Thinking... <span id="thinking-time">0</span>s');
+                    break;
+
+                case 'agent_invoke':
+                    removeThinking();
+                    addMessage('agent-invoke', `
+                        <span class="agent-icon">🔀</span>
+                        <span class="agent-label">invoking</span>
+                        <span class="agent-name">${escapeHtml(event.agent_name)}</span>
+                        <div class="agent-task">${escapeHtml(event.task)}</div>
+                    `);
+                    // Show thinking while subagent runs
+                    thinkingEl = addMessage('thinking', '<span class="cursor">|</span> Agent running...');
+                    break;
+
+                case 'agent_result':
+                    removeThinking();
+                    const agentTruncated = event.truncated
+                        ? '<div class="truncated-notice">... output truncated</div>'
+                        : '';
+                    addMessage('agent-result', `
+                        <span class="agent-icon">✓</span>
+                        <span class="agent-label">returned</span>
+                        <span class="agent-name">${escapeHtml(event.agent_name)}</span>
+                        <div class="agent-result-content">${escapeHtml(event.result)}</div>
+                        ${agentTruncated}
+                    `);
+                    // Re-add thinking for parent agent
                     thinkingEl = addMessage('thinking', '<span class="cursor">|</span> Thinking... <span id="thinking-time">0</span>s');
                     break;
 

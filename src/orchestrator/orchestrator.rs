@@ -65,10 +65,11 @@ impl AgentOrchestrator {
 
         agent.can_invoke.iter().filter_map(|target_name| {
             let target = self.agents.get(target_name)?;
+            // Use the agent's description for the invoke tool description
             let description = format!(
-                "Invoke the '{}' agent. {}",
+                "Invoke the '{}' agent: {}",
                 target_name,
-                truncate_prompt(&self.resolved_prompts.get(target_name).unwrap_or(&target.prompt), 100)
+                target.description
             );
 
             Some(Tool {
@@ -375,43 +376,58 @@ impl AgentOrchestrator {
             for tool_call in tool_calls {
                 let tool_name = &tool_call.function.name;
                 let arguments = &tool_call.function.arguments;
+                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
 
-                // Only show tool call for MCP tools, not invoke calls
-                if !self.is_invoke_tool(tool_name) {
+                let result = if self.is_invoke_tool(tool_name) {
+                    // Handle agent invocation - show invoke event
+                    let target_agent = self.get_invoke_target(tool_name).unwrap_or("unknown");
+                    let task = args.get("task").and_then(|t| t.as_str()).unwrap_or("");
+                    display.write_event(DisplayEvent::AgentInvoke {
+                        agent_name: target_agent.to_string(),
+                        task: task.to_string(),
+                    });
+
+                    let invoke_result = self.handle_invoke(
+                        client, model, tool_name, &args, mcp_manager,
+                        tool_output_limit, display.clone(), depth, agent_name,
+                    ).await;
+
+                    // Show agent return event
+                    display.write_event(DisplayEvent::AgentResult {
+                        agent_name: target_agent.to_string(),
+                        result: invoke_result.clone(),
+                        limit: tool_output_limit,
+                    });
+
+                    invoke_result
+                } else {
+                    // Regular tool call - show tool events
                     display.write_event(DisplayEvent::ToolCall {
                         name: tool_name.clone(),
                         arguments: arguments.clone(),
                     });
-                }
 
-                let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+                    let tool_result = if tool_name == SEARCH_QUERY_TOOL_NAME {
+                        // Built-in search_query tool
+                        agent::execute_search_query(args).await
+                            .unwrap_or_else(|e| format!("Error: {}", e))
+                    } else if tool_name == INTERPRET_IMAGE_TOOL_NAME {
+                        // Built-in interpret_image tool
+                        agent::execute_interpret_image(client, model, args).await
+                            .unwrap_or_else(|e| format!("Error: {}", e))
+                    } else {
+                        // Regular MCP tool
+                        mcp_manager.execute_tool(tool_name, args).await
+                            .unwrap_or_else(|e| format!("Error: {}", e))
+                    };
 
-                let result = if self.is_invoke_tool(tool_name) {
-                    // Handle agent invocation
-                    self.handle_invoke(
-                        client, model, tool_name, &args, mcp_manager,
-                        tool_output_limit, display.clone(), depth, agent_name,
-                    ).await
-                } else if tool_name == SEARCH_QUERY_TOOL_NAME {
-                    // Built-in search_query tool
-                    agent::execute_search_query(args).await
-                        .unwrap_or_else(|e| format!("Error: {}", e))
-                } else if tool_name == INTERPRET_IMAGE_TOOL_NAME {
-                    // Built-in interpret_image tool
-                    agent::execute_interpret_image(client, model, args).await
-                        .unwrap_or_else(|e| format!("Error: {}", e))
-                } else {
-                    // Regular MCP tool
-                    mcp_manager.execute_tool(tool_name, args).await
-                        .unwrap_or_else(|e| format!("Error: {}", e))
-                };
-
-                if !self.is_invoke_tool(tool_name) {
                     display.write_event(DisplayEvent::ToolResult {
-                        result: result.clone(),
+                        result: tool_result.clone(),
                         limit: tool_output_limit,
                     });
-                }
+
+                    tool_result
+                };
 
                 conversation_history.push(Message::Tool {
                     tool_call_id: tool_call.id.clone(),
@@ -421,6 +437,25 @@ impl AgentOrchestrator {
         }
 
         Ok(final_response)
+    }
+
+    /// Public wrapper for handle_invoke - used by webapp
+    pub async fn handle_invoke_webapp(
+        &self,
+        client: &Client,
+        model: &str,
+        tool_name: &str,
+        args: &serde_json::Value,
+        mcp_manager: &mut McpManager,
+        tool_output_limit: usize,
+        display: Arc<dyn DisplaySink>,
+        depth: usize,
+        caller_agent: &str,
+    ) -> String {
+        self.handle_invoke(
+            client, model, tool_name, args, mcp_manager,
+            tool_output_limit, display, depth, caller_agent,
+        ).await
     }
 
     /// Handle an invoke_* tool call
@@ -478,6 +513,7 @@ fn resolve_prompt(prompt: &str, config_dir: Option<&Path>) -> Result<String> {
 }
 
 /// Truncate a string for display
+#[allow(dead_code)]  // Used in tests
 fn truncate_prompt(s: &str, max_len: usize) -> String {
     let s = s.lines().next().unwrap_or(s); // First line only
     if s.len() <= max_len {
@@ -503,6 +539,7 @@ mod tests {
     fn test_orchestrator_with_agents() {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
+            description: "Root coordinator".to_string(),
             prompt: "You are the root agent".to_string(),
             model: None,
             mcp_servers: vec![],
@@ -510,6 +547,7 @@ mod tests {
             can_invoke: vec!["worker".to_string()],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
+            description: "Worker that executes tasks".to_string(),
             prompt: "You are a worker agent".to_string(),
             model: None,
             mcp_servers: vec![],
@@ -526,6 +564,7 @@ mod tests {
     fn test_get_invoke_tools() {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
+            description: "Root coordinator".to_string(),
             prompt: "Root agent".to_string(),
             model: None,
             mcp_servers: vec![],
@@ -533,6 +572,7 @@ mod tests {
             can_invoke: vec!["dev".to_string()],
         });
         config.agents.insert("dev".to_string(), AgentConfig {
+            description: "Developer that writes code".to_string(),
             prompt: "Developer agent".to_string(),
             model: None,
             mcp_servers: vec![],
@@ -544,12 +584,15 @@ mod tests {
         let tools = orch.get_invoke_tools("root");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].function.name, "invoke_dev");
+        // Verify the description is used
+        assert!(tools[0].function.description.contains("Developer that writes code"));
     }
 
     #[test]
     fn test_get_agent_model_default() {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
+            description: "Root agent".to_string(),
             prompt: "Root agent".to_string(),
             model: None,
             mcp_servers: vec![],
@@ -565,6 +608,7 @@ mod tests {
     fn test_get_agent_model_override() {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
+            description: "Root agent".to_string(),
             prompt: "Root agent".to_string(),
             model: Some("custom-model".to_string()),
             mcp_servers: vec![],
@@ -580,6 +624,7 @@ mod tests {
     fn test_get_all_agent_models() {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
+            description: "Root agent".to_string(),
             prompt: "Root agent".to_string(),
             model: Some("gemini-pro".to_string()),
             mcp_servers: vec![],
@@ -587,6 +632,7 @@ mod tests {
             can_invoke: vec![],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
+            description: "Worker agent".to_string(),
             prompt: "Worker agent".to_string(),
             model: Some("gemini-flash".to_string()),
             mcp_servers: vec![],
@@ -594,6 +640,7 @@ mod tests {
             can_invoke: vec![],
         });
         config.agents.insert("helper".to_string(), AgentConfig {
+            description: "Helper agent".to_string(),
             prompt: "Helper agent".to_string(),
             model: None, // Uses default
             mcp_servers: vec![],

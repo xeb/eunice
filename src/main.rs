@@ -1024,6 +1024,7 @@ mod tests {
             webapp: None,
         };
         config.agents.insert("root".to_string(), AgentConfig {
+            description: "Root coordinator".to_string(),
             prompt: "You are root".to_string(),
             model: None,
             mcp_servers: vec![],
@@ -1031,6 +1032,7 @@ mod tests {
             can_invoke: vec!["worker".to_string()],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
+            description: "Worker agent".to_string(),
             prompt: "You are worker".to_string(),
             model: None,
             mcp_servers: vec![],
@@ -1054,6 +1056,7 @@ mod tests {
             webapp: None,
         };
         config.agents.insert("root".to_string(), AgentConfig {
+            description: "Root coordinator".to_string(),
             prompt: "You are root".to_string(),
             model: None,  // Uses default model
             mcp_servers: vec![],
@@ -1061,6 +1064,7 @@ mod tests {
             can_invoke: vec!["worker".to_string()],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
+            description: "Worker with custom model".to_string(),
             prompt: "You are worker".to_string(),
             model: Some("gemini-3-flash-preview".to_string()),  // Custom model
             mcp_servers: vec![],

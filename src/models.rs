@@ -175,6 +175,8 @@ impl Default for WebappConfig {
 /// Configuration for a single agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
+    /// Human-readable description of what this agent does (required for invoke tools)
+    pub description: String,
     /// System prompt (inline string or file path)
     pub prompt: String,
     /// Optional model override for this agent (defaults to --model if not specified)

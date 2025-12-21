@@ -24,6 +24,7 @@ args = ["server", "shell"]
 # Uses default model (gemini-3-pro-preview) for customer interaction
 # Can only read files (orders, menu)
 [agents.root]
+description = "Customer-facing counter agent that takes orders and communicates with customers"
 prompt = "agents/counter.md"
 tools = ["filesystem_read_file", "filesystem_list_directory"]
 can_invoke = ["head_chef"]
@@ -32,6 +33,7 @@ can_invoke = ["head_chef"]
 # Uses default model for complex coordination decisions
 # Can read and write to coordinate orders
 [agents.head_chef]
+description = "Kitchen coordinator that manages orders and delegates to line cooks and suppliers"
 prompt = "agents/head_chef.md"
 tools = ["filesystem_read_file", "filesystem_write_file", "filesystem_edit_file"]
 can_invoke = ["line_cook", "supplier"]
@@ -40,6 +42,7 @@ can_invoke = ["line_cook", "supplier"]
 # Uses faster flash model for simpler execution tasks
 # Full filesystem access + shell for timing
 [agents.line_cook]
+description = "Line cook that prepares individual dishes and updates inventory"
 prompt = "agents/line_cook.md"
 model = "gemini-3-flash-preview"
 tools = ["filesystem_*", "shell_*"]
@@ -49,6 +52,7 @@ can_invoke = []
 # Uses faster flash model for inventory management
 # Can read and write pantry files
 [agents.supplier]
+description = "Inventory manager that tracks pantry stock and reports availability"
 prompt = "agents/supplier.md"
 model = "gemini-3-flash-preview"
 tools = ["filesystem_read_file", "filesystem_write_file", "filesystem_edit_file"]
