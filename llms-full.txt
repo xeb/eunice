@@ -10,7 +10,6 @@ This file contains the complete documentation for Eunice in a single file for LL
 
 # eunice
 
-[![Crates.io](https://img.shields.io/crates/v/eunice.svg)](https://crates.io/crates/eunice)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
@@ -33,12 +32,6 @@ An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, a
 - **Progress Spinners**: Visual feedback during tool execution
 
 ## Installation
-
-### From crates.io
-
-```bash
-cargo install eunice
-```
 
 ### From Source
 
@@ -115,7 +108,8 @@ Options:
 - Requires: `OPENAI_API_KEY`
 
 ### Google Gemini
-- Models: `gemini-3-pro-preview` (default), `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro`
+- Models: `gemini-3-flash-preview` (default), `gemini-3-pro-preview`, `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro`
+- Aliases: `gemini-3-flash` → `gemini-3-flash-preview`, `gemini-3-pro` → `gemini-3-pro-preview`
 - Requires: `GEMINI_API_KEY`
 
 ### Anthropic Claude
@@ -132,7 +126,7 @@ Options:
 
 When no model is specified, eunice automatically selects the best available:
 
-1. **Gemini** (if API key set): `gemini-3-pro-preview`
+1. **Gemini** (if API key set): `gemini-3-flash-preview`
 2. **Anthropic** (if API key set): `sonnet` (Claude Sonnet 4)
 3. **OpenAI** (if API key set): `gpt-5.1`
 4. **Ollama** (if running): `llama3.1:latest` → `deepseek-r1:latest` → first available
@@ -316,7 +310,7 @@ See [examples/real_multi_agent](examples/real_multi_agent) for a complete exampl
 
 ```
 ├── Cargo.toml           # Package configuration
-├── Makefile             # Build commands with publish automation
+├── Makefile             # Build commands
 ├── CLAUDE.md            # Development guide
 ├── dmn_instructions.md  # DMN system instructions
 ├── src/
@@ -609,13 +603,6 @@ cargo build --release && ls -lh target/release/eunice
    - Implement format conversion in `Client`
    - Add tests for conversions
 
-### Publishing
-
-Update version and publish:
-```bash
-make publish  # Bumps patch version and publishes to crates.io
-```
-
 ## Native Gemini API Implementation
 
 The `gemini-3-pro-preview` model uses a different API format:
@@ -750,15 +737,15 @@ When adding features:
 - **0.1.1**: Added native Gemini API support, 429 retry, spinners, unit tests
 - **0.1.0**: Initial release with multi-provider support and MCP integration
 
-## Publishing
+## Releasing
 
-When the user says "publish":
+When the user says "release":
 1. Run `cargo test` - all tests must pass
 2. Update LOC and binary size in README.md
-3. Git commit with descriptive message
-4. Git tag (e.g., `v0.2.1`)
-5. Git push (with tags)
-6. `cargo publish`
+3. Bump version in Cargo.toml
+4. Git commit with descriptive message
+5. Git push
+6. **IMPORTANT**: After git push completes, run `eunice --update` to install the new version from GitHub
 ---
 
 ## DMN Instructions

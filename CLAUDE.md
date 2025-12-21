@@ -117,13 +117,6 @@ cargo build --release && ls -lh target/release/eunice
    - Implement format conversion in `Client`
    - Add tests for conversions
 
-### Publishing
-
-Update version and publish:
-```bash
-make publish  # Bumps patch version and publishes to crates.io
-```
-
 ## Native Gemini API Implementation
 
 The `gemini-3-pro-preview` model uses a different API format:
@@ -440,7 +433,7 @@ When adding features:
 
 ## Releasing
 
-When the user says "publish" or "release":
+When the user says "release":
 1. Run `cargo test` - all tests must pass
 2. Update LOC and binary size in README.md
 3. Bump version in Cargo.toml

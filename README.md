@@ -1,6 +1,5 @@
 # eunice
 
-[![Crates.io](https://img.shields.io/crates/v/eunice.svg)](https://crates.io/crates/eunice)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
@@ -49,12 +48,6 @@ Eunice is designed with these principles:
 In December 2025, I decided to focus on Web-based and TUI features so threw simplicity out the window in favor of efficacy. The "~7,000 lines" above is now a nostalgic lie. We have a webapp now. And a TUI with SharedWriters. Sorry not sorry.
 
 ## Installation
-
-### From crates.io
-
-```bash
-cargo install eunice
-```
 
 ### From Source
 
@@ -134,7 +127,8 @@ Options:
 - Requires: `OPENAI_API_KEY`
 
 ### Google Gemini
-- Models: `gemini-3-pro-preview` (default), `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro`
+- Models: `gemini-3-flash-preview` (default), `gemini-3-pro-preview`, `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-1.5-flash`, `gemini-1.5-pro`
+- Aliases: `gemini-3-flash` → `gemini-3-flash-preview`, `gemini-3-pro` → `gemini-3-pro-preview`
 - Requires: `GEMINI_API_KEY`
 
 ### Anthropic Claude
@@ -151,7 +145,7 @@ Options:
 
 When no model is specified, eunice automatically selects the best available:
 
-1. **Gemini** (if API key set): `gemini-3-pro-preview`
+1. **Gemini** (if API key set): `gemini-3-flash-preview`
 2. **Anthropic** (if API key set): `sonnet` (Claude Sonnet 4)
 3. **OpenAI** (if API key set): `gpt-5.1`
 4. **Ollama** (if running): `llama3.1:latest` → `deepseek-r1:latest` → first available
@@ -651,7 +645,7 @@ See [examples/image_understanding](examples/image_understanding) for a complete 
 
 ```
 ├── Cargo.toml           # Package configuration
-├── Makefile             # Build commands with publish automation
+├── Makefile             # Build commands
 ├── CLAUDE.md            # Development guide
 ├── dmn_instructions.md  # DMN system instructions
 ├── src/
