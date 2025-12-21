@@ -476,4 +476,4 @@ When the user says "publish" or "release":
 3. Bump version in Cargo.toml
 4. Git commit with descriptive message
 5. Git push
-6. Install locally: `cargo install --path .`
+6. **IMPORTANT**: After git push completes, run `eunice --update` to install the new version from GitHub
