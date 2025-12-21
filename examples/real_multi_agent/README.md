@@ -4,12 +4,14 @@ This example demonstrates eunice's multi-agent capabilities by simulating a rest
 
 ## Agents
 
-| Agent | Role | Can Invoke |
-|-------|------|------------|
-| `root` (counter) | Takes customer orders | head_chef |
-| `head_chef` | Coordinates kitchen | line_cook, supplier |
-| `line_cook` | Prepares dishes | - |
-| `supplier` | Manages inventory | - |
+| Agent | Role | Model | Can Invoke |
+|-------|------|-------|------------|
+| `root` (counter) | Takes customer orders | default | head_chef |
+| `head_chef` | Coordinates kitchen | default | line_cook, supplier |
+| `line_cook` | Prepares dishes | gemini-3-flash-preview | - |
+| `supplier` | Manages inventory | gemini-3-flash-preview | - |
+
+Agents can specify their own model. Simpler agents (line_cook, supplier) use the faster flash model, while complex coordination agents use the default model.
 
 ## How It Works
 
@@ -33,6 +35,9 @@ eunice "I'd like to order a burger and fries please"
 cat orders.txt
 cat kitchen_log.txt
 cat pantry.txt
+
+# See agent configurations and models
+eunice --list-agents
 ```
 
 ## Requirements

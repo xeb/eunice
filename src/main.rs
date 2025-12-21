@@ -443,6 +443,9 @@ async fn main() -> Result<()> {
                 names.sort();
                 for name in names {
                     if let Some(agent) = config.agents.get(name) {
+                        let model_str = agent.model.as_ref()
+                            .map(|m| format!(" (model: {})", m))
+                            .unwrap_or_default();
                         let tools_str = if agent.tools.is_empty() {
                             "no tools".to_string()
                         } else {
@@ -453,7 +456,7 @@ async fn main() -> Result<()> {
                         } else {
                             format!(" → can invoke: {}", agent.can_invoke.join(", "))
                         };
-                        println!("  {}: [{}]{}", name, tools_str, invoke_str);
+                        println!("  {}{}: [{}]{}", name, model_str, tools_str, invoke_str);
                     }
                 }
             }
@@ -684,7 +687,17 @@ async fn main() -> Result<()> {
 
         // Create orchestrator if agents are configured
         let orch = if !config.agents.is_empty() {
-            Some(AgentOrchestrator::new(config, None)?)
+            let orchestrator = AgentOrchestrator::new(config, None)?;
+
+            // Validate all agent models at startup
+            let unique_models = orchestrator.get_all_agent_models(&model);
+            for agent_model in &unique_models {
+                detect_provider(agent_model).map_err(|e| {
+                    anyhow!("Invalid model '{}' used by agent: {}", agent_model, e)
+                })?;
+            }
+
+            Some(orchestrator)
         } else {
             None
         };
@@ -879,6 +892,9 @@ pub fn format_agents(config: &McpConfig) -> Vec<String> {
     names.sort();
     for name in names {
         if let Some(agent) = config.agents.get(name) {
+            let model_str = agent.model.as_ref()
+                .map(|m| format!(" (model: {})", m))
+                .unwrap_or_default();
             let tools_str = if agent.tools.is_empty() {
                 "no tools".to_string()
             } else {
@@ -889,7 +905,7 @@ pub fn format_agents(config: &McpConfig) -> Vec<String> {
             } else {
                 format!(" → can invoke: {}", agent.can_invoke.join(", "))
             };
-            result.push(format!("{}: [{}]{}", name, tools_str, invoke_str));
+            result.push(format!("{}{}: [{}]{}", name, model_str, tools_str, invoke_str));
         }
     }
     result
@@ -1009,12 +1025,14 @@ mod tests {
         };
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "You are root".to_string(),
+            model: None,
             mcp_servers: vec![],
             tools: vec!["tool1".to_string()],
             can_invoke: vec!["worker".to_string()],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
             prompt: "You are worker".to_string(),
+            model: None,
             mcp_servers: vec![],
             tools: vec!["tool2".to_string(), "tool3".to_string()],
             can_invoke: Vec::new(),
@@ -1023,6 +1041,36 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], "root: [tool1] → can invoke: worker");
         assert_eq!(result[1], "worker: [tool2, tool3]");
+    }
+
+    #[test]
+    fn test_format_agents_with_model_override() {
+        use crate::models::AgentConfig;
+        let mut config = McpConfig {
+            mcp_servers: std::collections::HashMap::new(),
+            agents: std::collections::HashMap::new(),
+            allowed_tools: Vec::new(),
+            denied_tools: Vec::new(),
+            webapp: None,
+        };
+        config.agents.insert("root".to_string(), AgentConfig {
+            prompt: "You are root".to_string(),
+            model: None,  // Uses default model
+            mcp_servers: vec![],
+            tools: vec!["tool1".to_string()],
+            can_invoke: vec!["worker".to_string()],
+        });
+        config.agents.insert("worker".to_string(), AgentConfig {
+            prompt: "You are worker".to_string(),
+            model: Some("gemini-3-flash-preview".to_string()),  // Custom model
+            mcp_servers: vec![],
+            tools: vec!["tool2".to_string()],
+            can_invoke: Vec::new(),
+        });
+        let result = format_agents(&config);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "root: [tool1] → can invoke: worker");
+        assert_eq!(result[1], "worker (model: gemini-3-flash-preview): [tool2]");
     }
 
     #[test]

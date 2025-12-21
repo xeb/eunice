@@ -105,11 +105,30 @@ impl AgentOrchestrator {
         tool_name.strip_prefix("invoke_")
     }
 
+    /// Get the effective model for an agent (agent's model or default)
+    pub fn get_agent_model(&self, agent_name: &str, default_model: &str) -> String {
+        self.agents.get(agent_name)
+            .and_then(|a| a.model.as_ref())
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| default_model.to_string())
+    }
+
+    /// Get all unique models used by agents (for validation)
+    pub fn get_all_agent_models(&self, default_model: &str) -> Vec<String> {
+        let mut models: Vec<String> = self.agents.values()
+            .filter_map(|a| a.model.clone())
+            .collect();
+        models.push(default_model.to_string());
+        models.sort();
+        models.dedup();
+        models
+    }
+
     /// Run an agent with a task (returns boxed future to enable recursion)
     pub fn run_agent<'a>(
         &'a self,
         client: &'a Client,
-        model: &'a str,
+        default_model: &'a str,
         agent_name: &'a str,
         task: &'a str,
         context: Option<&'a str>,
@@ -122,6 +141,9 @@ impl AgentOrchestrator {
         Box::pin(async move {
             let agent = self.agents.get(agent_name)
                 .ok_or_else(|| anyhow!("Unknown agent: {}", agent_name))?;
+
+            // Use agent's model if specified, otherwise use default
+            let effective_model = agent.model.as_deref().unwrap_or(default_model);
 
             let system_prompt = self.resolved_prompts.get(agent_name)
                 .ok_or_else(|| anyhow!("No prompt for agent: {}", agent_name))?;
@@ -145,8 +167,14 @@ impl AgentOrchestrator {
                     } else {
                         task.to_string()
                     };
+                    // Show model if different from default
+                    let model_info = if effective_model != default_model {
+                        format!(" [{}]", effective_model)
+                    } else {
+                        String::new()
+                    };
                     display.write_event(DisplayEvent::Debug {
-                        message: format!("{}{}→{} {}", indent, caller, agent_name, task_preview),
+                        message: format!("{}{}→{}{} {}", indent, caller, agent_name, model_info, task_preview),
                     });
                 }
             }
@@ -159,7 +187,7 @@ impl AgentOrchestrator {
             let mut conversation_history: Vec<Message> = Vec::new();
             let result = self.agent_loop(
                 client,
-                model,
+                effective_model,
                 &full_prompt,
                 &tools,
                 agent_name,
@@ -475,12 +503,14 @@ mod tests {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "You are the root agent".to_string(),
+            model: None,
             mcp_servers: vec![],
             tools: vec![],
             can_invoke: vec!["worker".to_string()],
         });
         config.agents.insert("worker".to_string(), AgentConfig {
             prompt: "You are a worker agent".to_string(),
+            model: None,
             mcp_servers: vec![],
             tools: vec!["shell".to_string()],
             can_invoke: vec![],
@@ -496,12 +526,14 @@ mod tests {
         let mut config = McpConfig::default();
         config.agents.insert("root".to_string(), AgentConfig {
             prompt: "Root agent".to_string(),
+            model: None,
             mcp_servers: vec![],
             tools: vec![],
             can_invoke: vec!["dev".to_string()],
         });
         config.agents.insert("dev".to_string(), AgentConfig {
             prompt: "Developer agent".to_string(),
+            model: None,
             mcp_servers: vec![],
             tools: vec![],
             can_invoke: vec![],
@@ -511,6 +543,69 @@ mod tests {
         let tools = orch.get_invoke_tools("root");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].function.name, "invoke_dev");
+    }
+
+    #[test]
+    fn test_get_agent_model_default() {
+        let mut config = McpConfig::default();
+        config.agents.insert("root".to_string(), AgentConfig {
+            prompt: "Root agent".to_string(),
+            model: None,
+            mcp_servers: vec![],
+            tools: vec![],
+            can_invoke: vec![],
+        });
+
+        let orch = AgentOrchestrator::new(&config, None).unwrap();
+        assert_eq!(orch.get_agent_model("root", "default-model"), "default-model");
+    }
+
+    #[test]
+    fn test_get_agent_model_override() {
+        let mut config = McpConfig::default();
+        config.agents.insert("root".to_string(), AgentConfig {
+            prompt: "Root agent".to_string(),
+            model: Some("custom-model".to_string()),
+            mcp_servers: vec![],
+            tools: vec![],
+            can_invoke: vec![],
+        });
+
+        let orch = AgentOrchestrator::new(&config, None).unwrap();
+        assert_eq!(orch.get_agent_model("root", "default-model"), "custom-model");
+    }
+
+    #[test]
+    fn test_get_all_agent_models() {
+        let mut config = McpConfig::default();
+        config.agents.insert("root".to_string(), AgentConfig {
+            prompt: "Root agent".to_string(),
+            model: Some("gemini-pro".to_string()),
+            mcp_servers: vec![],
+            tools: vec![],
+            can_invoke: vec![],
+        });
+        config.agents.insert("worker".to_string(), AgentConfig {
+            prompt: "Worker agent".to_string(),
+            model: Some("gemini-flash".to_string()),
+            mcp_servers: vec![],
+            tools: vec![],
+            can_invoke: vec![],
+        });
+        config.agents.insert("helper".to_string(), AgentConfig {
+            prompt: "Helper agent".to_string(),
+            model: None, // Uses default
+            mcp_servers: vec![],
+            tools: vec![],
+            can_invoke: vec![],
+        });
+
+        let orch = AgentOrchestrator::new(&config, None).unwrap();
+        let models = orch.get_all_agent_models("default-model");
+        assert_eq!(models.len(), 3);
+        assert!(models.contains(&"default-model".to_string()));
+        assert!(models.contains(&"gemini-pro".to_string()));
+        assert!(models.contains(&"gemini-flash".to_string()));
     }
 
     #[test]

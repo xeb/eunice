@@ -10,6 +10,7 @@
 #
 # Tool patterns use wildcards: "filesystem_*" matches all filesystem tools
 # Use `eunice --list-tools` to see available tools and agent access
+# Use `eunice --list-agents` to see agents and their models
 
 [mcpServers.filesystem]
 command = "mcpz"
@@ -20,6 +21,7 @@ command = "mcpz"
 args = ["server", "shell"]
 
 # Counter - the customer-facing agent (root)
+# Uses default model (gemini-3-pro-preview) for customer interaction
 # Can only read files (orders, menu)
 [agents.root]
 prompt = "agents/counter.md"
@@ -27,6 +29,7 @@ tools = ["filesystem_read_file", "filesystem_list_directory"]
 can_invoke = ["head_chef"]
 
 # Head Chef - coordinates the kitchen
+# Uses default model for complex coordination decisions
 # Can read and write to coordinate orders
 [agents.head_chef]
 prompt = "agents/head_chef.md"
@@ -34,15 +37,19 @@ tools = ["filesystem_read_file", "filesystem_write_file", "filesystem_edit_file"
 can_invoke = ["line_cook", "supplier"]
 
 # Line Cook - prepares dishes
+# Uses faster flash model for simpler execution tasks
 # Full filesystem access + shell for timing
 [agents.line_cook]
 prompt = "agents/line_cook.md"
+model = "gemini-3-flash-preview"
 tools = ["filesystem_*", "shell_*"]
 can_invoke = []
 
 # Supplier - manages pantry inventory
+# Uses faster flash model for inventory management
 # Can read and write pantry files
 [agents.supplier]
 prompt = "agents/supplier.md"
+model = "gemini-3-flash-preview"
 tools = ["filesystem_read_file", "filesystem_write_file", "filesystem_edit_file"]
 can_invoke = []

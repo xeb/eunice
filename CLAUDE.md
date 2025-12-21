@@ -173,9 +173,20 @@ can_invoke = ["worker"]              # Agents this agent can call
 
 [agents.worker]
 prompt = "agents/worker.md"          # Can be file path
+model = "gemini-3-flash-preview"     # Optional: use different model (faster/cheaper)
 tools = ["shell_*"]                  # Supports wildcards: shell_*, *_read, etc.
 can_invoke = []
 ```
+
+### Per-Agent Models
+
+Each agent can specify its own model via the optional `model` field:
+
+- **Default**: Agents without `model` use the `--model` flag value (or auto-detected default)
+- **Override**: Specify `model = "gemini-3-flash-preview"` for faster/cheaper execution
+- **Validation**: All agent models are validated at startup (API key + model availability)
+
+Use faster models (e.g., `gemini-3-flash-preview`) for simpler agents and reserve powerful models for coordinators.
 
 ### How It Works
 
@@ -184,6 +195,7 @@ can_invoke = []
 3. Each agent gets `invoke_*` tools for agents in `can_invoke`
 4. Agent invocation is recursive with depth tracking
 5. MCP tools are filtered per-agent based on `tools` list
+6. Each agent uses its own model (or default if not specified)
 
 ### CLI Usage
 
@@ -399,6 +411,7 @@ When adding features:
 
 ## Version History
 
+- **0.2.66**: Per-agent models: agents can specify their own `model` in config, validated at startup
 - **0.2.59**: Webapp SQLite session persistence (if mcpz installed), hamburger menu with session list, cyberpunk session names
 - **0.2.58**: Display tool call arguments in grey underneath tool name in TUI and CLI output
 - **0.2.57**: Webapp event replay: reconnect to see events that happened while browser was closed; agents continue running when tab closes

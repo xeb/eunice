@@ -177,6 +177,9 @@ impl Default for WebappConfig {
 pub struct AgentConfig {
     /// System prompt (inline string or file path)
     pub prompt: String,
+    /// Optional model override for this agent (defaults to --model if not specified)
+    #[serde(default)]
+    pub model: Option<String>,
     /// MCP server names this agent can access (gets all tools from these servers)
     /// If specified without `tools`, agent gets ALL tools from these servers
     /// If specified with `tools`, the tool patterns filter within these servers only

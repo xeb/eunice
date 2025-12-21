@@ -49,6 +49,7 @@ pub fn get_dmn_mcp_config() -> McpConfig {
     let mut agents = HashMap::new();
     agents.insert("root".to_string(), AgentConfig {
         prompt: DMN_INSTRUCTIONS.to_string(),
+        model: None,
         mcp_servers: vec![],
         tools: vec!["*".to_string()],  // Access to all tools
         can_invoke: vec![],
@@ -92,6 +93,7 @@ pub fn get_research_mcp_config() -> McpConfig {
     // Root agent (lead coordinator)
     agents.insert("root".to_string(), AgentConfig {
         prompt: RESEARCH_LEAD_PROMPT.to_string(),
+        model: None,
         mcp_servers: vec![],
         tools: vec![],
         can_invoke: vec!["researcher".to_string(), "report_writer".to_string(), "evaluator".to_string()],
@@ -100,6 +102,7 @@ pub fn get_research_mcp_config() -> McpConfig {
     // Researcher agent
     agents.insert("researcher".to_string(), AgentConfig {
         prompt: RESEARCH_RESEARCHER_PROMPT.to_string(),
+        model: None,
         mcp_servers: vec![],
         tools: vec!["filesystem_write_*".to_string(), "search_query".to_string(), "browser_*".to_string()],
         can_invoke: vec![],
@@ -108,6 +111,7 @@ pub fn get_research_mcp_config() -> McpConfig {
     // Report writer agent
     agents.insert("report_writer".to_string(), AgentConfig {
         prompt: RESEARCH_REPORT_WRITER_PROMPT.to_string(),
+        model: None,
         mcp_servers: vec![],
         tools: vec!["filesystem_*".to_string()],
         can_invoke: vec![],
@@ -116,6 +120,7 @@ pub fn get_research_mcp_config() -> McpConfig {
     // Evaluator agent
     agents.insert("evaluator".to_string(), AgentConfig {
         prompt: RESEARCH_EVALUATOR_PROMPT.to_string(),
+        model: None,
         mcp_servers: vec![],
         tools: vec!["filesystem_read_*".to_string(), "filesystem_list_*".to_string()],
         can_invoke: vec![],
