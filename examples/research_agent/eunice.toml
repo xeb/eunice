@@ -7,21 +7,25 @@ command = "mcpz"
 args = ["server", "filesystem"]
 
 [agents.root]
+description = "Research coordinator that breaks down topics and delegates to specialized agents"
 prompt = "agents/lead.md"
 tools = []  # Lead only invokes subagents
 can_invoke = ["researcher", "report_writer", "evaluator"]
 
 [agents.researcher]
+description = "Web researcher that searches for information and saves notes to files"
 prompt = "agents/researcher.md"
 tools = ["filesystem_write_*", "search_query"]  # Fixed: filesystem_write_* matches filesystem_write_file
 can_invoke = []
 
 [agents.report_writer]
+description = "Report writer that synthesizes research notes into comprehensive reports"
 prompt = "agents/report_writer.md"
 tools = ["filesystem_*"]  # read, write, list - all filesystem tools
 can_invoke = []
 
 [agents.evaluator]
+description = "Report evaluator that reviews reports and provides APPROVED or NEEDS_REVISION feedback"
 prompt = "agents/evaluator.md"
 tools = ["filesystem_read_*", "filesystem_list_*"]  # Fixed: wildcards for read/list operations
 can_invoke = []

@@ -15,7 +15,7 @@ This file contains the complete documentation for Eunice in a single file for LL
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**3,568 lines of Rust** • **4.2MB binary** - Emphasizing "sophisticated simplicity".
+**8,763 lines of Rust** • **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -103,7 +103,6 @@ Options:
       --silent                  Suppress all output except AI responses
       --verbose                 Enable verbose debug output
       --events                  Output JSON-RPC events to stdout
-      --create-agent            Interactive wizard to create eunice.toml
   -h, --help                    Print help
   -V, --version                 Print version
 ```
@@ -275,11 +274,13 @@ allowedTools = ["shell_*", "fs_*"]   # Whitelist: only these patterns
 deniedTools = ["*_delete*"]          # Blacklist: exclude these patterns
 
 [agents.root]
+description = "Coordinator that delegates tasks to workers"
 prompt = "You are the coordinator. Delegate tasks to workers."
 tools = []
 can_invoke = ["worker"]
 
 [agents.worker]
+description = "Worker that executes shell commands and reads files"
 prompt = "agents/worker.md"  # Can be file path
 tools = ["shell_*", "fs_read_*"]     # Tool patterns with wildcards
 can_invoke = []
@@ -310,26 +311,6 @@ eunice --list-agents
 ### Example: Restaurant Simulation
 
 See [examples/real_multi_agent](examples/real_multi_agent) for a complete example simulating a restaurant with counter, chef, cook, and supplier agents.
-
-## Create Agent Wizard
-
-Generate `eunice.toml` configurations interactively with AI assistance:
-
-```bash
-eunice --create-agent
-```
-
-The wizard guides you through:
-
-1. **Agent Name**: Short identifier (e.g., `researcher`, `coder`)
-2. **Agent Purpose**: What the agent should do
-3. **Tool Selection**: Choose from available MCP tools (requires mcpz)
-   - Enter numbers separated by commas (e.g., `1,3,5`)
-   - Enter `0` to select ALL tools
-   - Press Enter with no selection for no tools
-4. **Agent Communication** (multi-agent only): How agents should interact
-
-The wizard uses AI to generate a complete TOML configuration based on your inputs.
 
 ## Project Structure
 
@@ -674,11 +655,13 @@ command = "mcpz"
 args = ["server", "shell"]
 
 [agents.root]
+description = "Coordinator that delegates to workers"
 prompt = "You are the coordinator..."
 tools = []                           # MCP servers this agent can use
 can_invoke = ["worker"]              # Agents this agent can call
 
 [agents.worker]
+description = "Worker that executes shell commands"
 prompt = "agents/worker.md"          # Can be file path
 tools = ["shell_*"]                  # Wildcard pattern for all shell tools
 can_invoke = []
@@ -976,31 +959,37 @@ args = ["-y", "@anthropic/brave-search-mcp-server"]
 
 # Agent definitions
 [agents.root]
+description = "CEO that delegates to appropriate team members"
 prompt = "You are the CEO. Delegate tasks to appropriate agents."
 can_invoke = ["product_manager", "senior_dev", "marketing"]
 # root has no direct tools - only delegates
 
 [agents.product_manager]
+description = "Product manager that creates specs and coordinates development"
 prompt = "agents/product_manager.md"  # Can be a file path
 tools = ["filesystem_*", "memory_*"]  # Wildcard patterns for tool names
 can_invoke = ["senior_dev", "tester"]
 
 [agents.senior_dev]
+description = "Senior developer that architects and delegates implementation"
 prompt = "agents/senior_dev.md"
 tools = ["shell_*", "filesystem_*", "editor_*", "grep_*"]
 can_invoke = ["junior_dev", "tester"]
 
 [agents.junior_dev]
+description = "Junior developer that implements specific tasks"
 prompt = "You implement specific tasks assigned by senior dev. Focus on clean, working code."
 tools = ["shell_*", "filesystem_*", "editor_*"]
 can_invoke = []  # Leaf agent - cannot delegate
 
 [agents.tester]
+description = "Tester that writes and runs tests"
 prompt = "agents/tester.md"
 tools = ["shell_*", "filesystem_*", "grep_*"]
 can_invoke = []
 
 [agents.marketing]
+description = "Marketing specialist that creates content and strategies"
 prompt = "You create marketing content and strategies."
 tools = ["filesystem_*", "web_*"]
 can_invoke = []
@@ -1310,24 +1299,28 @@ args = ["server", "shell"]
 
 # Counter - the customer-facing agent (root)
 [agents.root]
+description = "Customer-facing counter agent that takes orders"
 prompt = "agents/counter.md"
 tools = ["filesystem_*"]
 can_invoke = ["head_chef"]
 
 # Head Chef - coordinates the kitchen
 [agents.head_chef]
+description = "Kitchen coordinator that manages orders and delegates to cooks"
 prompt = "agents/head_chef.md"
 tools = ["filesystem_*"]
 can_invoke = ["line_cook", "supplier"]
 
 # Line Cook - prepares dishes
 [agents.line_cook]
+description = "Line cook that prepares individual dishes"
 prompt = "agents/line_cook.md"
 tools = ["filesystem_*", "shell_*"]
 can_invoke = []
 
 # Supplier - manages pantry inventory
 [agents.supplier]
+description = "Inventory manager that tracks pantry stock"
 prompt = "agents/supplier.md"
 tools = ["filesystem_*"]
 can_invoke = []

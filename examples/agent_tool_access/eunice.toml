@@ -37,6 +37,7 @@ args = ["server", "filesystem"]
 # Agent gets ALL tools from specified servers
 # ============================================================================
 [agents.shell_expert]
+description = "Shell command expert with full access to execute system commands"
 prompt = """You are a shell expert. You have full access to shell commands.
 Execute commands safely and explain what you're doing."""
 mcp_servers = ["shell"]      # Gets ALL shell tools
@@ -47,6 +48,7 @@ can_invoke = []
 # Agent gets tools matching patterns from ALL servers
 # ============================================================================
 [agents.reader]
+description = "Read-only agent that can read files and explore directories"
 prompt = """You are a read-only agent. You can read files and list directories,
 but you cannot modify anything. Use your tools to explore the filesystem."""
 tools = ["*_read*", "*_list*", "*_tree*", "*_search*", "*_info*"]
@@ -57,6 +59,7 @@ can_invoke = []
 # Agent gets filtered tools from specific servers only
 # ============================================================================
 [agents.fs_writer]
+description = "Filesystem writer that can write, edit, create, and move files"
 prompt = """You are a filesystem writer. You can ONLY write and edit files
 from the filesystem server. You cannot run shell commands or read files."""
 mcp_servers = ["filesystem"]
@@ -67,6 +70,7 @@ can_invoke = []
 # ROOT: Coordinator that delegates to specialists
 # ============================================================================
 [agents.root]
+description = "Task coordinator that delegates to shell, reader, and writer specialists"
 prompt = """You are a task coordinator. Delegate to the appropriate specialist:
 - invoke_shell_expert: For running shell commands
 - invoke_reader: For reading files and exploring directories

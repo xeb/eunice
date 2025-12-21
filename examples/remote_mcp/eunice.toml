@@ -13,6 +13,7 @@
 url = "http://127.0.0.1:3323/mcp"
 
 [agents.root]
+description = "Shell execution agent that runs commands via remote MCP server"
 prompt = "You are a shell execution agent that runs commands the user asks for and shows the output and any suggestions for what to do next."
-tools = ["shell"]
+tools = ["shell_*"]
 can_invoke = []

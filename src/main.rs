@@ -2,7 +2,6 @@ mod agent;
 mod client;
 mod compact;
 mod config;
-mod create_agent;
 mod display;
 mod display_sink;
 mod interactive;
@@ -14,7 +13,7 @@ mod tui;
 mod webapp;
 
 use crate::client::Client;
-use crate::config::{get_dmn_mcp_config, get_research_mcp_config, has_gemini_api_key, load_mcp_config, DMN_INSTRUCTIONS, LLMS_TXT, LLMS_FULL_TXT};
+use crate::config::{get_dmn_mcp_config, get_research_mcp_config, has_gemini_api_key, load_mcp_config, DMN_INSTRUCTIONS, LLMS_FULL_TXT};
 use crate::display_sink::create_display_sink;
 use crate::mcp::McpManager;
 use crate::models::{McpConfig, Message};
@@ -88,10 +87,6 @@ struct Args {
     #[arg(long, help_heading = "Modes")]
     webapp: bool,
 
-    /// Interactive wizard to create a eunice.toml agent configuration
-    #[arg(long, help_heading = "Modes")]
-    create_agent: bool,
-
     /// Full TUI mode with enhanced terminal interface (requires TTY)
     #[arg(long, help_heading = "Modes")]
     tui: bool,
@@ -113,13 +108,9 @@ struct Args {
     #[arg(long, default_value = "50", help_heading = "Output")]
     tool_output_limit: usize,
 
-    /// Output llms.txt (LLM context index)
+    /// Output llms.txt (full LLM context documentation)
     #[arg(long = "llms-txt", help_heading = "Output")]
     llms_txt: bool,
-
-    /// Output llms-full.txt (full LLM context)
-    #[arg(long = "llms-full-txt", help_heading = "Output")]
-    llms_full_txt: bool,
 
     // === Advanced ===
     /// Disable MCP even if eunice.json exists
@@ -366,22 +357,10 @@ async fn main() -> Result<()> {
         return run_update();
     }
 
-    // Handle --llms-txt
+    // Handle --llms-txt (outputs full documentation)
     if args.llms_txt {
-        print!("{}", LLMS_TXT);
-        return Ok(());
-    }
-
-    // Handle --llms-full-txt
-    if args.llms_full_txt {
         print!("{}", LLMS_FULL_TXT);
         return Ok(());
-    }
-
-    // Handle --create-agent
-    if args.create_agent {
-        let model = args.model.as_deref().unwrap_or("gemini-3-pro-preview");
-        return create_agent::run_create_agent(model, args.verbose).await;
     }
 
     // Validate conflicting arguments

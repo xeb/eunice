@@ -24,6 +24,7 @@ args = ["server", "filesystem"]
 
 # Root agent - coordinator (no direct tool access)
 [agents.root]
+description = "Task coordinator that delegates file operations to reader and writer agents"
 prompt = """You are a task coordinator. You delegate file operations to specialized agents:
 - Use invoke_reader for ANY read operations (reading files, listing directories, searching)
 - Use invoke_writer for ANY write operations (writing, editing, creating files)
@@ -35,6 +36,7 @@ can_invoke = ["reader", "writer"]
 
 # Reader agent - read-only access
 [agents.reader]
+description = "File reader that can read files and list directories (read-only)"
 prompt = """You are a file reader. You can ONLY read files and list directories.
 You cannot write, edit, create, or delete files.
 Use your tools to help the user read file contents."""
@@ -43,6 +45,7 @@ can_invoke = []
 
 # Writer agent - write-only access
 [agents.writer]
+description = "File writer that can write and edit files (write-only)"
 prompt = """You are a file writer. You can ONLY write and edit files.
 You cannot read file contents (use the reader agent for that).
 Use your tools to help the user write or edit files."""

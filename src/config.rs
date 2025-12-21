@@ -159,8 +159,7 @@ pub fn load_mcp_config(path: &Path) -> Result<McpConfig> {
 /// DMN (Default Mode Network) instructions loaded from external file
 pub const DMN_INSTRUCTIONS: &str = include_str!("../dmn_instructions.md");
 
-/// LLM context files embedded for --llms-txt and --llms-full-txt flags
-pub const LLMS_TXT: &str = include_str!("../llms.txt");
+/// LLM context documentation embedded for --llms-txt flag
 pub const LLMS_FULL_TXT: &str = include_str!("../llms-full.txt");
 
 // === Research Agent Prompts (embedded) ===

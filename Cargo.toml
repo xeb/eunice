@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "0.2.68"
+version = "0.2.69"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
