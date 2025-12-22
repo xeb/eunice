@@ -494,9 +494,9 @@ When the user says "release":
    ```bash
    echo "X.Y.Z" > ~/gal/projects/longrunningagents.com/version.txt
    ```
-   Then deploy the website so https://longrunningagents.com/version.txt is updated.
+   The website is automatically synced via rclone, so this is all that's needed.
 7. Run `eunice --update` to verify the update works
 
 ### Version Check System
 
-The `--update` flag and `install.sh` check https://longrunningagents.com/version.txt to determine if an update is needed. This file must contain just the version number (e.g., `0.2.70`).
+The `--update` flag and `install.sh` check https://longrunningagents.com/version.txt to determine if an update is needed. This file must contain just the version number (e.g., `0.2.70`). The file at `~/gal/projects/longrunningagents.com/version.txt` is automatically deployed to the website via rclone.
