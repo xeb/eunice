@@ -47,6 +47,7 @@ impl<S: McpServer + Send + Sync + 'static> AppState<S> {
 }
 
 /// SSE event for streaming responses
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 struct SseEvent {
     data: String,

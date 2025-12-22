@@ -7,7 +7,9 @@ use uuid::Uuid;
 /// Session state
 #[derive(Debug, Clone)]
 pub struct Session {
+    #[allow(dead_code)]
     pub id: String,
+    #[allow(dead_code)]
     pub created_at: Instant,
     pub last_activity: Instant,
     pub initialized: bool,
@@ -32,6 +34,7 @@ pub enum SessionError {
     NotFound,
     #[error("Session expired")]
     Expired,
+    #[allow(dead_code)]
     #[error("Session not initialized")]
     NotInitialized,
 }
@@ -94,6 +97,7 @@ impl SessionManager {
     }
 
     /// Check if a session is initialized
+    #[allow(dead_code)]
     pub async fn is_initialized(&self, id: &str) -> Result<bool, SessionError> {
         let sessions = self.sessions.read().await;
 
@@ -133,6 +137,7 @@ impl SessionManager {
     }
 
     /// Get the number of active sessions
+    #[allow(dead_code)]
     pub async fn session_count(&self) -> usize {
         let sessions = self.sessions.read().await;
         sessions.len()
