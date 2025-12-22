@@ -1751,9 +1751,24 @@
         // Update NEW button to use new session creation
         newBtn.addEventListener('click', async () => {
             if (authenticatedUser) {
-                // Authenticated user - clear server-side session
-                await fetch('/api/session/clear', { method: 'POST' });
+                // Authenticated user - clear server-side and get new session
+                try {
+                    const res = await fetch('/api/session/clear', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.cleared && data.session_id) {
+                        // Update to new session from server
+                        sessionId = data.session_id;
+                        currentSessionName = data.session_name;
+                        localStorage.setItem(SESSION_KEY, sessionId);
+                        localStorage.setItem(SESSION_NAME_KEY, currentSessionName);
+                        updateSessionUrl(currentSessionName);
+                        console.log('[webapp] New session created:', sessionId, currentSessionName);
+                    }
+                } catch (err) {
+                    console.error('[webapp] Failed to clear session:', err);
+                }
                 messagesEl.innerHTML = '';
+                loadSessions(); // Refresh session list
             } else {
                 await createNewSession();
             }

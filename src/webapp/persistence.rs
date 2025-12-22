@@ -641,19 +641,23 @@ impl SessionStorage {
     }
 
     /// Clear history for a user's session (for NEW button with authenticated users)
-    pub async fn clear_user_session(&self, user_id: &str) -> Result<()> {
+    /// Returns the new session that was created
+    pub async fn clear_user_session(&self, user_id: &str) -> Result<SessionRecord> {
         match self {
             SessionStorage::Memory(store) => {
+                // For memory mode, also create a new session (consistent with SQLite)
                 let mut store = store.write().await;
+                // Clear runtime state from old session if exists
                 for session in store.values_mut() {
                     if session.user_id.as_deref() == Some(user_id) {
                         session.history.clear();
                         session.events.clear();
-                        session.updated_at = chrono::Utc::now().timestamp();
                         break;
                     }
                 }
-                Ok(())
+                drop(store);
+                // Create new session
+                self.create_session(Some(user_id)).await
             }
             SessionStorage::Sqlite { conn, runtime } => {
                 // For SQLite, we create a new session instead of clearing
@@ -667,9 +671,8 @@ impl SessionStorage {
                     runtime.write().await.remove(&old_id);
                 }
                 drop(conn);
-                // Create new session for user
-                self.create_session(Some(user_id)).await?;
-                Ok(())
+                // Create new session for user and return it
+                self.create_session(Some(user_id)).await
             }
         }
     }
@@ -1151,8 +1154,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_session_clear_clears_history() {
-        // Test that clearing a user session clears its history
+    async fn test_session_clear_creates_new_session() {
+        // Test that clearing a user session creates a fresh new session
         let storage = SessionStorage::new(false).unwrap();
         let user = "clearable@example.com";
 
@@ -1167,12 +1170,19 @@ mod tests {
         let history_before = storage.get_history(&original.id).await.unwrap();
         assert_eq!(history_before.len(), 2);
 
-        // Clear session
-        storage.clear_user_session(user).await.unwrap();
+        // Clear session - returns new session
+        let new_session = storage.clear_user_session(user).await.unwrap();
 
-        // Session should now have empty history
-        let history_after = storage.get_history(&original.id).await.unwrap();
-        assert!(history_after.is_empty());
+        // New session should have different ID
+        assert_ne!(new_session.id, original.id);
+
+        // New session should have empty history
+        let history_new = storage.get_history(&new_session.id).await.unwrap();
+        assert!(history_new.is_empty());
+
+        // Old session's history should be cleared too (memory mode)
+        let history_old = storage.get_history(&original.id).await.unwrap();
+        assert!(history_old.is_empty());
     }
 
     #[tokio::test]

@@ -456,13 +456,18 @@ pub async fn get_session_history(
     }
 }
 
-/// Clear session response
+/// Clear session response - returns the new session info
 #[derive(Serialize)]
 pub struct ClearSessionResponse {
     cleared: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_name: Option<String>,
 }
 
 /// Clear session history (for authenticated users to start fresh)
+/// Creates a new session and returns its ID and name
 pub async fn clear_session(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
@@ -470,16 +475,27 @@ pub async fn clear_session(
     // Check for authenticated user
     if let Some(user) = extract_user_identity(&headers) {
         match state.storage.clear_user_session(&user).await {
-            Ok(()) => {
-                log(&format!("Cleared session history for: {}", user));
-                return Json(ClearSessionResponse { cleared: true });
+            Ok(new_session) => {
+                log(&format!(
+                    "Created new session for {}: {} ({})",
+                    user, new_session.id, new_session.name
+                ));
+                return Json(ClearSessionResponse {
+                    cleared: true,
+                    session_id: Some(new_session.id),
+                    session_name: Some(new_session.name),
+                });
             }
             Err(e) => {
                 log(&format!("Failed to clear session for {}: {}", user, e));
             }
         }
     }
-    Json(ClearSessionResponse { cleared: false })
+    Json(ClearSessionResponse {
+        cleared: false,
+        session_id: None,
+        session_name: None,
+    })
 }
 
 /// Request for session events (reconnection)
@@ -750,20 +766,21 @@ pub async fn query(
     let state_clone = state.clone();
     let prompt = request.prompt.clone();
 
-    // Log incoming query
+    // Check for authenticated user from proxy headers
+    let authenticated_user = extract_user_identity(&headers);
+
+    // Log incoming query with user info
     let prompt_preview = if request.prompt.len() > 100 {
         format!("{}...", &request.prompt[..100])
     } else {
         request.prompt.clone()
     };
-    log(&format!("Query received: \"{}\"", prompt_preview));
-
-    // Check for authenticated user from proxy headers
-    let authenticated_user = extract_user_identity(&headers);
+    let user_info = authenticated_user.as_deref().unwrap_or("anonymous");
+    log(&format!("Query from {}: \"{}\"", user_info, prompt_preview));
 
     // Get or create session using storage layer
     // IMPORTANT: Always respect request.session_id if provided - user chose that session!
-    let session_id = match request.session_id {
+    let (session_id, session_name) = match request.session_id {
         Some(ref id) if !id.is_empty() => {
             // User specified a session - validate ownership before using
             if let Some(ref user) = authenticated_user {
@@ -776,42 +793,38 @@ pub async fn query(
                             match state.storage.create_session(Some(user)).await {
                                 Ok(new_session) => {
                                     log(&format!("Created new session: {} ({})", &new_session.id[..8], new_session.name));
-                                    new_session.id
+                                    (new_session.id, new_session.name)
                                 }
-                                Err(_) => uuid::Uuid::new_v4().to_string(),
+                                Err(_) => (uuid::Uuid::new_v4().to_string(), "unknown".to_string()),
                             }
                         } else {
                             // Session belongs to this user - use it
-                            log(&format!("Using specified session: {} ({})", &id[..8.min(id.len())], session.name));
-                            session.id
+                            (session.id, session.name)
                         }
                     } else {
                         // Anonymous session - ensure and use it
                         let user_ref = authenticated_user.as_deref();
                         match state.storage.ensure_session(id, user_ref).await {
-                            Ok(session) => session.id,
-                            Err(_) => id.clone(),
+                            Ok(session) => (session.id, session.name),
+                            Err(_) => (id.clone(), "unknown".to_string()),
                         }
                     }
                 } else {
                     // Session doesn't exist - create it
                     let user_ref = authenticated_user.as_deref();
                     match state.storage.ensure_session(id, user_ref).await {
-                        Ok(session) => session.id,
-                        Err(_) => id.clone(),
+                        Ok(session) => (session.id, session.name),
+                        Err(_) => (id.clone(), "unknown".to_string()),
                     }
                 }
             } else {
                 // Anonymous user - just use the session
                 let user_ref = authenticated_user.as_deref();
                 match state.storage.ensure_session(id, user_ref).await {
-                    Ok(session) => {
-                        log(&format!("Using specified session: {} ({})", &id[..8.min(id.len())], session.name));
-                        session.id
-                    }
+                    Ok(session) => (session.id, session.name),
                     Err(e) => {
                         log(&format!("Failed to ensure session {}: {}", id, e));
-                        id.clone()
+                        (id.clone(), "unknown".to_string())
                     }
                 }
             }
@@ -821,34 +834,36 @@ pub async fn query(
             if let Some(ref user) = authenticated_user {
                 // Get or create session for authenticated user
                 match state.storage.get_or_create_user_session(user).await {
-                    Ok(session) => {
-                        log(&format!("Using authenticated session for: {} ({})", user, session.name));
-                        session.id
-                    }
+                    Ok(session) => (session.id, session.name),
                     Err(e) => {
                         log(&format!("Failed to get/create session for {}: {}", user, e));
                         // Create fallback session
                         match state.storage.create_session(Some(user)).await {
-                            Ok(s) => s.id,
-                            Err(_) => uuid::Uuid::new_v4().to_string(),
+                            Ok(s) => (s.id, s.name),
+                            Err(_) => (uuid::Uuid::new_v4().to_string(), "unknown".to_string()),
                         }
                     }
                 }
             } else {
                 // Create new anonymous session
                 match state.storage.create_session(None).await {
-                    Ok(session) => {
-                        log(&format!("Created new session: {} ({})", &session.id[..8], session.name));
-                        session.id
-                    }
+                    Ok(session) => (session.id, session.name),
                     Err(e) => {
                         log(&format!("Failed to create session: {}", e));
-                        uuid::Uuid::new_v4().to_string()
+                        (uuid::Uuid::new_v4().to_string(), "unknown".to_string())
                     }
                 }
             }
         }
     };
+
+    // Log session info
+    log(&format!(
+        "Session: {} ({}) for {}",
+        &session_id[..8.min(session_id.len())],
+        session_name,
+        user_info
+    ));
 
     // Create broadcast channel for this query (for re-subscribers)
     let (broadcast_tx, _) = broadcast::channel::<SseEvent>(100);
@@ -872,7 +887,7 @@ pub async fn query(
 
     // Spawn agent task
     tokio::spawn(async move {
-        run_agent_with_events(state_clone, prompt, session_id, event_sender, cancel_rx).await;
+        run_agent_with_events(state_clone, prompt, session_id, session_name, event_sender, cancel_rx).await;
     });
 
     // Convert channel to SSE stream
@@ -918,11 +933,13 @@ async fn run_agent_with_events(
     state: Arc<AppState>,
     prompt: String,
     session_id: String,
+    session_name: String,
     event_sender: EventSender,
     cancel_rx: watch::Receiver<bool>,
 ) {
     let session_short = &session_id[..8];
-    log(&format!("[{}] Agent loop starting", session_short));
+    let log_prefix = format!("{} ({})", session_short, session_name);
+    log(&format!("[{}] Agent loop starting", log_prefix));
 
     // Send session ID to client first
     event_sender.send(SseEvent::SessionId {
@@ -931,7 +948,7 @@ async fn run_agent_with_events(
 
     // Load existing history from storage
     let incoming_history = state.storage.get_history(&session_id).await.unwrap_or_default();
-    log(&format!("[{}] Loaded {} messages from history", session_short, incoming_history.len()));
+    log(&format!("[{}] Loaded {} messages from history", log_prefix, incoming_history.len()));
 
     // Prepare the prompt with DMN instructions if needed (only for first message in session)
     let final_prompt = if state.dmn && incoming_history.is_empty() {
@@ -966,7 +983,7 @@ async fn run_agent_with_events(
     let current_agent = state.agent_name.as_deref().unwrap_or("root");
     if let Some(ref orchestrator) = state.orchestrator {
         let invoke_tools = orchestrator.get_invoke_tools(current_agent);
-        log(&format!("[{}] Adding {} invoke tools for agent '{}'", session_short, invoke_tools.len(), current_agent));
+        log(&format!("[{}] Adding {} invoke tools for agent '{}'", log_prefix, invoke_tools.len(), current_agent));
         tools.extend(invoke_tools);
     }
 
@@ -1009,11 +1026,11 @@ async fn run_agent_with_events(
     let mut loop_iteration = 0;
     loop {
         loop_iteration += 1;
-        log(&format!("[{}] Loop iteration {}", session_short, loop_iteration));
+        log(&format!("[{}] Loop iteration {}", log_prefix, loop_iteration));
 
         // Check for cancellation
         if *cancel_rx.borrow() {
-            log(&format!("[{}] Query cancelled by user", session_short));
+            log(&format!("[{}] Query cancelled by user", log_prefix));
             event_sender.send(SseEvent::Error {
                 message: "Query cancelled".to_string(),
             }).await;
@@ -1022,7 +1039,7 @@ async fn run_agent_with_events(
 
         // Call LLM
         log(&format!("[{}] Calling LLM ({}) with {} messages",
-            session_short,
+            log_prefix,
             state.provider_info.resolved_model,
             conversation_history.len()
         ));
@@ -1039,18 +1056,18 @@ async fn run_agent_with_events(
 
         let response = match response {
             Ok(r) => {
-                log(&format!("[{}] LLM response received", session_short));
+                log(&format!("[{}] LLM response received", log_prefix));
                 r
             }
             Err(e) => {
                 // Use {:#} to get full error chain from anyhow
                 let error_msg = format!("{:#}", e);
-                log(&format!("[{}] LLM error: {}", session_short, error_msg));
+                log(&format!("[{}] LLM error: {}", log_prefix, error_msg));
 
                 // Check if this is a context exhaustion error and we haven't tried compaction yet
                 if is_context_exhausted_error(&error_msg) && !compaction_attempted {
                     compaction_attempted = true;
-                    log(&format!("[{}] Attempting context compaction", session_short));
+                    log(&format!("[{}] Attempting context compaction", log_prefix));
 
                     // Attempt compaction
                     match compact_context(
@@ -1065,7 +1082,7 @@ async fn run_agent_with_events(
                             } else {
                                 format!("Context compacted via truncation (ratio: {:.1}%)", compacted.compaction_ratio * 100.0)
                             };
-                            log(&format!("[{}] {}", session_short, compaction_msg));
+                            log(&format!("[{}] {}", log_prefix, compaction_msg));
 
                             event_sender.send(SseEvent::Compacted {
                                 message: compaction_msg,
@@ -1076,7 +1093,7 @@ async fn run_agent_with_events(
                             continue;
                         }
                         Err(compact_err) => {
-                            log(&format!("[{}] Compaction failed: {:#}", session_short, compact_err));
+                            log(&format!("[{}] Compaction failed: {:#}", log_prefix, compact_err));
                             event_sender.send(SseEvent::Error {
                                 message: format!("Context exhausted and compaction failed: {:#}", compact_err),
                             }).await;
@@ -1108,7 +1125,7 @@ async fn run_agent_with_events(
                 } else {
                     content.clone()
                 };
-                log(&format!("[{}] Response: \"{}\"", session_short, content_preview.replace('\n', " ")));
+                log(&format!("[{}] Response: \"{}\"", log_prefix, content_preview.replace('\n', " ")));
                 event_sender.send(SseEvent::Response {
                     content: content.clone(),
                 }).await;
@@ -1117,23 +1134,23 @@ async fn run_agent_with_events(
 
         // Check for tool calls
         let Some(tool_calls) = &choice.message.tool_calls else {
-            log(&format!("[{}] No tool calls, loop complete", session_short));
+            log(&format!("[{}] No tool calls, loop complete", log_prefix));
             break;
         };
 
         if tool_calls.is_empty() {
-            log(&format!("[{}] Empty tool calls, loop complete", session_short));
+            log(&format!("[{}] Empty tool calls, loop complete", log_prefix));
             break;
         }
 
-        log(&format!("[{}] Processing {} tool call(s)", session_short, tool_calls.len()));
+        log(&format!("[{}] Processing {} tool call(s)", log_prefix, tool_calls.len()));
 
         // Execute tool calls
         for tool_call in tool_calls {
             let tool_name = &tool_call.function.name;
             let arguments = &tool_call.function.arguments;
 
-            log(&format!("[{}] Tool call: {}", session_short, tool_name));
+            log(&format!("[{}] Tool call: {}", log_prefix, tool_name));
 
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
@@ -1150,7 +1167,7 @@ async fn run_agent_with_events(
                     .unwrap_or("unknown");
                 let task = args.get("task").and_then(|t| t.as_str()).unwrap_or("");
 
-                log(&format!("[{}] Invoking agent '{}' with task: {}", session_short, target_agent, task));
+                log(&format!("[{}] Invoking agent '{}' with task: {}", log_prefix, target_agent, task));
 
                 // Send agent invoke event
                 event_sender.send(SseEvent::AgentInvoke {
@@ -1217,7 +1234,7 @@ async fn run_agent_with_events(
                 } else {
                     tool_result.clone()
                 };
-                log(&format!("[{}] Tool result: {} chars ({})", session_short, tool_result.len(), result_preview.replace('\n', " ")));
+                log(&format!("[{}] Tool result: {} chars ({})", log_prefix, tool_result.len(), result_preview.replace('\n', " ")));
 
                 // Truncate result for display
                 let (display_result, truncated) = if tool_result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
@@ -1262,7 +1279,7 @@ async fn run_agent_with_events(
         let _ = state.storage.append_event(&session_id, event_type, &content).await;
     }
 
-    log(&format!("[{}] Query complete, saved {} messages to session", session_short, conversation_history.len()));
+    log(&format!("[{}] Query complete, saved {} messages to session", log_prefix, conversation_history.len()));
 
     // Clear cancel sender
     {
