@@ -314,6 +314,40 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 5. **MCP for Extensibility**: Tools provided via Model Context Protocol servers
 6. **Agents as Tools**: Agent-to-agent calls are just tool calls, reusing MCP infrastructure
 7. **Built-in Tools**: Special tools like `interpret_image` and `search_query` are handled directly by the agent
+8. **Dual Binaries**: eunice and mcpz are bundled together - one install gets both tools
+
+## mcpz Architecture
+
+mcpz is a runtime MCP router tool bundled with eunice. It provides:
+
+### Package Routing
+- Searches crates.io, PyPI, and npm for MCP server packages
+- Caches user selections in `~/.cache/mcpz/package_mapping.toml`
+- Runs packages via `npx -y`, `uvx`, or `cargo install` + binary execution
+
+### Built-in MCP Servers
+
+| Server | Module | Description |
+|--------|--------|-------------|
+| `shell` | `mcpz/servers/shell.rs` | Execute shell commands with allow/deny patterns |
+| `filesystem` | `mcpz/servers/filesystem.rs` | File operations with directory sandboxing |
+| `sql` | `mcpz/servers/sql.rs` | Query PostgreSQL, MySQL, SQLite databases |
+| `browser` | `mcpz/servers/browser.rs` | Chrome automation via DevTools Protocol |
+
+### HTTP Transport (`mcpz/http/`)
+
+All built-in servers support HTTP transport in addition to stdio:
+- `HttpServerConfig` - Port, host, TLS configuration
+- `SessionManager` - UUID-based session tracking with TTL
+- `TlsConfig` - Self-signed certificate generation or custom certs
+- Endpoint: `POST/GET/DELETE /mcp` per MCP Streamable HTTP spec
+
+### Key Types
+
+- `McpServer` trait (`servers/common.rs`) - Common interface for all servers
+- `JsonRpcRequest`/`JsonRpcResponse` - MCP JSON-RPC message types
+- `PackageType` enum - Cargo, Python, or Npm package types
+- `PackageCache` - TOML-serialized HashMap for package selections
 
 ## File Structure
 
@@ -339,7 +373,24 @@ src/
 ├── interactive.rs       - Interactive REPL mode
 ├── agent.rs             - Single-agent loop with tool execution
 ├── config.rs            - Configuration loading
-└── lib.rs               - Library exports
+├── lib.rs               - Library exports
+├── mcpz_main.rs         - mcpz binary entry point
+└── mcpz/
+    ├── mod.rs           - mcpz module exports
+    ├── cli.rs           - mcpz CLI and package routing
+    ├── http/            - HTTP transport for MCP servers
+    │   ├── mod.rs
+    │   ├── handlers.rs  - POST/GET/DELETE handlers
+    │   ├── server.rs    - Axum server setup
+    │   ├── session.rs   - Session management
+    │   └── tls.rs       - TLS/certificate handling
+    └── servers/         - Built-in MCP servers
+        ├── mod.rs
+        ├── common.rs    - Shared MCP types
+        ├── shell.rs     - Shell command execution
+        ├── filesystem.rs - Filesystem operations
+        ├── sql.rs       - SQL database queries
+        └── browser.rs   - Browser automation
 
 webapp/
 └── index.html           - Embedded HTML/CSS/JS frontend (synth minimal aesthetic)

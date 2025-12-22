@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "0.2.69"
+version = "0.2.70"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
@@ -15,6 +15,10 @@ exclude = ["examples/**/*.pdf", "examples/**/*.jpg", "examples/**/*.png", "asset
 [[bin]]
 name = "eunice"
 path = "src/main.rs"
+
+[[bin]]
+name = "mcpz"
+path = "src/mcpz_main.rs"
 
 [dependencies]
 # Async runtime
@@ -60,6 +64,24 @@ atty = "0.2"
 # Session persistence (SQLite)
 rusqlite = { version = "0.32", features = ["bundled"] }
 rand = "0.8"
+
+# mcpz dependencies
+dirs = "5"
+urlencoding = "2"
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = "0.5"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rcgen = "0.13"
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
+tokio-rustls = "0.26"
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql", "sqlite", "chrono"] }
+sha2 = "0.10"
+hex = "0.4"
+time = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 lto = true

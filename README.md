@@ -49,13 +49,21 @@ In December 2025, I decided to focus on Web-based and TUI features so threw simp
 
 ## Installation
 
+### From GitHub
+
+```bash
+cargo install --git ssh://git@github.com/xeb/eunice.git
+```
+
+This installs both `eunice` and `mcpz` binaries to `~/.cargo/bin/`.
+
 ### From Source
 
 ```bash
 cargo build --release
 ```
 
-The binary will be at `target/release/eunice`.
+Binaries will be at `target/release/eunice` and `target/release/mcpz`.
 
 ### Install Globally (from source)
 
@@ -757,6 +765,51 @@ export BRAVE_API_KEY="..."  # For web search in DMN mode
 # Ollama host (optional)
 export OLLAMA_HOST="http://localhost:11434"
 ```
+
+## mcpz - Bundled MCP Server Runner
+
+This package includes `mcpz`, a runtime MCP router tool. When you install eunice, you also get mcpz.
+
+### What mcpz does
+
+`mcpz` searches across **crates.io**, **PyPI**, and **npm** for MCP server packages and runs them with the correct package manager. It also provides built-in MCP servers.
+
+### Quick Usage
+
+```bash
+# Search for packages across all registries
+mcpz search mcp-server-filesystem
+
+# Run a package (auto-picks package manager)
+mcpz run mcp-server-time
+
+# Built-in servers
+mcpz server shell                    # Shell command execution
+mcpz server filesystem               # Filesystem operations
+mcpz server sql --connection sqlite::memory: --readonly  # SQL queries
+mcpz server browser                  # Browser automation (requires Chrome)
+```
+
+### Built-in MCP Servers
+
+| Server | Description | Example |
+|--------|-------------|---------|
+| `shell` | Execute shell commands | `mcpz server shell --allow "ls*,cat*"` |
+| `filesystem` | File operations with sandboxing | `mcpz server filesystem -d /home/user` |
+| `sql` | Query PostgreSQL, MySQL, SQLite | `mcpz server sql -c postgres://... --readonly` |
+| `browser` | Chrome automation via DevTools | `mcpz server browser --verbose` |
+
+### HTTP Transport
+
+All servers support HTTP transport for remote access:
+
+```bash
+mcpz server shell --http -p 8080           # HTTP on port 8080
+mcpz server shell --http --tls             # HTTPS with self-signed cert
+mcpz server filesystem --http --tls --cert cert.pem --key key.pem
+```
+
+For full mcpz documentation, run `mcpz --help` or `mcpz server --help`.
 
 ## License
 

@@ -299,12 +299,63 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
     Ok(None)
 }
 
-/// Update eunice to the latest version from GitHub
+/// Fetch the remote version from GitHub Cargo.toml
+fn fetch_remote_version() -> Option<String> {
+    let url = "https://raw.githubusercontent.com/xeb/eunice/master/Cargo.toml";
+    let response = reqwest::blocking::get(url).ok()?;
+    let text = response.text().ok()?;
+
+    // Parse version from Cargo.toml (version = "x.y.z")
+    for line in text.lines() {
+        if line.starts_with("version") {
+            // Extract version from: version = "0.2.70"
+            let parts: Vec<&str> = line.split('"').collect();
+            if parts.len() >= 2 {
+                return Some(parts[1].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Compare semantic versions, returns true if remote > local
+fn is_newer_version(remote: &str, local: &str) -> bool {
+    let parse = |v: &str| -> Vec<u32> {
+        v.split('.').filter_map(|s| s.parse().ok()).collect()
+    };
+    let remote_parts = parse(remote);
+    let local_parts = parse(local);
+
+    for i in 0..3 {
+        let r = remote_parts.get(i).unwrap_or(&0);
+        let l = local_parts.get(i).unwrap_or(&0);
+        if r > l { return true; }
+        if r < l { return false; }
+    }
+    false
+}
+
+/// Update eunice and mcpz to the latest version from GitHub
 fn run_update() -> Result<()> {
     use std::process::{Command, Stdio};
 
-    println!("Updating eunice from GitHub...");
+    println!("Checking for updates...");
     println!("Current version: {}", VERSION);
+
+    // Check remote version
+    if let Some(remote_version) = fetch_remote_version() {
+        println!("Remote version:  {}", remote_version);
+        println!();
+
+        if !is_newer_version(&remote_version, VERSION) {
+            println!("Already up to date!");
+            return Ok(());
+        }
+
+        println!("Update available: {} -> {}", VERSION, remote_version);
+    } else {
+        println!("Could not fetch remote version, proceeding with update...");
+    }
     println!();
 
     // Check if cargo is available
@@ -318,6 +369,7 @@ fn run_update() -> Result<()> {
 
     // Run cargo install from git with SSH
     // Set CARGO_NET_GIT_FETCH_WITH_CLI=true to use system git (with SSH keys)
+    // This installs both eunice and mcpz binaries
     let status = Command::new("cargo")
         .env("CARGO_NET_GIT_FETCH_WITH_CLI", "true")
         .args([
@@ -332,7 +384,8 @@ fn run_update() -> Result<()> {
 
     if status.success() {
         println!();
-        println!("Update complete! Run 'eunice --version' to verify.");
+        println!("Update complete! Both eunice and mcpz have been updated.");
+        println!("Run 'eunice --version' or 'mcpz --version' to verify.");
         Ok(())
     } else {
         Err(anyhow!("Update failed. Check the output above for details."))

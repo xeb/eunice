@@ -375,12 +375,12 @@ pub async fn get_session_history(
     State(state): State<Arc<AppState>>,
     Json(request): Json<SessionHistoryRequest>,
 ) -> Json<SessionHistoryResponse> {
-    // Use the requested session ID directly - the frontend knows which session to load
-    // For authenticated users, sessions are already filtered by user in list_sessions
+    let authenticated_user = extract_user_identity(&headers);
+
     let session_id = if request.session_id.is_empty() {
         // No session ID provided - for authenticated users, get their most recent session
-        if let Some(user) = extract_user_identity(&headers) {
-            match state.storage.get_or_create_user_session(&user).await {
+        if let Some(ref user) = authenticated_user {
+            match state.storage.get_or_create_user_session(user).await {
                 Ok(session) => session.id,
                 Err(_) => return Json(SessionHistoryResponse { exists: false, messages: vec![] }),
             }
@@ -388,6 +388,20 @@ pub async fn get_session_history(
             return Json(SessionHistoryResponse { exists: false, messages: vec![] });
         }
     } else {
+        // Validate session ownership for authenticated users
+        if let Some(ref user) = authenticated_user {
+            // Check if the session belongs to this user
+            if let Ok(Some(session)) = state.storage.get_session(&request.session_id).await {
+                // If session has a user_id, it must match the authenticated user
+                if let Some(ref session_user) = session.user_id {
+                    if session_user != user {
+                        // Session belongs to a different user - deny access
+                        return Json(SessionHistoryResponse { exists: false, messages: vec![] });
+                    }
+                }
+                // Anonymous sessions (user_id = None) can be accessed by anyone
+            }
+        }
         request.session_id.clone()
     };
 
@@ -477,6 +491,7 @@ pub struct SessionEventsRequest {
 /// Session events endpoint - replay stored events and subscribe to live events if query is running
 /// This allows users to reconnect and see events that happened while they were disconnected
 pub async fn session_events(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Json(request): Json<SessionEventsRequest>,
 ) -> Sse<impl Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
@@ -484,8 +499,32 @@ pub async fn session_events(
     let session_short = if session_id.len() >= 8 { &session_id[..8] } else { &session_id };
     log(&format!("[{}] Session events requested (reconnection)", session_short));
 
+    // Validate session ownership for authenticated users
+    let authenticated_user = extract_user_identity(&headers);
+    let access_denied = if let Some(ref user) = authenticated_user {
+        if let Ok(Some(session)) = state.storage.get_session(&session_id).await {
+            if let Some(ref session_user) = session.user_id {
+                if session_user != user {
+                    log(&format!("[{}] Access denied - session belongs to different user", session_short));
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
     // Get stored events and check if query is running from storage
-    let (stored_events, broadcast_rx, query_running) = if let Some((events, event_tx, running)) =
+    // If access denied, return empty events
+    let (stored_events, broadcast_rx, query_running) = if access_denied {
+        (Vec::new(), None, false)
+    } else if let Some((events, event_tx, running)) =
         state.storage.get_runtime_state(&session_id).await
     {
         let rx = event_tx.as_ref().map(|tx| tx.subscribe());
@@ -726,16 +765,54 @@ pub async fn query(
     // IMPORTANT: Always respect request.session_id if provided - user chose that session!
     let session_id = match request.session_id {
         Some(ref id) if !id.is_empty() => {
-            // User specified a session - use it (ensure it exists)
-            let user_ref = authenticated_user.as_deref();
-            match state.storage.ensure_session(id, user_ref).await {
-                Ok(session) => {
-                    log(&format!("Using specified session: {} ({})", &id[..8.min(id.len())], session.name));
-                    session.id
+            // User specified a session - validate ownership before using
+            if let Some(ref user) = authenticated_user {
+                // Check if the session belongs to this user
+                if let Ok(Some(session)) = state.storage.get_session(id).await {
+                    if let Some(ref session_user) = session.user_id {
+                        if session_user != user {
+                            // Session belongs to a different user - create new session for this user
+                            log(&format!("Session {} belongs to different user, creating new session", &id[..8.min(id.len())]));
+                            match state.storage.create_session(Some(user)).await {
+                                Ok(new_session) => {
+                                    log(&format!("Created new session: {} ({})", &new_session.id[..8], new_session.name));
+                                    new_session.id
+                                }
+                                Err(_) => uuid::Uuid::new_v4().to_string(),
+                            }
+                        } else {
+                            // Session belongs to this user - use it
+                            log(&format!("Using specified session: {} ({})", &id[..8.min(id.len())], session.name));
+                            session.id
+                        }
+                    } else {
+                        // Anonymous session - ensure and use it
+                        let user_ref = authenticated_user.as_deref();
+                        match state.storage.ensure_session(id, user_ref).await {
+                            Ok(session) => session.id,
+                            Err(_) => id.clone(),
+                        }
+                    }
+                } else {
+                    // Session doesn't exist - create it
+                    let user_ref = authenticated_user.as_deref();
+                    match state.storage.ensure_session(id, user_ref).await {
+                        Ok(session) => session.id,
+                        Err(_) => id.clone(),
+                    }
                 }
-                Err(e) => {
-                    log(&format!("Failed to ensure session {}: {}", id, e));
-                    id.clone()
+            } else {
+                // Anonymous user - just use the session
+                let user_ref = authenticated_user.as_deref();
+                match state.storage.ensure_session(id, user_ref).await {
+                    Ok(session) => {
+                        log(&format!("Using specified session: {} ({})", &id[..8.min(id.len())], session.name));
+                        session.id
+                    }
+                    Err(e) => {
+                        log(&format!("Failed to ensure session {}: {}", id, e));
+                        id.clone()
+                    }
                 }
             }
         }
