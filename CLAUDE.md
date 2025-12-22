@@ -159,8 +159,9 @@ args = ["server", "shell"]
 allowedTools = ["shell_*"]           # Whitelist: only these patterns
 deniedTools = ["*_background"]       # Blacklist: exclude these patterns
 
-[agents.root]
+[agents.coordinator]
 prompt = "You are the coordinator..."
+root = true                          # Mark this as the entry-point agent
 tools = []                           # Tool patterns this agent can use
 can_invoke = ["worker"]              # Agents this agent can call
 
@@ -170,6 +171,18 @@ model = "gemini-3-flash-preview"     # Optional: use different model (faster/che
 tools = ["shell_*"]                  # Supports wildcards: shell_*, *_read, etc.
 can_invoke = []
 ```
+
+### Root Agent Selection
+
+The root agent is the entry-point agent that runs first. It's determined by:
+
+1. **`root = true` flag**: If an agent has `root = true`, it becomes the root agent
+2. **Name-based fallback**: If no `root = true` exists, an agent named "root" is used
+3. **First agent fallback**: If neither exists, the first agent in config is used
+
+**Conflict detection**:
+- Error if multiple agents have `root = true`
+- Error if one agent has `root = true` AND another agent is named "root"
 
 ### Per-Agent Models
 
@@ -184,7 +197,7 @@ Use faster models (e.g., `gemini-3-flash-preview`) for simpler agents and reserv
 ### How It Works
 
 1. When `[agents]` section exists, multi-agent mode is auto-enabled
-2. Default agent is `root` (or specify with `--agent name`)
+2. Root agent is determined by `root = true` flag, or agent named "root" (or specify with `--agent name`)
 3. Each agent gets `invoke_*` tools for agents in `can_invoke`
 4. Agent invocation is recursive with depth tracking
 5. MCP tools are filtered per-agent based on `tools` list
@@ -425,6 +438,8 @@ When adding features:
 
 ## Version History
 
+- **0.2.73**: Root agent selection: `root = true` flag to mark entry-point agent (backwards compatible with name-based "root")
+- **0.2.72**: Fix NEW button session bug, improve webapp logging with username and session name
 - **0.2.68**: Multi-agent: required `description` field for agents, visible invoke calls in CLI/TUI/webapp
 - **0.2.67**: Fix session switching: respect session_id from request instead of always using most recent
 - **0.2.66**: Per-agent models: agents can specify their own `model` in config, validated at startup

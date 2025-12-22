@@ -731,8 +731,12 @@ async fn main() -> Result<()> {
     // Determine agent to use
     let agent_name = if let Some(ref name) = args.agent {
         Some(name.clone())
-    } else if orchestrator.as_ref().map_or(false, |o| o.has_agents()) {
-        Some("root".to_string()) // Default to root agent
+    } else if let Some(ref config) = mcp_config {
+        // Get the root agent from config (handles root = true flag and name-based fallback)
+        match config.get_root_agent() {
+            Ok(root) => root,
+            Err(e) => return Err(anyhow!("Agent configuration error: {}", e)),
+        }
     } else {
         None
     };
@@ -1048,6 +1052,7 @@ mod tests {
             description: "Root coordinator".to_string(),
             prompt: "You are root".to_string(),
             model: None,
+            root: true,
             mcp_servers: vec![],
             tools: vec!["tool1".to_string()],
             can_invoke: vec!["worker".to_string()],
@@ -1056,6 +1061,7 @@ mod tests {
             description: "Worker agent".to_string(),
             prompt: "You are worker".to_string(),
             model: None,
+            root: false,
             mcp_servers: vec![],
             tools: vec!["tool2".to_string(), "tool3".to_string()],
             can_invoke: Vec::new(),
@@ -1080,6 +1086,7 @@ mod tests {
             description: "Root coordinator".to_string(),
             prompt: "You are root".to_string(),
             model: None,  // Uses default model
+            root: true,
             mcp_servers: vec![],
             tools: vec!["tool1".to_string()],
             can_invoke: vec!["worker".to_string()],
@@ -1088,6 +1095,7 @@ mod tests {
             description: "Worker with custom model".to_string(),
             prompt: "You are worker".to_string(),
             model: Some("gemini-3-flash-preview".to_string()),  // Custom model
+            root: false,
             mcp_servers: vec![],
             tools: vec!["tool2".to_string()],
             can_invoke: Vec::new(),
