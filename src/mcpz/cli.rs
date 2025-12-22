@@ -1265,21 +1265,12 @@ fn pick_package(query: &str) -> Result<()> {
     Ok(())
 }
 
-/// Fetch the remote version from GitHub Cargo.toml
+/// Fetch the remote version from longrunningagents.com
 fn fetch_remote_version() -> Option<String> {
-    let url = "https://raw.githubusercontent.com/xeb/eunice/master/Cargo.toml";
+    let url = "https://longrunningagents.com/version.txt";
     let response = reqwest::blocking::get(url).ok()?;
     let text = response.text().ok()?;
-
-    for line in text.lines() {
-        if line.starts_with("version") {
-            let parts: Vec<&str> = line.split('"').collect();
-            if parts.len() >= 2 {
-                return Some(parts[1].to_string());
-            }
-        }
-    }
-    None
+    Some(text.trim().to_string())
 }
 
 /// Compare semantic versions, returns true if remote > local

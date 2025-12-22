@@ -299,23 +299,12 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
     Ok(None)
 }
 
-/// Fetch the remote version from GitHub Cargo.toml
+/// Fetch the remote version from longrunningagents.com
 fn fetch_remote_version() -> Option<String> {
-    let url = "https://raw.githubusercontent.com/xeb/eunice/master/Cargo.toml";
+    let url = "https://longrunningagents.com/version.txt";
     let response = reqwest::blocking::get(url).ok()?;
     let text = response.text().ok()?;
-
-    // Parse version from Cargo.toml (version = "x.y.z")
-    for line in text.lines() {
-        if line.starts_with("version") {
-            // Extract version from: version = "0.2.70"
-            let parts: Vec<&str> = line.split('"').collect();
-            if parts.len() >= 2 {
-                return Some(parts[1].to_string());
-            }
-        }
-    }
-    None
+    Some(text.trim().to_string())
 }
 
 /// Compare semantic versions, returns true if remote > local

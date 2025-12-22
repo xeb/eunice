@@ -490,4 +490,13 @@ When the user says "release":
 3. Bump version in Cargo.toml
 4. Git commit with descriptive message
 5. Git push
-6. **IMPORTANT**: After git push completes, run `eunice --update` to install the new version from GitHub
+6. **IMPORTANT**: Update version.txt for `--update` to work:
+   ```bash
+   echo "X.Y.Z" > ~/gal/projects/longrunningagents.com/version.txt
+   ```
+   Then deploy the website so https://longrunningagents.com/version.txt is updated.
+7. Run `eunice --update` to verify the update works
+
+### Version Check System
+
+The `--update` flag and `install.sh` check https://longrunningagents.com/version.txt to determine if an update is needed. This file must contain just the version number (e.g., `0.2.70`).
