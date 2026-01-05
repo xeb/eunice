@@ -76,280 +76,9 @@ fn print_help(shared_writer: &mut SharedWriter) -> std::io::Result<()> {
     }
     writeln!(
         shared_writer,
-        "\n{DIM}Type / for command menu, Ctrl+D to exit, Esc/Ctrl+C to stop generation{RESET}"
-    )?;
-    writeln!(
-        shared_writer,
-        "{DIM}Multiline paste supported via terminal paste (right-click, Ctrl+Shift+V){RESET}\n"
+        "\n{DIM}Type / for command menu, Ctrl+D to exit, Esc/Ctrl+C to stop generation{RESET}\n"
     )?;
     Ok(())
-}
-
-/// Simple line editor state for paste-enabled readline
-struct LineEditor {
-    line: String,
-    cursor: usize,
-}
-
-impl LineEditor {
-    fn new() -> Self {
-        Self {
-            line: String::new(),
-            cursor: 0,
-        }
-    }
-
-    fn insert_char(&mut self, c: char) {
-        self.line.insert(self.cursor, c);
-        self.cursor += c.len_utf8();
-    }
-
-    fn insert_str(&mut self, s: &str) {
-        self.line.insert_str(self.cursor, s);
-        self.cursor += s.len();
-    }
-
-    fn backspace(&mut self) {
-        if self.cursor > 0 {
-            // Find the previous character boundary
-            let mut new_cursor = self.cursor - 1;
-            while new_cursor > 0 && !self.line.is_char_boundary(new_cursor) {
-                new_cursor -= 1;
-            }
-            self.line.drain(new_cursor..self.cursor);
-            self.cursor = new_cursor;
-        }
-    }
-
-    fn delete(&mut self) {
-        if self.cursor < self.line.len() {
-            // Find the next character boundary
-            let mut end = self.cursor + 1;
-            while end < self.line.len() && !self.line.is_char_boundary(end) {
-                end += 1;
-            }
-            self.line.drain(self.cursor..end);
-        }
-    }
-
-    fn move_left(&mut self) {
-        if self.cursor > 0 {
-            let mut new_cursor = self.cursor - 1;
-            while new_cursor > 0 && !self.line.is_char_boundary(new_cursor) {
-                new_cursor -= 1;
-            }
-            self.cursor = new_cursor;
-        }
-    }
-
-    fn move_right(&mut self) {
-        if self.cursor < self.line.len() {
-            let mut new_cursor = self.cursor + 1;
-            while new_cursor < self.line.len() && !self.line.is_char_boundary(new_cursor) {
-                new_cursor += 1;
-            }
-            self.cursor = new_cursor;
-        }
-    }
-
-    fn move_home(&mut self) {
-        self.cursor = 0;
-    }
-
-    fn move_end(&mut self) {
-        self.cursor = self.line.len();
-    }
-
-    fn clear(&mut self) {
-        self.line.clear();
-        self.cursor = 0;
-    }
-
-    fn delete_word_backward(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        // Skip trailing spaces
-        let mut pos = self.cursor;
-        while pos > 0 {
-            let prev = {
-                let mut p = pos - 1;
-                while p > 0 && !self.line.is_char_boundary(p) {
-                    p -= 1;
-                }
-                p
-            };
-            if self.line[prev..pos].trim().is_empty() {
-                pos = prev;
-            } else {
-                break;
-            }
-        }
-        // Skip the word
-        while pos > 0 {
-            let prev = {
-                let mut p = pos - 1;
-                while p > 0 && !self.line.is_char_boundary(p) {
-                    p -= 1;
-                }
-                p
-            };
-            if !self.line[prev..pos].trim().is_empty() {
-                pos = prev;
-            } else {
-                break;
-            }
-        }
-        self.line.drain(pos..self.cursor);
-        self.cursor = pos;
-    }
-
-    fn take_line(&mut self) -> String {
-        let line = std::mem::take(&mut self.line);
-        self.cursor = 0;
-        line
-    }
-}
-
-/// Render the prompt and current line directly to stdout
-/// We use crossterm directly because SharedWriter doesn't handle
-/// in-place line editing with escape sequences properly.
-fn render_line(editor: &LineEditor) -> std::io::Result<()> {
-    let mut stdout = std::io::stdout();
-
-    // Move to beginning of line and clear it
-    execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
-
-    // Print prompt and line
-    write!(stdout, "{PURPLE}>{RESET} {}", editor.line)?;
-
-    // Move cursor to correct position
-    let prompt_len = 2; // "> "
-    let display_cursor = prompt_len + editor.line[..editor.cursor].chars().count();
-    execute!(stdout, cursor::MoveToColumn(display_cursor as u16))?;
-
-    stdout.flush()
-}
-
-/// Custom readline with bracketed paste support
-///
-/// Uses crossterm directly for line editing (SharedWriter doesn't handle
-/// in-place editing properly). SharedWriter is still used for final output.
-async fn read_line_with_paste(_ctx: &mut ReadlineAsyncContext) -> Result<ReadlineEvent> {
-    let mut editor = LineEditor::new();
-
-    // Initial render
-    render_line(&editor)?;
-
-    loop {
-        // Poll for events with a small timeout
-        if event::poll(Duration::from_millis(50)).map_err(|e| anyhow!("Poll error: {}", e))? {
-            let ev = event::read().map_err(|e| anyhow!("Read error: {}", e))?;
-
-            match ev {
-                // Handle bracketed paste - this is the key addition
-                Event::Paste(text) => {
-                    // For multiline paste, join lines with spaces to preserve content
-                    let processed = text.lines().collect::<Vec<_>>().join(" ");
-                    editor.insert_str(&processed);
-                    render_line(&editor)?;
-                }
-
-                Event::Key(key_event) => {
-                    // Handle control keys
-                    if key_event.modifiers.contains(KeyModifiers::CONTROL) {
-                        match key_event.code {
-                            KeyCode::Char('c') => {
-                                // Clear line and print ^C, then newline
-                                let mut stdout = std::io::stdout();
-                                execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
-                                writeln!(stdout, "{PURPLE}>{RESET} ^C")?;
-                                return Ok(ReadlineEvent::Interrupted);
-                            }
-                            KeyCode::Char('d') => {
-                                if editor.line.is_empty() {
-                                    println!();
-                                    return Ok(ReadlineEvent::Eof);
-                                }
-                                // If there's content, Ctrl+D does nothing
-                            }
-                            KeyCode::Char('a') => {
-                                editor.move_home();
-                                render_line(&editor)?;
-                            }
-                            KeyCode::Char('e') => {
-                                editor.move_end();
-                                render_line(&editor)?;
-                            }
-                            KeyCode::Char('u') => {
-                                editor.clear();
-                                render_line(&editor)?;
-                            }
-                            KeyCode::Char('w') => {
-                                editor.delete_word_backward();
-                                render_line(&editor)?;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    match key_event.code {
-                        KeyCode::Enter => {
-                            let line = editor.take_line();
-                            // Print the final line and move to next line
-                            let mut stdout = std::io::stdout();
-                            execute!(stdout, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
-                            writeln!(stdout, "{PURPLE}>{RESET} {}", line)?;
-                            return Ok(ReadlineEvent::Line(line));
-                        }
-                        KeyCode::Char(c) => {
-                            editor.insert_char(c);
-                            render_line(&editor)?;
-                        }
-                        KeyCode::Backspace => {
-                            editor.backspace();
-                            render_line(&editor)?;
-                        }
-                        KeyCode::Delete => {
-                            editor.delete();
-                            render_line(&editor)?;
-                        }
-                        KeyCode::Left => {
-                            editor.move_left();
-                            render_line(&editor)?;
-                        }
-                        KeyCode::Right => {
-                            editor.move_right();
-                            render_line(&editor)?;
-                        }
-                        KeyCode::Home => {
-                            editor.move_home();
-                            render_line(&editor)?;
-                        }
-                        KeyCode::End => {
-                            editor.move_end();
-                            render_line(&editor)?;
-                        }
-                        KeyCode::Up | KeyCode::Down => {
-                            // TODO: History navigation (would need history access)
-                        }
-                        _ => {}
-                    }
-                }
-
-                Event::Resize(_, _) => {
-                    render_line(&editor)?;
-                    return Ok(ReadlineEvent::Resized);
-                }
-
-                _ => {}
-            }
-        }
-
-        // Yield to other tasks
-        tokio::task::yield_now().await;
-    }
 }
 
 /// Show command selection menu
@@ -483,12 +212,12 @@ pub async fn run_tui_mode(
         .await?;
     }
 
-    // Main event loop - use custom readline with paste support
+    // Main event loop - use r3bl_tui's native readline
     loop {
-        let event = read_line_with_paste(&mut ctx).await?;
+        let event = ctx.readline.readline().await;
 
         match event {
-            ReadlineEvent::Line(line) => {
+            Ok(ReadlineEvent::Line(line)) => {
                 let input = line.trim();
 
                 if input.is_empty() {
@@ -563,14 +292,20 @@ pub async fn run_tui_mode(
                 )
                 .await?;
             }
-            ReadlineEvent::Eof | ReadlineEvent::Interrupted => {
+            Ok(ReadlineEvent::Eof) | Ok(ReadlineEvent::Interrupted) => {
                 let mut sw = ctx.clone_shared_writer();
                 writeln!(sw, "\n{DIM}Goodbye!{RESET}\n")?;
                 break;
             }
-            ReadlineEvent::Resized => {
+            Ok(ReadlineEvent::Resized) => {
                 // Handle terminal resize - continue loop
                 continue;
+            }
+            Err(e) => {
+                // Handle readline errors
+                let mut sw = ctx.clone_shared_writer();
+                writeln!(sw, "\n{YELLOW}Readline error: {}{RESET}\n", e)?;
+                break;
             }
         }
     }
