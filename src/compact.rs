@@ -50,7 +50,7 @@ pub struct CompactedContext {
 }
 
 /// Compaction prompt template (embedded from file)
-const COMPACTION_PROMPT: &str = include_str!("../specs/compaction_prompt.md");
+const COMPACTION_PROMPT: &str = include_str!("../prompts/compaction_prompt.md");
 
 /// Estimate token count for messages (rough heuristic: ~4 chars per token)
 pub fn estimate_tokens(messages: &[Message]) -> usize {
