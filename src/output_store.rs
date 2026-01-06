@@ -29,6 +29,7 @@ enum OutputStorage {
 struct StoredOutput {
     storage: OutputStorage,
     total_lines: usize,
+    #[allow(dead_code)]
     total_bytes: usize,
 }
 
@@ -93,6 +94,7 @@ impl OutputStore {
     }
 
     /// Store shell output with exit code prominently displayed
+    #[allow(dead_code)]
     pub fn store_shell_output(
         &mut self,
         exit_code: i32,
@@ -173,11 +175,13 @@ impl OutputStore {
     }
 
     /// Check if an output ID exists
+    #[allow(dead_code)]
     pub fn exists(&self, id: &str) -> bool {
         self.outputs.contains_key(id)
     }
 
     /// Get metadata for an output
+    #[allow(dead_code)]
     pub fn get_metadata(&self, id: &str) -> Option<(usize, usize)> {
         self.outputs
             .get(id)

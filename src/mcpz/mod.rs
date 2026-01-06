@@ -4,6 +4,11 @@
 //! - Package routing (search across crates.io, PyPI, npm)
 //! - Built-in MCP servers (shell, filesystem, sql, browser)
 //! - HTTP transport support for all servers
+//!
+//! Note: Most of this module is only used by the `mcpz` binary, not `eunice`.
+
+#![allow(dead_code)]
+#![allow(unused_imports)]
 
 pub mod cli;
 pub mod http;
