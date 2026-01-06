@@ -1,4 +1,5 @@
 mod agent;
+mod builtin_tools;
 mod client;
 mod compact;
 mod config;
@@ -6,10 +7,13 @@ mod display;
 mod display_sink;
 mod interactive;
 mod mcp;
+mod mcpz;
 mod models;
 mod orchestrator;
+mod output_store;
 mod provider;
 mod tui;
+mod usage;
 mod webapp;
 
 use crate::client::Client;
@@ -45,6 +49,52 @@ struct Args {
     #[arg(help_heading = "Main Options")]
     prompt_positional: Option<String>,
 
+    // === Tools ===
+    /// Enable shell command execution
+    #[arg(long, help_heading = "Tools")]
+    shell: bool,
+
+    /// Enable filesystem operations (read, write, edit, list)
+    #[arg(long, help_heading = "Tools")]
+    filesystem: bool,
+
+    /// Enable browser automation (requires Chrome)
+    #[arg(long, help_heading = "Tools")]
+    browser: bool,
+
+    /// Enable web search (uses Gemini + Google Search)
+    #[arg(long, help_heading = "Tools")]
+    search: bool,
+
+    /// Enable image/PDF interpretation
+    #[arg(long, help_heading = "Tools")]
+    images: bool,
+
+    /// Enable all built-in tools
+    #[arg(long, help_heading = "Tools")]
+    all: bool,
+
+    // === Modes ===
+    /// Autonomous batch execution (--all + DMN instructions)
+    #[arg(long = "default-mode-network", visible_alias = "dmn", help_heading = "Modes")]
+    dmn: bool,
+
+    /// Run as specific agent from config
+    #[arg(long, help_heading = "Modes")]
+    agent: Option<String>,
+
+    /// Multi-agent research orchestration (requires GEMINI_API_KEY)
+    #[arg(long, help_heading = "Modes")]
+    research: bool,
+
+    /// Start web server interface
+    #[arg(long, help_heading = "Modes")]
+    webapp: bool,
+
+    /// Full TUI mode with enhanced terminal interface (requires TTY)
+    #[arg(long, help_heading = "Modes")]
+    tui: bool,
+
     // === Discovery ===
     /// List available AI models
     #[arg(long, help_heading = "Discovery")]
@@ -54,42 +104,13 @@ struct Args {
     #[arg(long, help_heading = "Discovery")]
     list_agents: bool,
 
-    /// List discovered MCP tools with sanitized names
+    /// List available tools (built-in and MCP)
     #[arg(long, help_heading = "Discovery")]
     list_tools: bool,
 
     /// List configured MCP servers
     #[arg(long, help_heading = "Discovery")]
     list_mcp_servers: bool,
-
-    // === Modes ===
-    /// Enable DMN (Default Mode Network) with auto-loaded MCP tools
-    #[arg(long = "default-mode-network", visible_alias = "dmn", help_heading = "Modes")]
-    dmn: bool,
-
-    /// Run as a specific agent (uses 'root' by default if agents configured)
-    #[arg(long, help_heading = "Modes")]
-    agent: Option<String>,
-
-    /// Enable built-in image interpretation tool
-    #[arg(long, help_heading = "Modes")]
-    images: bool,
-
-    /// Enable built-in web search tool (uses Gemini with Google Search)
-    #[arg(long, help_heading = "Modes")]
-    search: bool,
-
-    /// Enable Research mode with multi-agent orchestration (requires GEMINI_API_KEY)
-    #[arg(long, help_heading = "Modes")]
-    research: bool,
-
-    /// Start web server interface (default: 0.0.0.0:8811)
-    #[arg(long, help_heading = "Modes")]
-    webapp: bool,
-
-    /// Full TUI mode with enhanced terminal interface (requires TTY)
-    #[arg(long, help_heading = "Modes")]
-    tui: bool,
 
     // === Output ===
     /// Suppress all output except AI responses
@@ -299,6 +320,44 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
     Ok(None)
 }
 
+/// Check for conflicts between built-in tool flags and MCP config
+fn check_builtin_tool_conflicts(args: &Args, config: &Option<models::McpConfig>) -> Result<()> {
+    let Some(config) = config else {
+        return Ok(());
+    };
+
+    let mut conflicts = Vec::new();
+
+    // Check shell conflict
+    if (args.shell || args.all) && config.mcp_servers.contains_key("shell") {
+        conflicts.push(("--shell", "shell"));
+    }
+
+    // Check filesystem conflict
+    if (args.filesystem || args.all) && config.mcp_servers.contains_key("filesystem") {
+        conflicts.push(("--filesystem", "filesystem"));
+    }
+
+    // Check browser conflict
+    if (args.browser || args.all) && config.mcp_servers.contains_key("browser") {
+        conflicts.push(("--browser", "browser"));
+    }
+
+    if !conflicts.is_empty() {
+        let msg = conflicts
+            .iter()
+            .map(|(flag, server)| format!("{} conflicts with MCP server '{}'", flag, server))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(anyhow!(
+            "Built-in tool conflicts with MCP config: {}. Use --no-mcp to disable MCP servers or remove the conflicting flag.",
+            msg
+        ));
+    }
+
+    Ok(())
+}
+
 /// Fetch the remote version from longrunningagents.com
 fn fetch_remote_version() -> Option<String> {
     let url = "https://longrunningagents.com/version.txt";
@@ -453,6 +512,9 @@ async fn main() -> Result<()> {
     // Get config early for --list-agents
     let mcp_config = determine_config(&args)?;
 
+    // Check for conflicts between built-in tool flags and MCP config
+    check_builtin_tool_conflicts(&args, &mcp_config)?;
+
     // Handle --list-agents
     if args.list_agents {
         if let Some(ref config) = mcp_config {
@@ -547,16 +609,39 @@ async fn main() -> Result<()> {
 
     // Handle --list-tools
     if args.list_tools {
-        let enable_image_tool = args.dmn || args.images;
-        let enable_search_tool = args.dmn || args.search || args.research;
+        let enable_image_tool = args.dmn || args.images || args.all;
+        let enable_search_tool = args.dmn || args.search || args.research || args.all;
+        // For shell/filesystem: only use built-in when explicitly requested via flags, not via --dmn
+        // (--dmn uses MCP servers for these, not built-in)
+        let enable_shell_builtin = args.shell || args.all;
+        let enable_filesystem_builtin = args.filesystem || args.all;
         let mut all_tool_names: Vec<String> = Vec::new();
 
-        // Add built-in tools
+        // Add built-in tools (interpret_image and search_query are always built-in)
         if enable_image_tool {
             all_tool_names.push(agent::INTERPRET_IMAGE_TOOL_NAME.to_string());
         }
         if enable_search_tool {
             all_tool_names.push(agent::SEARCH_QUERY_TOOL_NAME.to_string());
+        }
+
+        // Add shell and filesystem tools via BuiltinToolRegistry
+        // Only when using explicit flags (not --dmn, which uses MCP servers)
+        let mut builtin_registry = builtin_tools::BuiltinToolRegistry::new();
+        if enable_shell_builtin {
+            builtin_registry = builtin_registry.with_shell(None);
+        }
+        if enable_filesystem_builtin {
+            builtin_registry = builtin_registry.with_filesystem(vec![]);
+        }
+        // Track which tool names come from built-in registry
+        let builtin_tool_names: std::collections::HashSet<String> = builtin_registry
+            .get_tools()
+            .iter()
+            .map(|t| t.function.name.clone())
+            .collect();
+        for name in &builtin_tool_names {
+            all_tool_names.push(name.clone());
         }
 
         // Get MCP tools if config exists
@@ -582,7 +667,9 @@ async fn main() -> Result<()> {
             println!("Discovered tools ({}):\n", all_tool_names.len());
 
             for name in &all_tool_names {
-                let is_builtin = name == agent::INTERPRET_IMAGE_TOOL_NAME || name == agent::SEARCH_QUERY_TOOL_NAME;
+                let is_builtin = name == agent::INTERPRET_IMAGE_TOOL_NAME
+                    || name == agent::SEARCH_QUERY_TOOL_NAME
+                    || builtin_tool_names.contains(name);
 
                 if is_builtin {
                     println!("  {} [built-in]", name);
@@ -887,17 +974,35 @@ async fn main() -> Result<()> {
         // Create display sink for single-agent mode
         let display = create_display_sink(args.silent, args.verbose);
 
+        // Output store for truncating large tool outputs
+        let mut output_store = output_store::OutputStore::new();
+
+        // Create BuiltinToolRegistry when using --shell, --filesystem, --browser, or --all flags
+        let builtin_registry = {
+            let mut registry = builtin_tools::BuiltinToolRegistry::new();
+            if args.shell || args.all {
+                registry = registry.with_shell(None);
+            }
+            if args.filesystem || args.all {
+                registry = registry.with_filesystem(vec![]);
+            }
+            // Note: browser not yet implemented in builtin registry
+            if registry.is_empty() { None } else { Some(registry) }
+        };
+
         agent::run_agent(
             &client,
             &provider_info.resolved_model,
             &final_prompt,
             args.tool_output_limit,
             mcp_manager.as_mut(),
+            builtin_registry.as_ref(),
             display,
             &mut conversation_history,
-            args.dmn || args.images,
-            args.dmn || args.search || args.research,
+            args.dmn || args.images || args.all,
+            args.dmn || args.search || args.research || args.all,
             compaction_config,
+            Some(&mut output_store),
         )
         .await?;
     }

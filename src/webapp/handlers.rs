@@ -4,6 +4,7 @@ use crate::agent;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::config::DMN_INSTRUCTIONS;
 use crate::models::Message;
+use crate::usage::SessionUsage;
 use axum::{
     extract::State,
     http::HeaderMap,
@@ -602,6 +603,7 @@ pub async fn session_events(
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
             SseEvent::Compacted { .. } => "compacted",
+            SseEvent::Usage { .. } => "usage",
             SseEvent::Done => "done",
         };
         Ok(axum::response::sse::Event::default()
@@ -633,6 +635,8 @@ pub enum SseEvent {
     SessionId { session_id: String },
     /// Context was compacted due to size limits
     Compacted { message: String },
+    /// Token usage summary for this query
+    Usage { input_tokens: u64, output_tokens: u64, cached_tokens: u64, estimated_cost: f64 },
     Done,
 }
 
@@ -903,6 +907,7 @@ pub async fn query(
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
             SseEvent::Compacted { .. } => "compacted",
+            SseEvent::Usage { .. } => "usage",
             SseEvent::Done => "done",
         };
         Ok(axum::response::sse::Event::default()
@@ -998,6 +1003,9 @@ async fn run_agent_with_events(
     // Compaction config
     let compaction_config = CompactionConfig::default();
     let mut compaction_attempted = false;
+
+    // Token usage tracking
+    let mut session_usage = SessionUsage::new();
 
     // Thinking timer - uses raw mpsc sender (not stored/broadcast since it's high-frequency)
     let tx_thinking = event_sender.tx_clone();
@@ -1108,6 +1116,11 @@ async fn run_agent_with_events(
                 }
             }
         };
+
+        // Track token usage from response
+        if let Some(ref usage) = response.usage {
+            session_usage.add(usage);
+        }
 
         let choice = &response.choices[0];
 
@@ -1285,6 +1298,20 @@ async fn run_agent_with_events(
     {
         let mut cancel_guard = state.cancel_tx.lock().await;
         *cancel_guard = None;
+    }
+
+    // Send usage event if we have any usage data
+    if session_usage.has_usage() {
+        let estimated_cost = session_usage.estimate_cost(
+            &state.provider_info.resolved_model,
+            &state.provider_info.provider
+        );
+        event_sender.send(SseEvent::Usage {
+            input_tokens: session_usage.total_input_tokens,
+            output_tokens: session_usage.total_output_tokens,
+            cached_tokens: session_usage.total_cached_tokens,
+            estimated_cost,
+        }).await;
     }
 
     // Send done event

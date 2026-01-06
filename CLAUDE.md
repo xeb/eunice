@@ -55,6 +55,20 @@ User Input → Provider Detection → Client → API Request → Response
    - Creates `invoke_*` tools for agent-to-agent calls
    - Filters MCP tools by agent permissions
    - Handles recursive agent invocation with depth tracking
+   - **Design decision**: Output store is shared across all agents (not per-agent isolation) because agents often work on the same files
+
+7. **Output Store** (`src/output_store.rs`)
+   - Stores full tool outputs in memory (or temp files for >1MB)
+   - Truncates output to first 50 + last 50 lines for LLM context
+   - Provides `get_output` tool for retrieving middle sections
+   - Session-scoped: outputs persist until session ends
+
+8. **TUI vs Interactive Mode**
+   - **TUI mode** (`src/tui/app.rs`): Uses `r3bl_tui` library for enhanced terminal interface with command menu, bracketed paste, and full readline support
+   - **Interactive mode** (`src/interactive.rs`): Simpler REPL loop with basic readline, used as fallback when TUI cannot initialize
+   - **Code flow**: `eunice` (no prompt, TTY) → TUI mode; `eunice` (no prompt, no TTY) → Interactive mode fallback
+   - **Design decision**: Keep both modes separate - TUI provides better UX when available, interactive mode ensures functionality in all terminal environments
+   - Both modes share the same `OutputStore` instance per session
 
 ## Testing
 

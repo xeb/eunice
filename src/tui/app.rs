@@ -1,6 +1,6 @@
 //! TUI application using r3bl_tui's readline_async for proper output coordination.
 
-use crate::agent::{self, AgentResult};
+use crate::agent::{self, AgentStatus};
 use crate::client::Client;
 use crate::compact;
 use crate::config::DMN_INSTRUCTIONS;
@@ -9,6 +9,8 @@ use crate::mcp::McpManager;
 use crate::models::Message;
 use crate::orchestrator::AgentOrchestrator;
 use crate::models::ProviderInfo;
+use crate::output_store::OutputStore;
+use crate::usage::SessionUsage;
 
 use anyhow::{anyhow, Result};
 use crossterm::{
@@ -191,6 +193,12 @@ pub async fn run_tui_mode(
     // Conversation history
     let mut conversation_history: Vec<Message> = Vec::new();
 
+    // Output store for truncating large tool outputs
+    let mut output_store = OutputStore::new();
+
+    // Session-level token usage tracking
+    let mut session_usage = SessionUsage::new();
+
     // Process initial prompt if provided
     if let Some(prompt_text) = initial_prompt {
         writeln!(shared_writer, "{DIM}Processing initial prompt...{RESET}\n")?;
@@ -208,6 +216,8 @@ pub async fn run_tui_mode(
             enable_image_tool,
             enable_search_tool,
             &mut conversation_history,
+            &mut output_store,
+            &mut session_usage,
         )
         .await?;
     }
@@ -255,11 +265,27 @@ pub async fn run_tui_mode(
                             )?;
                             writeln!(
                                 sw,
-                                "  {DIM}History: {} messages{RESET}\n",
+                                "  {DIM}History: {} messages{RESET}",
                                 conversation_history.len()
                             )?;
+                            // Display token usage if any
+                            if session_usage.has_usage() {
+                                let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                                for line in summary.lines() {
+                                    writeln!(sw, "  {DIM}{}{RESET}", line)?;
+                                }
+                            }
+                            writeln!(sw)?;
                         }
                         "/quit" | "/q" | "/exit" => {
+                            // Display session usage summary if any
+                            if session_usage.has_usage() {
+                                writeln!(sw)?;
+                                let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                                for line in summary.lines() {
+                                    writeln!(sw, "{DIM}{}{RESET}", line)?;
+                                }
+                            }
                             writeln!(sw, "\n{DIM}Goodbye!{RESET}\n")?;
                             break;
                         }
@@ -289,11 +315,21 @@ pub async fn run_tui_mode(
                     enable_image_tool,
                     enable_search_tool,
                     &mut conversation_history,
+                    &mut output_store,
+                    &mut session_usage,
                 )
                 .await?;
             }
             Ok(ReadlineEvent::Eof) | Ok(ReadlineEvent::Interrupted) => {
                 let mut sw = ctx.clone_shared_writer();
+                // Display session usage summary if any
+                if session_usage.has_usage() {
+                    writeln!(sw)?;
+                    let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                    for line in summary.lines() {
+                        writeln!(sw, "{DIM}{}{RESET}", line)?;
+                    }
+                }
                 writeln!(sw, "\n{DIM}Goodbye!{RESET}\n")?;
                 break;
             }
@@ -355,6 +391,8 @@ async fn process_prompt(
     enable_image_tool: bool,
     enable_search_tool: bool,
     conversation_history: &mut Vec<Message>,
+    output_store: &mut OutputStore,
+    session_usage: &mut SessionUsage,
 ) -> Result<()> {
     let mut shared_writer = ctx.clone_shared_writer();
     writeln!(shared_writer)?;
@@ -413,21 +451,31 @@ async fn process_prompt(
         }
         _ => {
             // Single-agent mode with cancellation support
+            // Note: TUI mode doesn't yet support --shell/--filesystem flags for builtin tools
             agent::run_agent_cancellable(
                 client,
                 &provider_info.resolved_model,
                 &final_prompt,
                 tool_output_limit,
                 mcp_manager.as_deref_mut(),
+                None, // builtin_registry - TUI uses MCP servers via --dmn
                 display,
                 conversation_history,
                 enable_image_tool,
                 enable_search_tool,
                 Some(cancel_rx),
                 compaction_config,
+                Some(output_store),
             )
             .await
-            .map(|r| if r == AgentResult::Cancelled { Some(true) } else { None })
+            .map(|r| {
+                // Accumulate usage from this run
+                session_usage.total_input_tokens += r.usage.total_input_tokens;
+                session_usage.total_output_tokens += r.usage.total_output_tokens;
+                session_usage.total_cached_tokens += r.usage.total_cached_tokens;
+                session_usage.api_calls += r.usage.api_calls;
+                if r.status == AgentStatus::Cancelled { Some(true) } else { None }
+            })
         }
     };
 

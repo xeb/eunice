@@ -1,4 +1,4 @@
-use crate::agent::{run_agent_cancellable, AgentResult};
+use crate::agent::{run_agent_cancellable, AgentStatus};
 use crate::client::Client;
 use crate::compact::CompactionConfig;
 use crate::config::DMN_INSTRUCTIONS;
@@ -7,6 +7,7 @@ use crate::display_sink::create_display_sink;
 use crate::mcp::McpManager;
 use crate::models::Message;
 use crate::orchestrator::AgentOrchestrator;
+use crate::output_store::OutputStore;
 use anyhow::Result;
 use colored::Colorize;
 use crossterm::cursor::{MoveTo, MoveToColumn, MoveUp, RestorePosition, SavePosition};
@@ -403,6 +404,7 @@ pub async fn interactive_mode(
     let mut conversation_history: Vec<Message> = Vec::new();
     let mut dmn_injected = false;
     let mut input_history: Vec<String> = Vec::new();
+    let mut output_store = OutputStore::new();
 
     // Wait for MCP servers to be ready before showing prompt
     if let Some(ref mut manager) = mcp_manager {
@@ -468,6 +470,7 @@ pub async fn interactive_mode(
             &mut dmn_injected,
             &mut conversation_history,
             Some(cancel_rx),
+            &mut output_store,
         )
         .await;
 
@@ -542,6 +545,7 @@ pub async fn interactive_mode(
             &mut dmn_injected,
             &mut conversation_history,
             Some(cancel_rx),
+            &mut output_store,
         )
         .await;
 
@@ -578,6 +582,7 @@ async fn run_prompt(
     dmn_injected: &mut bool,
     conversation_history: &mut Vec<Message>,
     cancel_rx: Option<watch::Receiver<bool>>,
+    output_store: &mut OutputStore,
 ) -> Result<bool> {
     // Create display sink for output
     let display = create_display_sink(silent, verbose);
@@ -614,21 +619,24 @@ async fn run_prompt(
             None
         };
 
+        // Note: Interactive mode doesn't yet support --shell/--filesystem flags for builtin tools
         let result = run_agent_cancellable(
             client,
             model,
             &final_prompt,
             tool_output_limit,
             mcp_manager.as_deref_mut(),
+            None, // builtin_registry - interactive mode uses MCP servers
             display,
             conversation_history,
             enable_image_tool,
             enable_search_tool,
             cancel_rx,
             compaction_config,
+            Some(output_store),
         )
         .await?;
-        Ok(result == AgentResult::Cancelled)
+        Ok(result.status == AgentStatus::Cancelled)
     }
 }
 

@@ -190,9 +190,21 @@ impl McpServer for ShellServer {
             .ok_or_else(|| anyhow::anyhow!("Missing command argument"))?;
 
         let result = self.execute_command(command);
-        let result_json = serde_json::to_string_pretty(&result)?;
 
-        Ok(text_content(&result_json))
+        // Format output with prominent exit code
+        let exit_status = if result.return_code == 0 {
+            "Exit code: 0 (OK)".to_string()
+        } else {
+            format!("Exit code: {} (FAILED)", result.return_code)
+        };
+
+        let formatted = if result.output.is_empty() {
+            format!("{}\n(no output)", exit_status)
+        } else {
+            format!("{}\n{}", exit_status, result.output)
+        };
+
+        Ok(text_content(&formatted))
     }
 }
 
@@ -334,5 +346,17 @@ mod tests {
             .unwrap();
         let text = result["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("test"));
+        assert!(text.contains("Exit code: 0 (OK)"));
+    }
+
+    #[test]
+    fn test_shell_server_call_tool_failed() {
+        let config = ShellServerConfig::new(None, 30, "/bin/sh".to_string(), None, None, false, false);
+        let server = ShellServer::new(config);
+        let result = server
+            .call_tool("execute_command", &serde_json::json!({"command": "exit 1"}))
+            .unwrap();
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Exit code: 1 (FAILED)"));
     }
 }

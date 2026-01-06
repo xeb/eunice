@@ -566,6 +566,12 @@ impl Client {
                     tool_calls,
                 },
             }],
+            usage: gemini_response.usage_metadata.map(|u| crate::models::UsageStats {
+                prompt_tokens: u.prompt_token_count,
+                completion_tokens: u.candidates_token_count,
+                total_tokens: u.total_token_count,
+                cached_tokens: u.cached_content_token_count,
+            }),
         })
     }
 
@@ -817,6 +823,7 @@ mod tests {
                 finish_message: None,
             }],
             prompt_feedback: None,
+            usage_metadata: None,
         };
 
         let result = client.convert_gemini_to_openai_response(gemini_response, "{}");
@@ -854,6 +861,7 @@ mod tests {
                 finish_message: None,
             }],
             prompt_feedback: None,
+            usage_metadata: None,
         };
 
         let result = client.convert_gemini_to_openai_response(gemini_response, "{}");
@@ -872,6 +880,7 @@ mod tests {
         let gemini_response = GeminiResponse {
             candidates: vec![],
             prompt_feedback: None,
+            usage_metadata: None,
         };
 
         let result = client.convert_gemini_to_openai_response(gemini_response, "{}");

@@ -108,6 +108,23 @@ pub struct ChatCompletionRequest {
 #[derive(Debug, Deserialize)]
 pub struct ChatCompletionResponse {
     pub choices: Vec<Choice>,
+    /// Token usage statistics (optional, not all providers return this)
+    #[serde(default)]
+    pub usage: Option<UsageStats>,
+}
+
+/// Token usage statistics from API response
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct UsageStats {
+    #[serde(default)]
+    pub prompt_tokens: u64,
+    #[serde(default)]
+    pub completion_tokens: u64,
+    #[serde(default)]
+    pub total_tokens: u64,
+    /// Cached tokens (Anthropic, some OpenAI models)
+    #[serde(default, alias = "cache_read_input_tokens")]
+    pub cached_tokens: u64,
 }
 
 /// A choice in the response
@@ -455,6 +472,22 @@ pub struct GeminiResponse {
     /// Feedback about the prompt (may contain block reason)
     #[serde(rename = "promptFeedback")]
     pub prompt_feedback: Option<GeminiPromptFeedback>,
+    /// Token usage metadata
+    #[serde(rename = "usageMetadata")]
+    pub usage_metadata: Option<GeminiUsageMetadata>,
+}
+
+/// Gemini usage metadata
+#[derive(Debug, Deserialize)]
+pub struct GeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    pub prompt_token_count: u64,
+    #[serde(rename = "candidatesTokenCount", default)]
+    pub candidates_token_count: u64,
+    #[serde(rename = "totalTokenCount", default)]
+    pub total_token_count: u64,
+    #[serde(rename = "cachedContentTokenCount", default)]
+    pub cached_content_token_count: u64,
 }
 
 /// Gemini candidate structure
