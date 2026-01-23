@@ -91,9 +91,9 @@ struct Args {
     #[arg(long, help_heading = "Modes")]
     webapp: bool,
 
-    /// Full TUI mode with enhanced terminal interface (requires TTY)
-    #[arg(long, help_heading = "Modes")]
-    tui: bool,
+    /// Interactive chat mode with enhanced terminal interface (requires TTY)
+    #[arg(long, alias = "tui", help_heading = "Modes")]
+    chat: bool,
 
     // === Discovery ===
     /// List available AI models
@@ -481,28 +481,28 @@ async fn main() -> Result<()> {
         return Err(anyhow!("--research and --dmn cannot be used together"));
     }
 
-    // --webapp conflicts with --events, --silent, --tui
+    // --webapp conflicts with --events, --silent, --chat
     if args.webapp && args.events {
         return Err(anyhow!("--webapp and --events cannot be used together"));
     }
     if args.webapp && args.silent {
         return Err(anyhow!("--webapp and --silent cannot be used together"));
     }
-    if args.webapp && args.tui {
-        return Err(anyhow!("--webapp and --tui cannot be used together"));
+    if args.webapp && args.chat {
+        return Err(anyhow!("--webapp and --chat cannot be used together"));
     }
 
-    // --tui conflicts with --events, --silent
-    if args.tui && args.events {
-        return Err(anyhow!("--tui and --events cannot be used together"));
+    // --chat conflicts with --events, --silent
+    if args.chat && args.events {
+        return Err(anyhow!("--chat and --events cannot be used together"));
     }
-    if args.tui && args.silent {
-        return Err(anyhow!("--tui and --silent cannot be used together"));
+    if args.chat && args.silent {
+        return Err(anyhow!("--chat and --silent cannot be used together"));
     }
 
-    // --tui requires a TTY
-    if args.tui && !atty::is(atty::Stream::Stdin) {
-        return Err(anyhow!("--tui requires an interactive terminal (TTY)"));
+    // --chat requires a TTY
+    if args.chat && !atty::is(atty::Stream::Stdin) {
+        return Err(anyhow!("--chat requires an interactive terminal (TTY)"));
     }
     // --research requires GEMINI_API_KEY for search_query tool
     if args.research && !has_gemini_api_key() {
@@ -765,7 +765,7 @@ async fn main() -> Result<()> {
     let prompt = resolve_prompt(&args)?;
 
     // Determine if we need TUI mode (when no prompt given and TTY available)
-    let use_tui = args.tui || (prompt.is_none() && atty::is(atty::Stream::Stdin));
+    let use_tui = args.chat || (prompt.is_none() && atty::is(atty::Stream::Stdin));
 
     // Select model
     let model = match &args.model {
