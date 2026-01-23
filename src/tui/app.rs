@@ -25,7 +25,7 @@ use r3bl_tui::{
 };
 use std::io::Write;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 /// ANSI color codes
@@ -78,7 +78,7 @@ fn print_help(shared_writer: &mut SharedWriter) -> std::io::Result<()> {
     }
     writeln!(
         shared_writer,
-        "\n{DIM}Type / for command menu, Ctrl+D to exit, Esc/Ctrl+C to stop generation{RESET}\n"
+        "\n{DIM}Type / for command menu, Ctrl+D to exit, Esc/Ctrl+C (twice in 500ms) to stop generation{RESET}\n"
     )?;
     Ok(())
 }
@@ -355,17 +355,32 @@ pub async fn run_tui_mode(
 
 /// Monitor for Escape or Ctrl+C to cancel the running agent
 async fn monitor_cancel_keys(cancel_tx: watch::Sender<bool>) {
+    // Keep track of the last Ctrl+C press time for double-press detection
+    let mut last_ctrlc_time: Option<Instant> = None;
+
     loop {
         // Poll for events with a small timeout
         if event::poll(Duration::from_millis(50)).unwrap_or(false) {
             if let Ok(Event::Key(key_event)) = event::read() {
-                // Check for Escape key or Ctrl+C
-                if key_event.code == KeyCode::Esc
-                    || (key_event.code == KeyCode::Char('c')
-                        && key_event.modifiers.contains(KeyModifiers::CONTROL))
-                {
+                // Check for Escape key
+                if key_event.code == KeyCode::Esc {
                     let _ = cancel_tx.send(true);
                     return;
+                }
+
+                // Check for Ctrl+C
+                if key_event.code == KeyCode::Char('c')
+                    && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    let now = Instant::now();
+                    if let Some(prev_time) = last_ctrlc_time {
+                        if now.duration_since(prev_time) < Duration::from_millis(500) {
+                            // Double Ctrl+C within 500ms
+                            let _ = cancel_tx.send(true);
+                            return;
+                        }
+                    }
+                    last_ctrlc_time = Some(now);
                 }
             }
         }
@@ -431,8 +446,7 @@ async fn process_prompt(
     // Run the agent with the TuiDisplaySink - all output is coordinated through SharedWriter
     let result = match (orchestrator, agent_name) {
         (Some(orch), Some(name)) if mcp_manager.is_some() => {
-            // Multi-agent mode - returns Result<String, Error>
-            // Note: Multi-agent mode doesn't support cancellation yet
+            // Multi-agent mode with cancellation support
             let manager = mcp_manager.as_deref_mut().unwrap();
             orch.run_agent(
                 client,
@@ -445,9 +459,12 @@ async fn process_prompt(
                 display,
                 0,
                 None,
+                Some(cancel_rx),
             )
             .await
-            .map(|_| None)
+            .map(|r| {
+                if r.status == AgentStatus::Cancelled { Some(true) } else { None }
+            })
         }
         _ => {
             // Single-agent mode with cancellation support

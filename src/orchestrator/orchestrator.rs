@@ -1,4 +1,4 @@
-use crate::agent::{self, SEARCH_QUERY_TOOL_NAME, INTERPRET_IMAGE_TOOL_NAME};
+use crate::agent::{self, AgentStatus, SEARCH_QUERY_TOOL_NAME, INTERPRET_IMAGE_TOOL_NAME};
 use crate::client::Client;
 use crate::display_sink::{DisplayEvent, DisplaySink};
 use crate::mcp::McpManager;
@@ -10,6 +10,13 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::future::Future;
+use tokio::sync::watch;
+
+/// Result of an agent run in the orchestrator
+pub struct OrchestratorResult {
+    pub status: AgentStatus,
+    pub final_response: String,
+}
 
 /// Manages multi-agent orchestration
 pub struct AgentOrchestrator {
@@ -139,7 +146,8 @@ impl AgentOrchestrator {
         display: Arc<dyn DisplaySink>,
         depth: usize,
         caller_agent: Option<&'a str>,
-    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
+        cancel_rx: Option<watch::Receiver<bool>>,
+    ) -> Pin<Box<dyn Future<Output = Result<OrchestratorResult>> + Send + 'a>> {
         Box::pin(async move {
             let agent = self.agents.get(agent_name)
                 .ok_or_else(|| anyhow!("Unknown agent: {}", agent_name))?;
@@ -198,6 +206,7 @@ impl AgentOrchestrator {
                 display.clone(),
                 &mut conversation_history,
                 depth,
+                cancel_rx,
             ).await?;
 
             // Show completion for subagent calls
@@ -277,6 +286,7 @@ impl AgentOrchestrator {
     }
 
     /// The agent loop - processes messages and tool calls
+    #[allow(clippy::too_many_lines)]
     async fn agent_loop(
         &self,
         client: &Client,
@@ -289,7 +299,8 @@ impl AgentOrchestrator {
         display: Arc<dyn DisplaySink>,
         conversation_history: &mut Vec<Message>,
         depth: usize,
-    ) -> Result<String> {
+        cancel_rx: Option<watch::Receiver<bool>>,
+    ) -> Result<OrchestratorResult> {
         let indent = "  ".repeat(depth);
 
         // Build prompt with failed server info
@@ -321,23 +332,39 @@ impl AgentOrchestrator {
                 message: format!("{}Agent '{}' calling LLM...", indent, agent_name),
             });
 
-            // Start thinking indicator
-            display.write_event(DisplayEvent::ThinkingStart);
-
-            // Call the LLM
-            let response = client
-                .chat_completion(
+            // Call the LLM with cancellation support
+            let response = {
+                let api_call = client.chat_completion(
                     model,
                     serde_json::to_value(&*conversation_history)?,
                     tools_option,
                     false,
-                )
-                .await;
+                );
 
-            // Stop thinking indicator
-            display.write_event(DisplayEvent::ThinkingStop);
+                if let Some(ref mut rx) = cancel_rx.clone() {
+                    display.write_event(DisplayEvent::ThinkingStart);
+                    tokio::select! {
+                        biased;
+                        _ = rx.changed() => {
+                            display.write_event(DisplayEvent::ThinkingStop);
+                            return Ok(OrchestratorResult {
+                                status: AgentStatus::Cancelled,
+                                final_response,
+                            });
+                        }
+                        result = api_call => {
+                            display.write_event(DisplayEvent::ThinkingStop);
+                            result
+                        }
+                    }
+                } else {
+                    display.write_event(DisplayEvent::ThinkingStart);
+                    let result = api_call.await;
+                    display.write_event(DisplayEvent::ThinkingStop);
+                    result
+                }
+            }?;
 
-            let response = response?;
             let choice = &response.choices[0];
 
             // Add assistant response to history
@@ -389,17 +416,29 @@ impl AgentOrchestrator {
 
                     let invoke_result = self.handle_invoke(
                         client, model, tool_name, &args, mcp_manager,
-                        tool_output_limit, display.clone(), depth, agent_name,
+                        tool_output_limit, display.clone(), depth, agent_name, cancel_rx.clone(),
                     ).await;
+
+                    // If sub-agent cancelled, propagate cancellation up
+                    let tool_result_string = match invoke_result {
+                        Ok(res) => res,
+                        Err(_) => {
+                            // This indicates a cancellation from a sub-agent
+                            return Ok(OrchestratorResult {
+                                status: AgentStatus::Cancelled,
+                                final_response,
+                            });
+                        }
+                    };
 
                     // Show agent return event
                     display.write_event(DisplayEvent::AgentResult {
                         agent_name: target_agent.to_string(),
-                        result: invoke_result.clone(),
+                        result: tool_result_string.clone(),
                         limit: tool_output_limit,
                     });
 
-                    invoke_result
+                    tool_result_string
                 } else {
                     // Regular tool call - show tool events
                     display.write_event(DisplayEvent::ToolCall {
@@ -410,23 +449,25 @@ impl AgentOrchestrator {
                     let tool_result = if tool_name == SEARCH_QUERY_TOOL_NAME {
                         // Built-in search_query tool
                         agent::execute_search_query(args).await
-                            .unwrap_or_else(|e| format!("Error: {}", e))
                     } else if tool_name == INTERPRET_IMAGE_TOOL_NAME {
                         // Built-in interpret_image tool
                         agent::execute_interpret_image(client, model, args).await
-                            .unwrap_or_else(|e| format!("Error: {}", e))
                     } else {
                         // Regular MCP tool
                         mcp_manager.execute_tool(tool_name, args).await
-                            .unwrap_or_else(|e| format!("Error: {}", e))
+                    };
+
+                    let display_result = match &tool_result {
+                        Ok(s) => s.clone(),
+                        Err(e) => format!("Error: {}", e),
                     };
 
                     display.write_event(DisplayEvent::ToolResult {
-                        result: tool_result.clone(),
+                        result: display_result,
                         limit: tool_output_limit,
                     });
 
-                    tool_result
+                    tool_result.unwrap_or_else(|e| format!("Error: {}", e))
                 };
 
                 conversation_history.push(Message::Tool {
@@ -436,7 +477,10 @@ impl AgentOrchestrator {
             }
         }
 
-        Ok(final_response)
+        Ok(OrchestratorResult {
+            status: AgentStatus::Completed,
+            final_response,
+        })
     }
 
     /// Public wrapper for handle_invoke - used by webapp
@@ -455,10 +499,11 @@ impl AgentOrchestrator {
         self.handle_invoke(
             client, model, tool_name, args, mcp_manager,
             tool_output_limit, display, depth, caller_agent,
-        ).await
+            None, // No cancellation support in webapp
+        ).await.unwrap_or_else(|e| format!("Error during agent invocation: {}", e))
     }
 
-    /// Handle an invoke_* tool call
+    /// Handle an invoke_* tool call. Returns Err on cancellation.
     async fn handle_invoke(
         &self,
         client: &Client,
@@ -470,9 +515,10 @@ impl AgentOrchestrator {
         display: Arc<dyn DisplaySink>,
         depth: usize,
         caller_agent: &str,
-    ) -> String {
+        cancel_rx: Option<watch::Receiver<bool>>,
+    ) -> Result<String> {
         let Some(target_agent) = self.get_invoke_target(tool_name) else {
-            return format!("Error: Invalid invoke tool name: {}", tool_name);
+            return Ok(format!("Error: Invalid invoke tool name: {}", tool_name));
         };
 
         let task = args.get("task")
@@ -485,9 +531,16 @@ impl AgentOrchestrator {
         match self.run_agent(
             client, model, target_agent, task, context,
             mcp_manager, tool_output_limit, display, depth + 1, Some(caller_agent),
+            cancel_rx,
         ).await {
-            Ok(result) => result,
-            Err(e) => format!("Agent '{}' failed: {:#}", target_agent, e),
+            Ok(result) => {
+                if result.status == AgentStatus::Cancelled {
+                    Err(anyhow!("Sub-agent execution cancelled by user"))
+                } else {
+                    Ok(result.final_response)
+                }
+            }
+            Err(e) => Ok(format!("Agent '{}' failed: {:#}", target_agent, e)),
         }
     }
 }

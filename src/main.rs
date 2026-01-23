@@ -949,6 +949,7 @@ async fn main() -> Result<()> {
             display,
             0,
             None, // No caller for root agent
+            None, // No cancellation support in non-interactive mode
         ).await?;
     } else {
         // Single-agent mode (original behavior)

@@ -594,20 +594,22 @@ async fn run_prompt(
         let orch = orchestrator.unwrap();
         let name = agent_name.unwrap();
         let manager = mcp_manager.as_mut().unwrap();
-        orch.run_agent(
-            client,
-            model,
-            name,
-            prompt,
-            None,
-            manager,
-            tool_output_limit,
-            display,
-            0,
-            None, // No caller for root agent
-        )
-        .await?;
-        Ok(false) // Multi-agent mode doesn't support cancellation yet
+        let result = orch
+            .run_agent(
+                client,
+                model,
+                name,
+                prompt,
+                None,
+                manager,
+                tool_output_limit,
+                display,
+                0,
+                None, // No caller for root agent
+                cancel_rx,
+            )
+            .await?;
+        Ok(result.status == AgentStatus::Cancelled)
     } else {
         // Single-agent mode (original behavior)
         let final_prompt = inject_dmn_instructions_if_needed(prompt, dmn_injected, dmn);

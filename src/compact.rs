@@ -199,11 +199,18 @@ async fn generate_summary(
     Ok(content)
 }
 
+/// Maximum messages before forcing hard trim (full summarization would also exceed context)
+const HARD_TRIM_THRESHOLD: usize = 500;
+
+/// Number of recent messages to keep during hard trim
+const HARD_TRIM_KEEP: usize = 50;
+
 /// Compact conversation history
 ///
-/// This function implements a two-phase compaction strategy:
-/// 1. First, try lightweight compaction (truncating old tool outputs)
-/// 2. If still too large, use full LLM summarization
+/// This function implements a three-phase compaction strategy:
+/// 1. Hard trim: If message count is very large, keep only recent messages
+/// 2. Lightweight compaction: Clear old tool outputs (often sufficient)
+/// 3. Full summarization: LLM-generated summary of the conversation
 pub async fn compact_context(
     client: &Client,
     model: &str,
@@ -220,6 +227,32 @@ pub async fn compact_context(
     }
 
     let original_tokens = estimate_tokens(messages);
+
+    // Phase 0: Hard trim for extremely large histories
+    // With thousands of messages, even summarization would exceed context limits
+    if messages.len() > HARD_TRIM_THRESHOLD {
+        let keep_start = messages.len().saturating_sub(HARD_TRIM_KEEP);
+        let mut trimmed = vec![Message::User {
+            content: format!(
+                "## Context Note\n\n[Previous conversation history ({} messages) was trimmed to stay within token limits. The most recent {} messages are preserved below.]",
+                messages.len(),
+                HARD_TRIM_KEEP
+            ),
+        }];
+        trimmed.extend(messages[keep_start..].to_vec());
+
+        // Also apply lightweight compaction to the trimmed messages
+        let compacted = lightweight_compact(&trimmed, config);
+        let new_tokens = estimate_tokens(&compacted);
+        let ratio = new_tokens as f32 / original_tokens as f32;
+
+        return Ok(CompactedContext {
+            summary: String::new(),
+            messages: compacted,
+            compaction_ratio: ratio,
+            used_full_summarization: false,
+        });
+    }
 
     // Phase 1: Try lightweight compaction
     if config.try_lightweight_first {
@@ -265,11 +298,50 @@ pub async fn compact_context(
     })
 }
 
-/// Check if an error message indicates context exhaustion
-pub fn is_context_exhausted_error(error_msg: &str) -> bool {
+/// Check if an error message indicates a rate limit (429 / quota exceeded)
+/// These should be retried, not compacted.
+pub fn is_rate_limit_error(error_msg: &str) -> bool {
     let error_lower = error_msg.to_lowercase();
 
-    // Gemini errors
+    (error_lower.contains("429") || error_lower.contains("too many requests"))
+        || (error_lower.contains("quota") && error_lower.contains("exceeded"))
+        || (error_lower.contains("rate") && error_lower.contains("limit"))
+}
+
+/// Extract retry delay from Gemini error message (e.g., "Please retry in 43.029546932s.")
+/// Returns delay in seconds, or None if not found.
+pub fn extract_retry_delay(error_msg: &str) -> Option<u64> {
+    // Look for "retry in Xs" or "retryDelay": "Xs"
+    if let Some(idx) = error_msg.find("retry in ") {
+        let after = &error_msg[idx + 9..];
+        if let Some(end) = after.find('s') {
+            if let Ok(secs) = after[..end].trim().parse::<f64>() {
+                return Some(secs.ceil() as u64);
+            }
+        }
+    }
+    if let Some(idx) = error_msg.find("\"retryDelay\": \"") {
+        let after = &error_msg[idx + 15..];
+        if let Some(end) = after.find('s') {
+            if let Ok(secs) = after[..end].trim().parse::<f64>() {
+                return Some(secs.ceil() as u64);
+            }
+        }
+    }
+    None
+}
+
+/// Check if an error message indicates context exhaustion (token limit exceeded)
+/// Note: Rate limit errors (quota/429) are excluded - use is_rate_limit_error for those.
+pub fn is_context_exhausted_error(error_msg: &str) -> bool {
+    // Rate limit errors should NOT be treated as context exhaustion
+    if is_rate_limit_error(error_msg) {
+        return false;
+    }
+
+    let error_lower = error_msg.to_lowercase();
+
+    // Gemini context errors (not quota-related)
     error_lower.contains("resource_exhausted")
         || error_lower.contains("resource exhausted")
         // OpenAI errors
@@ -280,6 +352,7 @@ pub fn is_context_exhausted_error(error_msg: &str) -> bool {
         || error_lower.contains("prompt is too long")
         // Generic patterns
         || (error_lower.contains("token") && error_lower.contains("limit"))
+        || (error_lower.contains("token") && error_lower.contains("exceed"))
         || (error_lower.contains("context") && error_lower.contains("exceed"))
 }
 
@@ -345,16 +418,66 @@ mod tests {
     }
 
     #[test]
+    fn test_is_rate_limit_error() {
+        // 429 errors
+        assert!(is_rate_limit_error("API request failed with status 429 Too Many Requests: {}"));
+        assert!(is_rate_limit_error("Too Many Requests"));
+
+        // Quota errors
+        assert!(is_rate_limit_error("You exceeded your current quota, please check your plan"));
+        assert!(is_rate_limit_error("RESOURCE_EXHAUSTED: quota exceeded"));
+        assert!(is_rate_limit_error("Quota exceeded for metric: generativelanguage"));
+
+        // Rate limit errors
+        assert!(is_rate_limit_error("rate limit exceeded"));
+
+        // Should not match non-rate-limit errors
+        assert!(!is_rate_limit_error("Connection timeout"));
+        assert!(!is_rate_limit_error("The input token count exceeds the maximum"));
+        assert!(!is_rate_limit_error("Resource exhausted error"));
+    }
+
+    #[test]
+    fn test_extract_retry_delay() {
+        // Gemini format
+        assert_eq!(
+            extract_retry_delay("Please retry in 43.029546932s."),
+            Some(44) // ceil of 43.03
+        );
+        assert_eq!(
+            extract_retry_delay("Please retry in 10s."),
+            Some(10)
+        );
+
+        // retryDelay JSON format
+        assert_eq!(
+            extract_retry_delay(r#""retryDelay": "43s""#),
+            Some(43)
+        );
+
+        // No delay found
+        assert_eq!(extract_retry_delay("Some other error"), None);
+    }
+
+    #[test]
     fn test_is_context_exhausted_error() {
-        // Gemini errors
-        assert!(is_context_exhausted_error("RESOURCE_EXHAUSTED: quota exceeded"));
+        // Gemini context errors (not quota-related)
         assert!(is_context_exhausted_error("Resource exhausted error"));
+
+        // Gemini 400 token count error
+        assert!(is_context_exhausted_error(
+            "The input token count exceeds the maximum number of tokens allowed (1048576)."
+        ));
 
         // OpenAI errors
         assert!(is_context_exhausted_error(
             "This model's maximum context length is 8192 tokens"
         ));
         assert!(is_context_exhausted_error("context_length_exceeded"));
+
+        // Rate limit errors should NOT match context exhaustion
+        assert!(!is_context_exhausted_error("RESOURCE_EXHAUSTED: quota exceeded"));
+        assert!(!is_context_exhausted_error("429 Too Many Requests: quota exceeded"));
 
         // Should not match random errors
         assert!(!is_context_exhausted_error("Connection timeout"));

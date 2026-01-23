@@ -1,7 +1,7 @@
 use super::persistence::SessionMetadata;
 use super::server::AppState;
 use crate::agent;
-use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
+use crate::compact::{compact_context, extract_retry_delay, is_context_exhausted_error, is_rate_limit_error, CompactionConfig};
 use crate::config::DMN_INSTRUCTIONS;
 use crate::models::Message;
 use crate::usage::SessionUsage;
@@ -1003,6 +1003,8 @@ async fn run_agent_with_events(
     // Compaction config
     let compaction_config = CompactionConfig::default();
     let mut compaction_attempted = false;
+    let mut rate_limit_retries = 0u32;
+    const MAX_RATE_LIMIT_RETRIES: u32 = 3;
 
     // Token usage tracking
     let mut session_usage = SessionUsage::new();
@@ -1072,10 +1074,26 @@ async fn run_agent_with_events(
                 let error_msg = format!("{:#}", e);
                 log(&format!("[{}] LLM error: {}", log_prefix, error_msg));
 
+                // Check for rate limit errors first - these should be retried, not compacted
+                if is_rate_limit_error(&error_msg) && rate_limit_retries < MAX_RATE_LIMIT_RETRIES {
+                    rate_limit_retries += 1;
+                    let delay = extract_retry_delay(&error_msg).unwrap_or(10).min(60);
+                    log(&format!("[{}] Rate limit hit, retrying in {}s (attempt {}/{})",
+                        log_prefix, delay, rate_limit_retries, MAX_RATE_LIMIT_RETRIES));
+
+                    event_sender.send(SseEvent::Compacted {
+                        message: format!("Rate limit hit. Retrying in {}s...", delay),
+                    }).await;
+
+                    tokio::time::sleep(Duration::from_secs(delay)).await;
+                    continue;
+                }
+
                 // Check if this is a context exhaustion error and we haven't tried compaction yet
                 if is_context_exhausted_error(&error_msg) && !compaction_attempted {
                     compaction_attempted = true;
-                    log(&format!("[{}] Attempting context compaction", log_prefix));
+                    log(&format!("[{}] Attempting context compaction ({} messages)",
+                        log_prefix, conversation_history.len()));
 
                     // Attempt compaction
                     match compact_context(
@@ -1086,9 +1104,11 @@ async fn run_agent_with_events(
                     ).await {
                         Ok(compacted) => {
                             let compaction_msg = if compacted.used_full_summarization {
-                                format!("Context compacted via summarization (ratio: {:.1}%)", compacted.compaction_ratio * 100.0)
+                                format!("Context compacted via summarization ({} → {} messages, {:.1}%)",
+                                    conversation_history.len(), compacted.messages.len(), compacted.compaction_ratio * 100.0)
                             } else {
-                                format!("Context compacted via truncation (ratio: {:.1}%)", compacted.compaction_ratio * 100.0)
+                                format!("Context compacted via trimming ({} → {} messages, {:.1}%)",
+                                    conversation_history.len(), compacted.messages.len(), compacted.compaction_ratio * 100.0)
                             };
                             log(&format!("[{}] {}", log_prefix, compaction_msg));
 

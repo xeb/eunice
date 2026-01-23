@@ -1813,6 +1813,23 @@
                     currentSessionName = savedName;
                     updateSessionUrl(savedName);
                 }
+            } else {
+                // No session in URL or localStorage - try to load the most recent session
+                try {
+                    const res = await fetch('/api/sessions');
+                    const data = await res.json();
+                    if (data.sessions && data.sessions.length > 0) {
+                        const mostRecent = data.sessions[0];
+                        sessionId = mostRecent.id;
+                        currentSessionName = mostRecent.name;
+                        localStorage.setItem(SESSION_KEY, sessionId);
+                        localStorage.setItem(SESSION_NAME_KEY, mostRecent.name);
+                        updateSessionUrl(mostRecent.name);
+                        console.log('[webapp] Loaded most recent session:', mostRecent.name);
+                    }
+                } catch (err) {
+                    console.error('[webapp] Failed to fetch sessions:', err);
+                }
             }
 
             await restoreSessionHistory();
