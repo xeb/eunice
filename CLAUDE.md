@@ -297,7 +297,7 @@ Use `--research` flag (requires `GEMINI_API_KEY`):
 
 ```bash
 eunice --research "Best laptops of 2025"
-eunice --research --tui  # TUI mode for interactive research
+eunice --research --chat  # Interactive chat mode for research
 ```
 
 ### Architecture
