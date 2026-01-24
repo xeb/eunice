@@ -20,6 +20,10 @@ path = "src/main.rs"
 name = "mcpz"
 path = "src/mcpz_main.rs"
 
+[[bin]]
+name = "browser"
+path = "src/browser_main.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }

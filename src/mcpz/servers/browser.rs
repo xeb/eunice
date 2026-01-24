@@ -28,8 +28,18 @@ pub struct BrowserServerConfig {
 
 impl BrowserServerConfig {
     pub fn new(port: u16, chrome_path: Option<String>, timeout: u64, verbose: bool) -> Self {
-        // Create unique user data directory in /tmp
-        let user_data_dir = PathBuf::from(format!("/tmp/mcpz/browser-{}", port));
+        Self::with_user_data_dir(port, chrome_path, None, timeout, verbose)
+    }
+
+    pub fn with_user_data_dir(
+        port: u16,
+        chrome_path: Option<String>,
+        user_data_dir: Option<PathBuf>,
+        timeout: u64,
+        verbose: bool,
+    ) -> Self {
+        let user_data_dir =
+            user_data_dir.unwrap_or_else(|| PathBuf::from(format!("/tmp/mcpz/browser-{}", port)));
 
         // Find Chrome path - use provided path or search common locations
         let chrome_path = chrome_path.unwrap_or_else(Self::find_chrome);
@@ -104,19 +114,19 @@ impl BrowserServerConfig {
 
 /// Browser automation result
 #[derive(Serialize)]
-struct BrowserResult {
-    success: bool,
-    message: String,
+pub struct BrowserResult {
+    pub success: bool,
+    pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<serde_json::Value>,
+    pub data: Option<serde_json::Value>,
 }
 
 /// Screenshot result
-struct ScreenshotResult {
+pub struct ScreenshotResult {
     /// File path where screenshot was saved
-    path: PathBuf,
+    pub path: PathBuf,
     /// Whether full page was captured
-    full_page: bool,
+    pub full_page: bool,
 }
 
 /// Chrome DevTools Protocol client
@@ -403,7 +413,7 @@ impl BrowserServer {
             .context("Browser not running. Call start_browser first.")
     }
 
-    fn start_browser(&self, headless: bool) -> Result<BrowserResult> {
+    pub fn start_browser(&self, headless: bool) -> Result<BrowserResult> {
         let mut process_guard = self.chrome_process.lock().unwrap();
 
         // Check if already running
@@ -511,7 +521,7 @@ impl BrowserServer {
         })
     }
 
-    fn open_url(&self, url: &str, wait_time: u64, tab_id: Option<&str>) -> Result<BrowserResult> {
+    pub fn open_url(&self, url: &str, wait_time: u64, tab_id: Option<&str>) -> Result<BrowserResult> {
         let mut client = if let Some(id) = tab_id {
             ChromeClient::connect_to_tab_by_id(self.config.port, self.config.timeout, id)
                 .context("Failed to connect to specified tab")?
@@ -545,7 +555,7 @@ impl BrowserServer {
         })
     }
 
-    fn get_page(&self) -> Result<BrowserResult> {
+    pub fn get_page(&self) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         // Enable DOM
@@ -575,7 +585,7 @@ impl BrowserServer {
         })
     }
 
-    fn get_page_as_markdown(&self) -> Result<BrowserResult> {
+    pub fn get_page_as_markdown(&self) -> Result<BrowserResult> {
         let page_result = self.get_page()?;
 
         let html = page_result
@@ -595,7 +605,7 @@ impl BrowserServer {
         })
     }
 
-    fn save_page_contents(&self, filepath: &str) -> Result<BrowserResult> {
+    pub fn save_page_contents(&self, filepath: &str) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         // Enable DOM
@@ -644,7 +654,7 @@ impl BrowserServer {
         })
     }
 
-    fn get_screenshot(&self, filepath: &str, full_page: bool) -> Result<ScreenshotResult> {
+    pub fn get_screenshot(&self, filepath: &str, full_page: bool) -> Result<ScreenshotResult> {
         let mut client = self.get_client()?;
 
         // Enable Page domain
@@ -703,7 +713,7 @@ impl BrowserServer {
         })
     }
 
-    fn execute_script(&self, script: &str) -> Result<BrowserResult> {
+    pub fn execute_script(&self, script: &str) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         // Enable Runtime
@@ -746,7 +756,7 @@ impl BrowserServer {
         })
     }
 
-    fn stop_browser(&self) -> Result<BrowserResult> {
+    pub fn stop_browser(&self) -> Result<BrowserResult> {
         let mut process_guard = self.chrome_process.lock().unwrap();
 
         if let Some(ref mut child) = *process_guard {
@@ -768,7 +778,7 @@ impl BrowserServer {
         }
     }
 
-    fn list_tabs(&self) -> Result<BrowserResult> {
+    pub fn list_tabs(&self) -> Result<BrowserResult> {
         let http_url = format!("http://localhost:{}/json", self.config.port);
 
         let client = reqwest::blocking::Client::builder()
@@ -802,7 +812,7 @@ impl BrowserServer {
         })
     }
 
-    fn new_tab(&self, url: Option<&str>) -> Result<BrowserResult> {
+    pub fn new_tab(&self, url: Option<&str>) -> Result<BrowserResult> {
         let http_url = format!(
             "http://localhost:{}/json/new?{}",
             self.config.port,
@@ -833,7 +843,7 @@ impl BrowserServer {
         })
     }
 
-    fn close_tab(&self, tab_id: &str) -> Result<BrowserResult> {
+    pub fn close_tab(&self, tab_id: &str) -> Result<BrowserResult> {
         let http_url = format!("http://localhost:{}/json/close/{}", self.config.port, tab_id);
 
         let client = reqwest::blocking::Client::builder()
@@ -861,7 +871,7 @@ impl BrowserServer {
         }
     }
 
-    fn reload_page(&self, ignore_cache: bool) -> Result<BrowserResult> {
+    pub fn reload_page(&self, ignore_cache: bool) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         client.send_command(
@@ -876,7 +886,7 @@ impl BrowserServer {
         })
     }
 
-    fn go_back(&self) -> Result<BrowserResult> {
+    pub fn go_back(&self) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         // Get navigation history
@@ -918,7 +928,7 @@ impl BrowserServer {
         })
     }
 
-    fn go_forward(&self) -> Result<BrowserResult> {
+    pub fn go_forward(&self) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         // Get navigation history
@@ -960,7 +970,7 @@ impl BrowserServer {
         })
     }
 
-    fn get_cookies(&self) -> Result<BrowserResult> {
+    pub fn get_cookies(&self) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         client.send_command("Network.enable", serde_json::json!({}))?;
@@ -976,7 +986,7 @@ impl BrowserServer {
         })
     }
 
-    fn set_cookie(
+    pub fn set_cookie(
         &self,
         name: &str,
         value: &str,
@@ -1022,7 +1032,7 @@ impl BrowserServer {
         })
     }
 
-    fn find_element(&self, selector: &str) -> Result<BrowserResult> {
+    pub fn find_element(&self, selector: &str) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         client.send_command("DOM.enable", serde_json::json!({}))?;
@@ -1071,7 +1081,7 @@ impl BrowserServer {
         })
     }
 
-    fn wait_for_element(&self, selector: &str, timeout_ms: u64) -> Result<BrowserResult> {
+    pub fn wait_for_element(&self, selector: &str, timeout_ms: u64) -> Result<BrowserResult> {
         let start = std::time::Instant::now();
         let timeout = Duration::from_millis(timeout_ms);
 
@@ -1092,7 +1102,7 @@ impl BrowserServer {
         })
     }
 
-    fn click_element(&self, selector: &str) -> Result<BrowserResult> {
+    pub fn click_element(&self, selector: &str) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         client.send_command("DOM.enable", serde_json::json!({}))?;
@@ -1185,7 +1195,7 @@ impl BrowserServer {
         })
     }
 
-    fn type_text(&self, text: &str, selector: Option<&str>) -> Result<BrowserResult> {
+    pub fn type_text(&self, text: &str, selector: Option<&str>) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         // If selector provided, click to focus first
@@ -1253,7 +1263,7 @@ impl BrowserServer {
         })
     }
 
-    fn keyboard_press(&self, key: &str, modifiers: Option<&str>) -> Result<BrowserResult> {
+    pub fn keyboard_press(&self, key: &str, modifiers: Option<&str>) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         // Map common key names to key codes
@@ -1336,7 +1346,7 @@ impl BrowserServer {
         })
     }
 
-    fn print_to_pdf(&self, filepath: &str, landscape: bool, print_background: bool) -> Result<BrowserResult> {
+    pub fn print_to_pdf(&self, filepath: &str, landscape: bool, print_background: bool) -> Result<BrowserResult> {
         let mut client = self.get_client()?;
 
         client.send_command("Page.enable", serde_json::json!({}))?;
@@ -1383,7 +1393,7 @@ impl BrowserServer {
         })
     }
 
-    fn is_available(&self) -> BrowserResult {
+    pub fn is_available(&self) -> BrowserResult {
         let chrome_path = std::path::Path::new(&self.config.chrome_path);
 
         // Check if the Chrome executable exists
