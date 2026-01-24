@@ -1393,6 +1393,13 @@ impl BrowserServer {
         })
     }
 
+    /// Detach Chrome process so it survives this process exiting.
+    /// Used by the CLI `browser start` command.
+    pub fn detach(&self) {
+        let mut process_guard = self.chrome_process.lock().unwrap();
+        *process_guard = None;
+    }
+
     pub fn is_available(&self) -> BrowserResult {
         let chrome_path = std::path::Path::new(&self.config.chrome_path);
 
@@ -1467,7 +1474,7 @@ impl BrowserServer {
 
 impl Drop for BrowserServer {
     fn drop(&mut self) {
-        // Stop Chrome when server is dropped
+        // Stop Chrome when server is dropped (only if not detached)
         let mut process_guard = self.chrome_process.lock().unwrap();
         if let Some(ref mut child) = *process_guard {
             child.kill().ok();

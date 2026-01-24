@@ -305,6 +305,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::Start { headless } => {
             let server = create_server(&cli);
             let result = server.start_browser(*headless)?;
+            // Detach Chrome so it survives this process exiting
+            server.detach();
             let db = open_db()?;
             db.set_state("chrome_port", &cli.port.to_string())?;
             if let Some(ref dir) = cli.user_data_dir {
@@ -314,10 +316,20 @@ fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Stop => {
-            let server = create_server(&cli);
-            let result = server.stop_browser()?;
+            // Kill Chrome by finding it via DevTools port
+            let port = cli.port;
+            let killed = kill_chrome_by_port(port);
             let db = open_db()?;
             db.delete_state("chrome_port")?;
+            let result = mcpz::servers::browser::BrowserResult {
+                success: true,
+                message: if killed {
+                    format!("Browser stopped (port {})", port)
+                } else {
+                    "Browser was not running".to_string()
+                },
+                data: None,
+            };
             output(&result, json_mode);
             Ok(())
         }
@@ -766,6 +778,38 @@ fn output(result: &mcpz::servers::browser::BrowserResult, json_mode: bool) {
     if !result.success {
         process::exit(1);
     }
+}
+
+/// Kill Chrome by finding the process listening on the DevTools port
+fn kill_chrome_by_port(port: u16) -> bool {
+    // Try to find Chrome PID via /proc or lsof
+    let output = std::process::Command::new("lsof")
+        .args(["-ti", &format!(":{}", port)])
+        .output();
+
+    if let Ok(out) = output {
+        let pids = String::from_utf8_lossy(&out.stdout);
+        for pid_str in pids.lines() {
+            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                kill_pid(pid);
+                return true;
+            }
+        }
+    }
+
+    // Fallback: try pkill
+    let result = std::process::Command::new("pkill")
+        .args(["-f", &format!("remote-debugging-port={}", port)])
+        .status();
+
+    matches!(result, Ok(status) if status.success())
+}
+
+/// Send SIGTERM to a process
+fn kill_pid(pid: i32) {
+    let _ = std::process::Command::new("kill")
+        .arg(pid.to_string())
+        .status();
 }
 
 fn truncate(s: &str, max: usize) -> String {
