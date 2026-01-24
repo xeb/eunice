@@ -130,7 +130,7 @@ pub async fn run_tui_mode(
 ) -> Result<()> {
     // Create readline context with custom prompt
     let prompt = format!("{PURPLE}>{RESET} ");
-    let maybe_ctx = ReadlineAsyncContext::try_new(Some(prompt))
+    let maybe_ctx = ReadlineAsyncContext::try_new(Some(prompt), None)
         .await
         .map_err(|e| anyhow!("Failed to create readline context: {}", e))?;
 
@@ -333,8 +333,12 @@ pub async fn run_tui_mode(
                 writeln!(sw, "\n{DIM}Goodbye!{RESET}\n")?;
                 break;
             }
-            Ok(ReadlineEvent::Resized) => {
+            Ok(ReadlineEvent::Resized(_)) => {
                 // Handle terminal resize - continue loop
+                continue;
+            }
+            Ok(_) => {
+                // Handle other events (Tab, BackTab, PageUp, etc.) - ignore
                 continue;
             }
             Err(e) => {

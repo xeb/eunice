@@ -37,18 +37,10 @@ pub fn get_dmn_mcp_config() -> McpConfig {
         },
     );
 
-    // Browser automation (optional - only if mcpz is available)
-    if use_mcpz {
-        servers.insert(
-            "browser".to_string(),
-            McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "browser".into()], url: None, timeout: None },
-        );
-    }
-
     // DMN root agent
     let mut agents = HashMap::new();
     agents.insert("root".to_string(), AgentConfig {
-        description: "Autonomous task executor with shell, filesystem, and browser access".to_string(),
+        description: "Autonomous task executor with shell, filesystem, and browser CLI access".to_string(),
         prompt: DMN_INSTRUCTIONS.to_string(),
         model: None,
         root: true,

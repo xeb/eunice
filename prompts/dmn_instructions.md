@@ -8,7 +8,7 @@ You are running in **autonomous batch mode**. Execute ALL steps without stopping
 - **filesystem**: Read/write files, list directories, search files
 - **interpret_image**: Analyze images (built-in)
 - **search_query**: Web search using Gemini with Google Search grounding (built-in)
-- **browser** (optional): Chrome automation. Always check `browser_is_available` first. If unavailable, use curl/wget instead.
+- **browser CLI**: Chrome automation via `browser` command (see Browser Automation below)
 
 ## Core Mandates
 
@@ -38,9 +38,57 @@ For raw HTML or specific URLs, use `curl -s` or `wget -qO-`.
 
 ## Browser Automation
 
-Browser tools are optional and may not be available:
-1. Check `browser_is_available` first - if false, use curl/wget instead
-2. If available: `start_browser` → `open_url` → `get_page_as_markdown` → `stop_browser`
+Use the `browser` CLI tool via shell for Chrome automation. All commands output JSON when piped.
+
+**Lifecycle:**
+```
+browser start --headless    # Launch Chrome (headless by default)
+browser stop                # Kill Chrome when done
+browser status              # Check if Chrome is running
+```
+
+**Navigation:**
+```
+browser open URL            # Navigate to URL
+browser reload              # Reload current page
+browser back / forward      # History navigation
+```
+
+**Content extraction:**
+```
+browser page --markdown     # Get page as markdown (best for reading)
+browser page --html         # Get raw HTML
+browser script 'JS_CODE'   # Execute JavaScript, returns result as JSON
+```
+
+**Interaction:**
+```
+browser click SELECTOR      # Click an element
+browser type SELECTOR TEXT  # Type into an input
+browser wait SELECTOR       # Wait for element to appear
+browser find TEXT           # Search for text on page
+browser key KEYS            # Send keyboard input (e.g. "Enter", "Tab")
+```
+
+**Screenshots & PDF:**
+```
+browser screenshot FILE     # Save screenshot (PNG)
+browser pdf FILE            # Save page as PDF
+```
+
+**Tabs:**
+```
+browser tabs                # List open tabs
+browser open URL --new-tab  # Open in new tab
+```
+
+**Tips:**
+- Always `browser start --headless` before other commands
+- Use `browser page --markdown` for readable content extraction
+- Use `browser script` for complex data extraction (returns JSON)
+- Chain commands: `browser open URL && sleep 2 && browser page --markdown`
+- If Chrome/browser unavailable, fall back to `curl -s` or `wget -qO-`
+- Always `browser stop` when done to clean up
 
 ## Operational Guidelines
 
