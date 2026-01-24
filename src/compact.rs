@@ -184,7 +184,6 @@ async fn generate_summary(
             model,
             serde_json::to_value(&summary_messages)?,
             None, // No tools for summarization
-            false, // Not DMN mode
         )
         .await
         .context("Failed to generate context summary")?;

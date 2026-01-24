@@ -1,4 +1,5 @@
 mod agent;
+mod api_keys;
 mod builtin_tools;
 mod client;
 mod compact;
@@ -137,6 +138,10 @@ struct Args {
     /// Disable MCP even if eunice.json exists
     #[arg(long, help_heading = "Advanced")]
     no_mcp: bool,
+
+    /// Path to API keys file for key rotation (default: ~/.eunice/api_keys.toml)
+    #[arg(long, help_heading = "Advanced")]
+    api_keys: Option<String>,
 
     /// Update eunice to the latest version from GitHub
     #[arg(long, help_heading = "Advanced")]
@@ -775,7 +780,54 @@ async fn main() -> Result<()> {
 
     // Detect provider and create client
     let provider_info = detect_provider(&model)?;
-    let client = Client::new(&provider_info, args.verbose)?;
+
+    // Load API keys for key rotation
+    let key_rotator = {
+        let keys_path = args.api_keys.as_ref()
+            .map(|p| std::path::PathBuf::from(p))
+            .or_else(|| {
+                dirs::home_dir().map(|h| h.join(".eunice").join("api_keys.toml"))
+            });
+
+        if let Some(path) = keys_path {
+            if path.exists() {
+                match api_keys::load_api_keys(&path) {
+                    Ok(config) => {
+                        let rotator = api_keys::build_rotator(
+                            &config,
+                            &provider_info.provider,
+                            &provider_info.api_key,
+                        );
+                        if let Some(ref r) = rotator {
+                            if !args.silent {
+                                eprintln!("API keys: {} keys loaded for rotation", r.key_count());
+                            }
+                        }
+                        rotator
+                    }
+                    Err(e) => {
+                        if args.api_keys.is_some() {
+                            // Explicit --api-keys flag: error is fatal
+                            return Err(e);
+                        }
+                        // Auto-discovery: warn but continue
+                        if args.verbose {
+                            eprintln!("Warning: failed to load API keys: {}", e);
+                        }
+                        None
+                    }
+                }
+            } else if args.api_keys.is_some() {
+                return Err(anyhow!("API keys file not found: {}", path.display()));
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    let client = Client::new_with_keys(&provider_info, args.verbose, key_rotator)?;
 
     // Initialize MCP manager (background startup for faster prompt display)
     let (mut mcp_manager, orchestrator) = if let Some(ref config) = mcp_config {

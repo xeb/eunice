@@ -1,10 +1,30 @@
+use crate::api_keys::ApiKeyRotator;
+use crate::compact::{extract_retry_delay, is_rate_limit_error};
 use crate::models::{
     ChatCompletionRequest, ChatCompletionResponse, GeminiContent, GeminiPart, GeminiRequest,
     GeminiResponse, Message, Provider, ProviderInfo, Tool,
 };
 use anyhow::{anyhow, Context, Result};
+use rand::Rng;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use std::time::Duration;
+
+/// Retry configuration for API requests
+pub struct RetryConfig {
+    pub max_retries: u32,
+    pub initial_delay_ms: u64,
+    pub max_delay_ms: u64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_delay_ms: 1000,
+            max_delay_ms: 60000,
+        }
+    }
+}
 
 /// OpenAI-compatible HTTP client for all providers
 pub struct Client {
@@ -14,40 +34,32 @@ pub struct Client {
     provider: Provider,
     use_native_gemini_api: bool,
     verbose: bool,
+    retry_config: RetryConfig,
+    key_rotator: Option<ApiKeyRotator>,
 }
 
 impl Client {
     /// Create a new client for the given provider
+    #[allow(dead_code)]
     pub fn new(provider_info: &ProviderInfo, verbose: bool) -> Result<Self> {
+        Self::new_with_keys(provider_info, verbose, None)
+    }
+
+    /// Create a new client with optional key rotation
+    pub fn new_with_keys(
+        provider_info: &ProviderInfo,
+        verbose: bool,
+        key_rotator: Option<ApiKeyRotator>,
+    ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        // Set authorization header based on provider
-        // Skip default auth headers for native Gemini API (uses per-request x-goog-api-key)
-        if !provider_info.use_native_gemini_api {
-            match provider_info.provider {
-                Provider::Anthropic => {
-                    headers.insert(
-                        "x-api-key",
-                        HeaderValue::from_str(&provider_info.api_key)
-                            .context("Invalid Anthropic API key")?,
-                    );
-                    headers.insert(
-                        "anthropic-version",
-                        HeaderValue::from_static("2023-06-01"),
-                    );
-                }
-                Provider::Ollama => {
-                    // Ollama doesn't need auth
-                }
-                _ => {
-                    headers.insert(
-                        AUTHORIZATION,
-                        HeaderValue::from_str(&format!("Bearer {}", provider_info.api_key))
-                            .context("Invalid API key format")?,
-                    );
-                }
-            }
+        // Anthropic requires a version header on every request
+        if let Provider::Anthropic = provider_info.provider {
+            headers.insert(
+                "anthropic-version",
+                HeaderValue::from_static("2023-06-01"),
+            );
         }
 
         let http = reqwest::Client::builder()
@@ -63,7 +75,41 @@ impl Client {
             provider: provider_info.provider.clone(),
             use_native_gemini_api: provider_info.use_native_gemini_api,
             verbose,
+            retry_config: RetryConfig::default(),
+            key_rotator,
         })
+    }
+
+    /// Get the current API key (from rotator or static)
+    fn current_api_key(&self) -> &str {
+        if let Some(ref rotator) = self.key_rotator {
+            rotator.current_key()
+        } else {
+            &self.api_key
+        }
+    }
+
+    /// Add auth header to a request based on provider
+    fn add_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let key = self.current_api_key();
+        match self.provider {
+            Provider::Anthropic => req.header("x-api-key", key),
+            Provider::Ollama => req, // No auth needed
+            _ => req.header(AUTHORIZATION, format!("Bearer {}", key)),
+        }
+    }
+
+    /// Calculate backoff delay with jitter for a given attempt
+    fn backoff_delay(&self, attempt: u32) -> Duration {
+        let base = self.retry_config.initial_delay_ms * 2u64.pow(attempt.saturating_sub(1));
+        let capped = base.min(self.retry_config.max_delay_ms);
+        let jitter = rand::thread_rng().gen_range(0..=self.retry_config.initial_delay_ms);
+        Duration::from_millis(capped + jitter)
+    }
+
+    /// Check if a status code is retryable
+    fn is_retryable_status(status: u16) -> bool {
+        status == 429 || status == 500 || status == 502 || status == 503
     }
 
     /// Send a chat completion request
@@ -72,13 +118,12 @@ impl Client {
         model: &str,
         messages: serde_json::Value,
         tools: Option<&[Tool]>,
-        dmn_mode: bool,
     ) -> Result<ChatCompletionResponse> {
         // Check if using native Gemini API
         if self.use_native_gemini_api {
             let messages: Vec<Message> = serde_json::from_value(messages)?;
             return self
-                .chat_completion_gemini_native(model, &messages, tools, dmn_mode)
+                .chat_completion_gemini_native(model, &messages, tools)
                 .await;
         }
 
@@ -92,37 +137,80 @@ impl Client {
             tool_choice: tools.map(|_| "auto".to_string()),
         };
 
-        // Try request with potential retry on 429
-        let mut attempt = 0;
+        let mut attempt = 0u32;
         loop {
-            attempt += 1;
-
             let response = self
-                .http
-                .post(&url)
+                .add_auth(self.http.post(&url))
                 .json(&request)
                 .send()
                 .await
                 .context("Failed to send request")?;
 
-            let status = response.status();
+            let status = response.status().as_u16();
 
-            // Handle 429 rate limit in DMN mode
-            if status.as_u16() == 429 && dmn_mode && attempt == 1 {
+            if Self::is_retryable_status(status) {
                 let error_text = response.text().await.unwrap_or_default();
-                eprintln!("⏳ Rate limit hit (429). DMN mode: retrying in 6 seconds...");
-                eprintln!("   Error: {}", error_text.lines().next().unwrap_or("Unknown error"));
-                tokio::time::sleep(Duration::from_secs(6)).await;
-                continue; // Retry
+
+                // Try key rotation first on 429
+                if status == 429 {
+                    if let Some(ref rotator) = self.key_rotator {
+                        if let Some(_new_key) = rotator.rotate() {
+                            eprintln!("⏳ Rate limit (429): rotating API key...");
+                            continue; // Immediate retry with new key (doesn't count as attempt)
+                        }
+                    }
+                }
+
+                if attempt >= self.retry_config.max_retries {
+                    return Err(anyhow!(
+                        "API request failed with status {} after {} retries: {}",
+                        status,
+                        attempt,
+                        error_text
+                    ));
+                }
+
+                // Calculate delay: use server-suggested delay if available, otherwise backoff
+                let delay = if is_rate_limit_error(&error_text) {
+                    if let Some(secs) = extract_retry_delay(&error_text) {
+                        Duration::from_secs(secs)
+                    } else {
+                        self.backoff_delay(attempt)
+                    }
+                } else {
+                    self.backoff_delay(attempt)
+                };
+
+                eprintln!(
+                    "⏳ {} ({}): retrying in {:.1}s (attempt {}/{})...",
+                    if status == 429 { "Rate limit" } else { "Server error" },
+                    status,
+                    delay.as_secs_f64(),
+                    attempt + 1,
+                    self.retry_config.max_retries
+                );
+                tokio::time::sleep(delay).await;
+                attempt += 1;
+
+                // Reset key rotator on retry so we start fresh
+                if let Some(ref rotator) = self.key_rotator {
+                    rotator.reset();
+                }
+                continue;
             }
 
-            if !status.is_success() {
+            if !response.status().is_success() {
                 let error_text = response.text().await.unwrap_or_default();
                 return Err(anyhow!(
                     "API request failed with status {}: {}",
                     status,
                     error_text
                 ));
+            }
+
+            // Success - reset key rotator
+            if let Some(ref rotator) = self.key_rotator {
+                rotator.reset();
             }
 
             let response_body = response
@@ -140,7 +228,6 @@ impl Client {
         model: &str,
         messages: &[Message],
         tools: Option<&[Tool]>,
-        dmn_mode: bool,
     ) -> Result<ChatCompletionResponse> {
         use crate::models::{GeminiFunctionDeclaration, GeminiTool};
 
@@ -171,36 +258,83 @@ impl Client {
         // Build URL: base_url already contains /v1beta/models/
         let url = format!("{}{}:generateContent", self.base_url, model);
 
-        // Try request with potential retry on 429
-        let mut attempt = 0;
+        let mut attempt = 0u32;
         loop {
-            attempt += 1;
-
-            // Build request with x-goog-api-key header
+            // Build request with x-goog-api-key header (per-request for key rotation)
+            let api_key = self.current_api_key().to_string();
             let response = self
                 .http
                 .post(&url)
-                .header("x-goog-api-key", &self.api_key)
+                .header("x-goog-api-key", &api_key)
                 .header(CONTENT_TYPE, "application/json")
                 .json(&gemini_request)
                 .send()
                 .await
                 .context("Failed to send Gemini request")?;
 
-            let status = response.status();
+            let status = response.status().as_u16();
 
-            // Handle 429 rate limit in DMN mode
-            if status.as_u16() == 429 && dmn_mode && attempt == 1 {
+            if Self::is_retryable_status(status) {
                 let error_text = response.text().await.unwrap_or_default();
-                eprintln!("⏳ Rate limit hit (429). DMN mode: retrying in 6 seconds...");
-                eprintln!("   Error: {}", error_text.lines().next().unwrap_or("Unknown error"));
-                tokio::time::sleep(Duration::from_secs(6)).await;
-                continue; // Retry
+
+                // Try key rotation first on 429
+                if status == 429 {
+                    if let Some(ref rotator) = self.key_rotator {
+                        if let Some(_new_key) = rotator.rotate() {
+                            eprintln!("⏳ Rate limit (429): rotating API key...");
+                            continue; // Immediate retry with new key
+                        }
+                    }
+                }
+
+                if attempt >= self.retry_config.max_retries {
+                    let debug_info = if self.verbose {
+                        format!(
+                            "\n\n--- Request Body (--verbose) ---\n{}",
+                            serde_json::to_string_pretty(&gemini_request).unwrap_or_else(|_| "Failed to serialize request".to_string())
+                        )
+                    } else {
+                        "\n\nTip: Use --verbose to see the full request body.".to_string()
+                    };
+                    return Err(anyhow!(
+                        "Gemini API request failed with status {} after {} retries: {}{}",
+                        status,
+                        attempt,
+                        error_text,
+                        debug_info
+                    ));
+                }
+
+                // Calculate delay
+                let delay = if is_rate_limit_error(&error_text) {
+                    if let Some(secs) = extract_retry_delay(&error_text) {
+                        Duration::from_secs(secs)
+                    } else {
+                        self.backoff_delay(attempt)
+                    }
+                } else {
+                    self.backoff_delay(attempt)
+                };
+
+                eprintln!(
+                    "⏳ {} ({}): retrying in {:.1}s (attempt {}/{})...",
+                    if status == 429 { "Rate limit" } else { "Server error" },
+                    status,
+                    delay.as_secs_f64(),
+                    attempt + 1,
+                    self.retry_config.max_retries
+                );
+                tokio::time::sleep(delay).await;
+                attempt += 1;
+
+                if let Some(ref rotator) = self.key_rotator {
+                    rotator.reset();
+                }
+                continue;
             }
 
-            if !status.is_success() {
+            if !response.status().is_success() {
                 let error_text = response.text().await.unwrap_or_default();
-                // Include request body in error for debugging in verbose mode
                 let debug_info = if self.verbose {
                     format!(
                         "\n\n--- Request Body (--verbose) ---\n{}",
@@ -215,6 +349,11 @@ impl Client {
                     error_text,
                     debug_info
                 ));
+            }
+
+            // Success - reset key rotator
+            if let Some(ref rotator) = self.key_rotator {
+                rotator.reset();
             }
 
             // Get raw response text first so we can inspect it
@@ -239,7 +378,6 @@ impl Client {
         prompt: &str,
         image_data: &str, // base64
         mime_type: &str,
-        _dmn_mode: bool,
     ) -> Result<ChatCompletionResponse> {
         // Use native Gemini API for multimodal requests if configured
         if self.use_native_gemini_api {
@@ -270,10 +408,11 @@ impl Client {
             };
 
             let url = format!("{}{}:generateContent", self.base_url, model);
+            let api_key = self.current_api_key().to_string();
             let response = self
                 .http
                 .post(&url)
-                .header("x-goog-api-key", &self.api_key)
+                .header("x-goog-api-key", &api_key)
                 .json(&gemini_request)
                 .send()
                 .await
@@ -321,8 +460,7 @@ impl Client {
         };
 
         let response = self
-            .http
-            .post(&url)
+            .add_auth(self.http.post(&url))
             .json(&request)
             .send()
             .await
@@ -416,7 +554,7 @@ impl Client {
                     // Convert tool result to Gemini functionResponse format
                     // Try to parse the content as JSON
                     let parsed = serde_json::from_str::<serde_json::Value>(content);
-                    
+
                     // Gemini requires functionResponse.response to be a Map (JSON object).
                     // If the tool output is a primitive or array, we must wrap it.
                     let response_value = match parsed {
@@ -425,9 +563,14 @@ impl Client {
                         Err(_) => serde_json::json!({ "result": content }),
                     };
 
-                    // Extract function name from tool_call_id
+                    // Extract function name and thought_signature from tool_call_id
                     // The ID may be encoded as "name::signature" or just "name"
                     let function_name = tool_call_id.split("::").next().unwrap_or(tool_call_id).to_string();
+                    let thought_signature = if tool_call_id.contains("::") {
+                        tool_call_id.split("::").nth(1).map(|s| s.to_string())
+                    } else {
+                        None
+                    };
 
                     contents.push(GeminiContent {
                         parts: vec![GeminiPart {
@@ -438,7 +581,7 @@ impl Client {
                                 name: function_name,
                                 response: response_value,
                             }),
-                            thought_signature: None,
+                            thought_signature,
                         }],
                         role: Some("user".to_string()),
                     });
@@ -886,5 +1029,65 @@ mod tests {
         let result = client.convert_gemini_to_openai_response(gemini_response, "{}");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("no candidates"));
+    }
+
+    #[test]
+    fn test_thought_signature_on_function_response() {
+        let client = create_test_client();
+        let messages = vec![
+            Message::Tool {
+                tool_call_id: "my_function::abc123sig".to_string(),
+                content: "{\"status\": \"ok\"}".to_string(),
+            },
+        ];
+
+        let result = client.convert_messages_to_gemini(&messages).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let part = &result[0].parts[0];
+        // Verify function_response has the correct name (without signature)
+        let fr = part.function_response.as_ref().unwrap();
+        assert_eq!(fr.name, "my_function");
+
+        // Verify thought_signature is extracted
+        assert_eq!(part.thought_signature, Some("abc123sig".to_string()));
+    }
+
+    #[test]
+    fn test_thought_signature_absent_on_function_response() {
+        let client = create_test_client();
+        let messages = vec![
+            Message::Tool {
+                tool_call_id: "my_function".to_string(),
+                content: "{\"value\": 42}".to_string(),
+            },
+        ];
+
+        let result = client.convert_messages_to_gemini(&messages).unwrap();
+        let part = &result[0].parts[0];
+
+        let fr = part.function_response.as_ref().unwrap();
+        assert_eq!(fr.name, "my_function");
+        assert_eq!(part.thought_signature, None);
+    }
+
+    #[test]
+    fn test_retry_config_defaults() {
+        let config = RetryConfig::default();
+        assert_eq!(config.max_retries, 3);
+        assert_eq!(config.initial_delay_ms, 1000);
+        assert_eq!(config.max_delay_ms, 60000);
+    }
+
+    #[test]
+    fn test_is_retryable_status() {
+        assert!(Client::is_retryable_status(429));
+        assert!(Client::is_retryable_status(500));
+        assert!(Client::is_retryable_status(502));
+        assert!(Client::is_retryable_status(503));
+        assert!(!Client::is_retryable_status(200));
+        assert!(!Client::is_retryable_status(400));
+        assert!(!Client::is_retryable_status(401));
+        assert!(!Client::is_retryable_status(404));
     }
 }

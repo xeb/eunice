@@ -1060,7 +1060,6 @@ async fn run_agent_with_events(
                 &state.provider_info.resolved_model,
                 serde_json::to_value(&conversation_history).unwrap(),
                 tools_option.as_deref(),
-                state.enable_image_tool,
             )
             .await;
 

@@ -338,7 +338,6 @@ impl AgentOrchestrator {
                     model,
                     serde_json::to_value(&*conversation_history)?,
                     tools_option,
-                    false,
                 );
 
                 if let Some(ref mut rx) = cancel_rx.clone() {

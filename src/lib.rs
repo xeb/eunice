@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod api_keys;
 pub mod builtin_tools;
 pub mod client;
 pub mod compact;

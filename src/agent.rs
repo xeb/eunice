@@ -81,7 +81,7 @@ pub async fn execute_interpret_image(
 
     // Call the client's multimodal chat completion method
     let response = client
-        .chat_completion_with_image(model, prompt, &image_base64, mime_type, true)
+        .chat_completion_with_image(model, prompt, &image_base64, mime_type)
         .await?;
 
     // Extract text from the response
@@ -422,7 +422,6 @@ pub async fn run_agent_cancellable(
                 model,
                 serde_json::to_value(&*conversation_history)?,
                 tools_option.as_deref(),
-                enable_image_tool,
             );
 
             if let Some(ref mut rx) = cancel_rx.clone() {
