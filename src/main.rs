@@ -18,7 +18,7 @@ mod usage;
 mod webapp;
 
 use crate::client::Client;
-use crate::config::{get_dmn_mcp_config, get_research_mcp_config, has_gemini_api_key, load_mcp_config, DMN_INSTRUCTIONS, LLMS_FULL_TXT};
+use crate::config::{get_dmn_mcp_config, get_research_mcp_config, has_gemini_api_key, has_mcpz, load_mcp_config, DMN_INSTRUCTIONS, LLMS_FULL_TXT};
 use crate::display_sink::create_display_sink;
 use crate::mcp::McpManager;
 use crate::models::{McpConfig, Message};
@@ -74,6 +74,10 @@ struct Args {
     /// Enable all built-in tools
     #[arg(long, help_heading = "Tools")]
     all: bool,
+
+    /// Enable shell + filesystem (shortcut for --shell --filesystem)
+    #[arg(long, help_heading = "Tools")]
+    native: bool,
 
     // === Modes ===
     /// Autonomous batch execution (--all + DMN instructions)
@@ -322,6 +326,57 @@ fn determine_config(args: &Args) -> Result<Option<McpConfig>> {
         return Ok(Some(load_mcp_config(json_config)?));
     }
 
+    // Create MCP config when --shell/--filesystem/--browser/--native/--all flags are used
+    // This enables these flags to work properly in TUI and interactive modes
+    if args.shell || args.filesystem || args.browser || args.native || args.all {
+        use std::collections::HashMap;
+        let use_mcpz = has_mcpz();
+        let mut servers = HashMap::new();
+
+        if args.shell || args.native || args.all {
+            servers.insert(
+                "shell".to_string(),
+                if use_mcpz {
+                    models::McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "shell".into()], url: None, timeout: None }
+                } else {
+                    models::McpServerConfig { command: "uvx".into(), args: vec!["git+https://github.com/emsi/mcp-server-shell".into()], url: None, timeout: None }
+                },
+            );
+        }
+
+        if args.filesystem || args.native || args.all {
+            servers.insert(
+                "filesystem".to_string(),
+                if use_mcpz {
+                    models::McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "filesystem".into()], url: None, timeout: None }
+                } else {
+                    models::McpServerConfig { command: "npx".into(), args: vec!["-y".into(), "@modelcontextprotocol/server-filesystem".into(), ".".into()], url: None, timeout: None }
+                },
+            );
+        }
+
+        if args.browser || args.all {
+            servers.insert(
+                "browser".to_string(),
+                if use_mcpz {
+                    models::McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "browser".into()], url: None, timeout: None }
+                } else {
+                    // Browser requires mcpz, warn user
+                    eprintln!("Warning: --browser flag requires mcpz. Install with: cargo install eunice");
+                    models::McpServerConfig { command: "mcpz".into(), args: vec!["server".into(), "browser".into()], url: None, timeout: None }
+                },
+            );
+        }
+
+        return Ok(Some(models::McpConfig {
+            mcp_servers: servers,
+            agents: HashMap::new(),
+            allowed_tools: vec![],
+            denied_tools: vec![],
+            webapp: None,
+        }));
+    }
+
     Ok(None)
 }
 
@@ -334,13 +389,13 @@ fn check_builtin_tool_conflicts(args: &Args, config: &Option<models::McpConfig>)
     let mut conflicts = Vec::new();
 
     // Check shell conflict
-    if (args.shell || args.all) && config.mcp_servers.contains_key("shell") {
-        conflicts.push(("--shell", "shell"));
+    if (args.shell || args.native || args.all) && config.mcp_servers.contains_key("shell") {
+        conflicts.push(("--shell/--native", "shell"));
     }
 
     // Check filesystem conflict
-    if (args.filesystem || args.all) && config.mcp_servers.contains_key("filesystem") {
-        conflicts.push(("--filesystem", "filesystem"));
+    if (args.filesystem || args.native || args.all) && config.mcp_servers.contains_key("filesystem") {
+        conflicts.push(("--filesystem/--native", "filesystem"));
     }
 
     // Check browser conflict
@@ -618,8 +673,8 @@ async fn main() -> Result<()> {
         let enable_search_tool = args.dmn || args.search || args.research || args.all;
         // For shell/filesystem: only use built-in when explicitly requested via flags, not via --dmn
         // (--dmn uses MCP servers for these, not built-in)
-        let enable_shell_builtin = args.shell || args.all;
-        let enable_filesystem_builtin = args.filesystem || args.all;
+        let enable_shell_builtin = args.shell || args.native || args.all;
+        let enable_filesystem_builtin = args.filesystem || args.native || args.all;
         let mut all_tool_names: Vec<String> = Vec::new();
 
         // Add built-in tools (interpret_image and search_query are always built-in)
@@ -1030,13 +1085,13 @@ async fn main() -> Result<()> {
         // Output store for truncating large tool outputs
         let mut output_store = output_store::OutputStore::new();
 
-        // Create BuiltinToolRegistry when using --shell, --filesystem, --browser, or --all flags
+        // Create BuiltinToolRegistry when using --shell, --filesystem, --native, --browser, or --all flags
         let builtin_registry = {
             let mut registry = builtin_tools::BuiltinToolRegistry::new();
-            if args.shell || args.all {
+            if args.shell || args.native || args.all {
                 registry = registry.with_shell(None);
             }
-            if args.filesystem || args.all {
+            if args.filesystem || args.native || args.all {
                 registry = registry.with_filesystem(vec![]);
             }
             // Note: browser not yet implemented in builtin registry

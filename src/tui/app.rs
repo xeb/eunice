@@ -472,7 +472,6 @@ async fn process_prompt(
         }
         _ => {
             // Single-agent mode with cancellation support
-            // Note: TUI mode doesn't yet support --shell/--filesystem flags for builtin tools
             agent::run_agent_cancellable(
                 client,
                 &provider_info.resolved_model,
