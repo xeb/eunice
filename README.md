@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama via OpenAI-compatible APIs.
 
-**8,763 lines of code** • **12MB binary** - Emphasizing "sophisticated simplicity".
+**19,028 lines of code** • **12MB/11MB/6.6MB binaries** (eunice/mcpz/browser) - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -25,6 +25,7 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 - **Smart Defaults**: Automatically selects the best available model
 - **DMN Mode**: Default Mode Network - autonomous batch execution with minimal MCP tools
 - **Intelligent Rate Limiting**: Automatic 429 retry with 6-second backoff in DMN mode
+- **API Key Rotation**: Automatic rotation through multiple API keys on rate limits
 - **Interactive Mode**: Multi-turn conversations with context preservation
 
 ## Design Goals
@@ -55,7 +56,7 @@ In December 2025, I decided to focus on Web-based and TUI features so threw simp
 cargo install --git ssh://git@github.com/xeb/eunice.git
 ```
 
-This installs both `eunice` and `mcpz` binaries to `~/.cargo/bin/`.
+This installs `eunice`, `mcpz`, and `browser` binaries to `~/.cargo/bin/`.
 
 ### From Source
 
@@ -766,6 +767,40 @@ export BRAVE_API_KEY="..."  # For web search in DMN mode
 export OLLAMA_HOST="http://localhost:11434"
 ```
 
+## API Key Rotation
+
+Eunice supports automatic API key rotation when rate limits (429 errors) are encountered. Configure multiple keys per provider in `~/.eunice/api_keys.toml`:
+
+```toml
+[gemini]
+keys = ["AIza...", "AIza...", "AIza..."]
+
+[anthropic]
+keys = ["sk-ant-1...", "sk-ant-2..."]
+
+[openai]
+keys = ["sk-proj-1...", "sk-proj-2..."]
+```
+
+### How It Works
+
+1. **Primary key**: The environment variable key (e.g., `GEMINI_API_KEY`) is always used first
+2. **Rotation**: On 429 errors, eunice automatically rotates to the next key
+3. **Reset**: After a successful request, rotation resets to the primary key
+4. **Exhaustion**: If all keys are exhausted, the normal retry/backoff logic applies
+
+### CLI Option
+
+```bash
+# Explicit path to keys file
+eunice --api-keys /path/to/api_keys.toml "prompt"
+
+# Default location: ~/.eunice/api_keys.toml (auto-loaded if exists)
+eunice "prompt"
+```
+
+Key rotation is thread-safe and works across all provider APIs (OpenAI, Gemini, Anthropic, Ollama).
+
 ## mcpz - Bundled MCP Server Runner
 
 This package includes `mcpz`, a runtime MCP router tool. When you install eunice, you also get mcpz.
@@ -810,6 +845,89 @@ mcpz server filesystem --http --tls --cert cert.pem --key key.pem
 ```
 
 For full mcpz documentation, run `mcpz --help` or `mcpz server --help`.
+
+## browser - Chrome Automation CLI
+
+This package includes `browser`, a standalone CLI for Chrome automation via the DevTools Protocol. It provides the same capabilities as the browser MCP server but accessible directly from the command line.
+
+### Quick Usage
+
+```bash
+# Start Chrome with remote debugging
+browser start
+browser start --headless
+
+# Check if Chrome is running
+browser status
+
+# Navigate and interact
+browser open https://example.com
+browser page --markdown          # Get page content as markdown
+browser screenshot shot.png --full-page
+browser pdf document.pdf
+
+# DOM interaction
+browser click "button.submit"
+browser type "Hello" --selector "input#search"
+browser wait "div.loaded" --timeout 10000
+
+# Tab management
+browser tabs
+browser tab new https://google.com
+browser tab close <tab-id>
+
+# JavaScript execution
+browser script "document.title"
+browser script --file script.js
+
+# Stop Chrome
+browser stop
+```
+
+### Credential Management
+
+Store and apply credentials for authenticated sites:
+
+```bash
+# Add a credential
+browser cred add github --url "github.com/*" --username user --password pass
+
+# List credentials
+browser cred list
+
+# Apply credential to current page (injects cookies, fills forms)
+browser cred apply github
+```
+
+### Session Management
+
+Save and restore browser sessions (cookies):
+
+```bash
+# Save current session
+browser session save my-session
+
+# List saved sessions
+browser session list
+
+# Load a saved session
+browser session load my-session
+```
+
+### Global Options
+
+```bash
+browser --port 9222 ...          # DevTools port (default: 9222)
+browser --chrome /path/to/chrome ...  # Chrome executable
+browser --user-data-dir /path ...     # Chrome profile directory
+browser --json ...               # Force JSON output
+browser --timeout 60 ...         # Page load timeout in seconds
+browser --verbose ...            # Enable verbose logging
+```
+
+Data is stored in `~/.eunice/mcpz/browser.db` (SQLite).
+
+For full documentation, run `browser --help` or `browser <command> --help`.
 
 ## License
 

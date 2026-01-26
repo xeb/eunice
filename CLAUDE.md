@@ -29,41 +29,48 @@ User Input → Provider Detection → Client → API Request → Response
    - HTTP client with provider-specific headers
    - Message format conversion (OpenAI ↔ Gemini)
    - 429 retry logic with 6-second backoff (DMN mode only)
+   - API key rotation support via `ApiKeyRotator`
 
-3. **MCP Integration** (`src/mcp/`)
+3. **API Key Rotation** (`src/api_keys.rs`)
+   - Loads multiple keys per provider from `~/.eunice/api_keys.toml`
+   - Thread-safe rotation via atomic index
+   - Auto-rotates on 429 rate limit errors
+   - Resets to primary key after successful requests
+
+4. **MCP Integration** (`src/mcp/`)
    - Manages multiple MCP server subprocesses (stdio) or HTTP connections
    - Supports two transports: stdio (command/args) and Streamable HTTP (url)
    - JSON-RPC communication
    - Tool discovery and routing
    - Failed server reporting to model
 
-4. **DMN Mode** (`src/config.rs`)
+5. **DMN Mode** (`src/config.rs`)
    - Default Mode Network: Autonomous batch execution
    - Minimal tool set: shell + filesystem + browser (interpret_image is built-in)
    - Browser automation (optional, requires Chrome and mcpz)
    - Shell provides access to grep, curl, wget, git, etc.
    - Includes comprehensive system instructions
 
-5. **Agent Loop** (`src/agent.rs`)
+6. **Agent Loop** (`src/agent.rs`)
    - Main conversation loop
    - Tool execution with spinners
    - Conversation history management
    - Built-in `interpret_image` tool for multimodal analysis
 
-6. **Multi-Agent Orchestrator** (`src/orchestrator/`)
+7. **Multi-Agent Orchestrator** (`src/orchestrator/`)
    - Manages agent configurations and prompts
    - Creates `invoke_*` tools for agent-to-agent calls
    - Filters MCP tools by agent permissions
    - Handles recursive agent invocation with depth tracking
    - **Design decision**: Output store is shared across all agents (not per-agent isolation) because agents often work on the same files
 
-7. **Output Store** (`src/output_store.rs`)
+8. **Output Store** (`src/output_store.rs`)
    - Stores full tool outputs in memory (or temp files for >1MB)
    - Truncates output to first 50 + last 50 lines for LLM context
    - Provides `get_output` tool for retrieving middle sections
    - Session-scoped: outputs persist until session ends
 
-8. **TUI vs Interactive Mode**
+9. **TUI vs Interactive Mode**
    - **TUI mode** (`src/tui/app.rs`): Uses `r3bl_tui` library for enhanced terminal interface with command menu, bracketed paste, and full readline support
    - **Interactive mode** (`src/interactive.rs`): Simpler REPL loop with basic readline, used as fallback when TUI cannot initialize
    - **Code flow**: `eunice` (no prompt, TTY) → TUI mode; `eunice` (no prompt, no TTY) → Interactive mode fallback
@@ -92,8 +99,10 @@ When updating the codebase, **ALWAYS** update both metrics in README.md:
 
 ### Count Implementation Lines
 ```bash
-for file in src/*.rs src/mcp/*.rs src/orchestrator/*.rs; do
-  test_start=$(grep -n "^#\[cfg(test)\]" "$file" | cut -d: -f1 | head -1)
+total=0
+for file in src/*.rs src/mcp/*.rs src/orchestrator/*.rs src/mcpz/*.rs src/mcpz/http/*.rs src/mcpz/servers/*.rs src/webapp/*.rs src/tui/*.rs src/browser/*.rs; do
+  test -f "$file" || continue
+  test_start=$(grep -n "^#\[cfg(test)\]" "$file" 2>/dev/null | cut -d: -f1 | head -1)
   if [ -n "$test_start" ]; then
     lines=$((test_start - 1))
   else
@@ -108,7 +117,7 @@ echo "Total: $total lines"
 ```bash
 make binary-size
 # or
-cargo build --release && ls -lh target/release/eunice
+cargo build --release && ls -lh target/release/eunice target/release/mcpz target/release/browser
 ```
 
 **Important**: Update both values in README.md after any code changes.
@@ -332,6 +341,43 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 - `--research --list-agents`: Show embedded agents
 - `--research --config eunice.toml`: Merge MCP servers from config (agents ignored)
 
+## API Key Rotation
+
+Eunice supports automatic API key rotation when rate limits are encountered.
+
+### Configuration (`~/.eunice/api_keys.toml`)
+
+```toml
+[gemini]
+keys = ["AIza...", "AIza...", "AIza..."]
+
+[anthropic]
+keys = ["sk-ant-1...", "sk-ant-2..."]
+
+[openai]
+keys = ["sk-proj-1...", "sk-proj-2..."]
+```
+
+### Implementation (`src/api_keys.rs`)
+
+1. `ApiKeysConfig` - TOML configuration struct for all providers
+2. `ApiKeyRotator` - Thread-safe rotation via `AtomicUsize` index
+3. `build_rotator()` - Combines env var key (first) with file keys, deduplicates
+
+### Rotation Logic (`src/client.rs`)
+
+1. On 429 error, `rotate()` is called to try next key
+2. Returns `None` if all keys exhausted (back to index 0)
+3. After successful request, `reset()` returns to primary key
+4. Works for both OpenAI-compatible and native Gemini APIs
+
+### CLI Option
+
+```bash
+eunice --api-keys /path/to/api_keys.toml "prompt"
+# Default: ~/.eunice/api_keys.toml (auto-loaded if exists)
+```
+
 ## Key Design Decisions
 
 1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
@@ -341,7 +387,7 @@ Research mode uses 4 embedded agents following the orchestrator-workers pattern:
 5. **MCP for Extensibility**: Tools provided via Model Context Protocol servers
 6. **Agents as Tools**: Agent-to-agent calls are just tool calls, reusing MCP infrastructure
 7. **Built-in Tools**: Special tools like `interpret_image` and `search_query` are handled directly by the agent
-8. **Dual Binaries**: eunice and mcpz are bundled together - one install gets both tools
+8. **Three Binaries**: eunice, mcpz, and browser are bundled together - one install gets all tools
 
 ## mcpz Architecture
 
@@ -376,13 +422,57 @@ All built-in servers support HTTP transport in addition to stdio:
 - `PackageType` enum - Cargo, Python, or Npm package types
 - `PackageCache` - TOML-serialized HashMap for package selections
 
+## Browser CLI Architecture
+
+The `browser` binary provides standalone Chrome automation from the command line, using the same `BrowserServer` implementation as the MCP server.
+
+### Entry Point (`src/browser_main.rs`)
+
+- Clap-based CLI with subcommands for all browser operations
+- Global options: `--port`, `--chrome`, `--user-data-dir`, `--json`, `--quiet`, `--verbose`, `--timeout`
+- Uses `BrowserServer` from `mcpz/servers/browser.rs` for all operations
+
+### Browser Database (`src/browser/db.rs`)
+
+SQLite database at `~/.eunice/mcpz/browser.db` storing:
+- **credentials**: Username/password, tokens, cookies for authenticated sites
+- **sessions**: Saved cookie sets for session restore
+- **state**: Chrome port and user data dir for process management
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `start` | Start Chrome with remote debugging (detaches process) |
+| `stop` | Stop Chrome by finding process via DevTools port |
+| `status` | Check if Chrome is available |
+| `open <url>` | Navigate to URL |
+| `page` | Get page content (HTML or `--markdown`) |
+| `screenshot <path>` | Capture screenshot (`--full-page` option) |
+| `pdf <path>` | Save page as PDF |
+| `script <code>` | Execute JavaScript |
+| `tabs` | List open tabs |
+| `click <selector>` | Click element by CSS selector |
+| `type <text>` | Type text (with optional `--selector`) |
+| `wait <selector>` | Wait for element to appear |
+| `cred add/list/get/delete/apply` | Credential management |
+| `session save/list/load/delete` | Session management |
+
+### Design Decisions
+
+1. **Detached Chrome**: `browser start` detaches Chrome so it survives CLI exit
+2. **Port-based process management**: `browser stop` finds Chrome via lsof/pkill on DevTools port
+3. **Shared implementation**: Uses same `BrowserServer` as MCP server for consistency
+4. **SQLite persistence**: Credentials and sessions stored securely in user's home directory
+
 ## File Structure
 
 ```
 src/
 ├── main.rs              - CLI entry, arg parsing, multi-agent detection
 ├── models.rs            - Data structures + AgentConfig + WebappConfig
-├── client.rs            - HTTP client, format conversions
+├── client.rs            - HTTP client, format conversions, key rotation
+├── api_keys.rs          - API key rotation for multi-key configurations
 ├── mcp/
 │   ├── mod.rs           - Module exports
 │   ├── server.rs        - MCP subprocess (stdio transport)
@@ -395,6 +485,11 @@ src/
 │   ├── mod.rs           - Module exports
 │   ├── server.rs        - Axum web server setup
 │   └── handlers.rs      - HTTP/SSE request handlers
+├── browser/
+│   ├── mod.rs           - Module exports
+│   ├── db.rs            - SQLite database for credentials/sessions
+│   └── output.rs        - Output formatting for browser CLI
+├── browser_main.rs      - browser binary entry point
 ├── provider.rs          - Provider detection
 ├── display.rs           - Terminal UI output
 ├── interactive.rs       - Interactive REPL mode
@@ -417,7 +512,7 @@ src/
         ├── shell.rs     - Shell command execution
         ├── filesystem.rs - Filesystem operations
         ├── sql.rs       - SQL database queries
-        └── browser.rs   - Browser automation
+        └── browser.rs   - Browser automation (shared by MCP server and CLI)
 
 webapp/
 └── index.html           - Embedded HTML/CSS/JS frontend (synth minimal aesthetic)
@@ -452,6 +547,8 @@ When adding features:
 
 ## Version History
 
+- **0.3.3**: DMN browser automation uses CLI tool instead of MCP server
+- **0.3.2**: API key rotation (`~/.eunice/api_keys.toml`), browser CLI (`browser` binary), universal retry logic
 - **0.2.73**: Root agent selection: `root = true` flag to mark entry-point agent (backwards compatible with name-based "root")
 - **0.2.72**: Fix NEW button session bug, improve webapp logging with username and session name
 - **0.2.68**: Multi-agent: required `description` field for agents, visible invoke calls in CLI/TUI/webapp
