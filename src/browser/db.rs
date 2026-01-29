@@ -62,6 +62,7 @@ impl BrowserDb {
 
     // === State ===
 
+    #[allow(dead_code)]
     pub fn get_state(&self, key: &str) -> Option<String> {
         self.conn
             .query_row("SELECT value FROM state WHERE key = ?1", params![key], |row| {
@@ -214,6 +215,7 @@ pub struct CredentialRow {
     pub url_pattern: String,
     pub username: Option<String>,
     pub has_token: bool,
+    #[allow(dead_code)]
     pub created_at: Option<String>,
 }
 
@@ -236,6 +238,7 @@ pub struct SessionRow {
     pub created_at: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Session {
     pub name: String,
