@@ -547,6 +547,9 @@ When adding features:
 
 ## Version History
 
+- **0.3.6**: Webapp proactive compaction (100 msg threshold, SQLite summaries); rate limit fallback to compaction; Agentic Vision code_execution for Gemini image analysis
+- **0.3.5**: Fix --native flag conflict with synthetic MCP config
+- **0.3.4**: Add --native flag, fix tool count in TUI mode
 - **0.3.3**: DMN browser automation uses CLI tool instead of MCP server
 - **0.3.2**: API key rotation (`~/.eunice/api_keys.toml`), browser CLI (`browser` binary), universal retry logic
 - **0.2.73**: Root agent selection: `root = true` flag to mark entry-point agent (backwards compatible with name-based "root")

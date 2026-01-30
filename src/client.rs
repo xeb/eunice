@@ -1,7 +1,7 @@
 use crate::api_keys::ApiKeyRotator;
 use crate::compact::{extract_retry_delay, is_rate_limit_error};
 use crate::models::{
-    ChatCompletionRequest, ChatCompletionResponse, GeminiContent, GeminiPart, GeminiRequest,
+    ChatCompletionRequest, ChatCompletionResponse, GeminiContent, GeminiPart, GeminiRequest, GeminiTool,
     GeminiResponse, Message, Provider, ProviderInfo, Tool,
 };
 use anyhow::{anyhow, Context, Result};
@@ -229,7 +229,7 @@ impl Client {
         messages: &[Message],
         tools: Option<&[Tool]>,
     ) -> Result<ChatCompletionResponse> {
-        use crate::models::{GeminiFunctionDeclaration, GeminiTool};
+        use crate::models::GeminiFunctionDeclaration;
 
         // Convert messages to Gemini format
         let contents = self.convert_messages_to_gemini(messages)?;
@@ -246,7 +246,8 @@ impl Client {
                 })
                 .collect();
             vec![GeminiTool {
-                function_declarations: declarations,
+                function_declarations: Some(declarations),
+                code_execution: None,
             }]
         });
 
@@ -404,7 +405,12 @@ impl Client {
                     ],
                     role: Some("user".to_string()),
                 }],
-                tools: None, // No tools for image interpretation
+                // Enable Agentic Vision code execution for Gemini image analysis
+                // This allows the model to zoom, crop, annotate, and analyze images with Python code
+                tools: Some(vec![GeminiTool {
+                    function_declarations: None,
+                    code_execution: Some(serde_json::json!({})),
+                }]),
             };
 
             let url = format!("{}{}:generateContent", self.base_url, model);
@@ -660,15 +666,23 @@ impl Client {
             }
         }
 
-        // Extract text content
-        let text = candidate
-            .content
-            .parts
-            .iter()
-            .filter_map(|p| p.text.as_ref())
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
+        // Extract text content, including code execution results for Agentic Vision
+        let mut text_parts: Vec<String> = Vec::new();
+        for part in &candidate.content.parts {
+            if let Some(ref t) = part.text {
+                text_parts.push(t.clone());
+            }
+            // Include code execution results in the text output
+            if let Some(ref code) = part.executable_code {
+                text_parts.push(format!("\n```{}\n{}\n```", code.language.to_lowercase(), code.code));
+            }
+            if let Some(ref result) = part.code_execution_result {
+                if let Some(ref output) = result.output {
+                    text_parts.push(format!("\n**Code Output ({}):**\n```\n{}\n```", result.outcome, output));
+                }
+            }
+        }
+        let text = text_parts.join("\n");
 
         // Extract function calls and convert to OpenAI tool_calls format
         // Encode both function name and thought_signature in the ID for Gemini 3 compatibility
@@ -802,7 +816,10 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{GeminiCandidate, GeminiContentResponse, GeminiPartResponse};
+    use crate::models::{
+        GeminiCandidate, GeminiCodeExecutionResult, GeminiContentResponse,
+        GeminiExecutableCode, GeminiPartResponse,
+    };
 
     fn create_test_client() -> Client {
         let provider_info = ProviderInfo {
@@ -960,6 +977,8 @@ mod tests {
                         text: Some("This is a test response".to_string()),
                         function_call: None,
                         thought_signature: None,
+                        executable_code: None,
+                        code_execution_result: None,
                     }],
                 },
                 finish_reason: Some("STOP".to_string()),
@@ -992,11 +1011,15 @@ mod tests {
                             text: Some("First part".to_string()),
                             function_call: None,
                             thought_signature: None,
+                            executable_code: None,
+                            code_execution_result: None,
                         },
                         GeminiPartResponse {
                             text: Some("Second part".to_string()),
                             function_call: None,
                             thought_signature: None,
+                            executable_code: None,
+                            code_execution_result: None,
                         },
                     ],
                 },
@@ -1089,5 +1112,71 @@ mod tests {
         assert!(!Client::is_retryable_status(400));
         assert!(!Client::is_retryable_status(401));
         assert!(!Client::is_retryable_status(404));
+    }
+
+    #[test]
+    fn test_convert_gemini_to_openai_response_with_code_execution() {
+        // Test Agentic Vision response parsing with executableCode and codeExecutionResult
+        let client = create_test_client();
+        let gemini_response = GeminiResponse {
+            candidates: vec![GeminiCandidate {
+                content: GeminiContentResponse {
+                    parts: vec![
+                        GeminiPartResponse {
+                            text: Some("Let me analyze the image.".to_string()),
+                            function_call: None,
+                            thought_signature: None,
+                            executable_code: None,
+                            code_execution_result: None,
+                        },
+                        GeminiPartResponse {
+                            text: None,
+                            function_call: None,
+                            thought_signature: None,
+                            executable_code: Some(GeminiExecutableCode {
+                                language: "PYTHON".to_string(),
+                                code: "print('Hello from Agentic Vision')".to_string(),
+                            }),
+                            code_execution_result: None,
+                        },
+                        GeminiPartResponse {
+                            text: None,
+                            function_call: None,
+                            thought_signature: None,
+                            executable_code: None,
+                            code_execution_result: Some(GeminiCodeExecutionResult {
+                                outcome: "OUTCOME_OK".to_string(),
+                                output: Some("Hello from Agentic Vision".to_string()),
+                            }),
+                        },
+                        GeminiPartResponse {
+                            text: Some("The analysis is complete.".to_string()),
+                            function_call: None,
+                            thought_signature: None,
+                            executable_code: None,
+                            code_execution_result: None,
+                        },
+                    ],
+                },
+                finish_reason: Some("STOP".to_string()),
+                finish_message: None,
+            }],
+            prompt_feedback: None,
+            usage_metadata: None,
+        };
+
+        let result = client.convert_gemini_to_openai_response(gemini_response, "{}");
+        assert!(result.is_ok());
+
+        let openai_response = result.unwrap();
+        let content = openai_response.choices[0].message.content.as_ref().unwrap();
+
+        // Verify all parts are included in the response
+        assert!(content.contains("Let me analyze the image."));
+        assert!(content.contains("```python"));
+        assert!(content.contains("print('Hello from Agentic Vision')"));
+        assert!(content.contains("OUTCOME_OK"));
+        assert!(content.contains("Hello from Agentic Vision"));
+        assert!(content.contains("The analysis is complete."));
     }
 }

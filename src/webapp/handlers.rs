@@ -951,9 +951,63 @@ async fn run_agent_with_events(
         session_id: session_id.clone(),
     }).await;
 
-    // Load existing history from storage
-    let incoming_history = state.storage.get_history(&session_id).await.unwrap_or_default();
-    log(&format!("[{}] Loaded {} messages from history", log_prefix, incoming_history.len()));
+    // Proactive compaction thresholds
+    const COMPACTION_THRESHOLD: usize = 100;  // Compact when context exceeds this many messages
+    const RECENT_MESSAGES_TO_KEEP: usize = 30; // Keep this many recent messages after compaction
+
+    // Load existing history from storage (uses compaction if available)
+    let (mut incoming_history, total_messages, needs_compaction) = state
+        .storage
+        .get_history_for_llm(&session_id, RECENT_MESSAGES_TO_KEEP, COMPACTION_THRESHOLD)
+        .await
+        .unwrap_or_else(|_| (Vec::new(), 0, false));
+    log(&format!("[{}] Loaded {} messages for LLM (total in session: {})", log_prefix, incoming_history.len(), total_messages));
+
+    // Proactive compaction if context is too large
+    if needs_compaction && incoming_history.len() > COMPACTION_THRESHOLD {
+        log(&format!("[{}] Proactive compaction needed ({} messages > {})", log_prefix, incoming_history.len(), COMPACTION_THRESHOLD));
+
+        event_sender.send(SseEvent::Compacted {
+            message: format!("Compacting conversation history ({} messages)...", incoming_history.len()),
+        }).await;
+
+        let compaction_config = CompactionConfig::default();
+        match compact_context(
+            &state.client,
+            &state.provider_info.resolved_model,
+            &incoming_history,
+            &compaction_config,
+        ).await {
+            Ok(compacted) => {
+                let compaction_msg = format!(
+                    "Context compacted proactively ({} → {} messages, {:.1}%)",
+                    incoming_history.len(),
+                    compacted.messages.len(),
+                    compacted.compaction_ratio * 100.0
+                );
+                log(&format!("[{}] {}", log_prefix, compaction_msg));
+
+                // Save compaction summary to database for future requests
+                if !compacted.summary.is_empty() {
+                    if let Err(e) = state.storage.save_compaction(&session_id, &compacted.summary).await {
+                        log(&format!("[{}] Failed to save compaction: {}", log_prefix, e));
+                    } else {
+                        log(&format!("[{}] Compaction summary saved to database", log_prefix));
+                    }
+                }
+
+                event_sender.send(SseEvent::Compacted {
+                    message: compaction_msg,
+                }).await;
+
+                incoming_history = compacted.messages;
+            }
+            Err(e) => {
+                log(&format!("[{}] Proactive compaction failed: {:#}", log_prefix, e));
+                // Continue with original history - will fail later if context is too large
+            }
+        }
+    }
 
     // Prepare the prompt with DMN instructions if needed (only for first message in session)
     let final_prompt = if state.dmn && incoming_history.is_empty() {
@@ -1088,8 +1142,14 @@ async fn run_agent_with_events(
                     continue;
                 }
 
-                // Check if this is a context exhaustion error and we haven't tried compaction yet
-                if is_context_exhausted_error(&error_msg) && !compaction_attempted {
+                // If rate limit retries exhausted with large context, try compaction as fallback
+                // Large context (>50 messages) likely contributes to quota usage
+                let should_try_compaction = !compaction_attempted && (
+                    is_context_exhausted_error(&error_msg) ||
+                    (is_rate_limit_error(&error_msg) && conversation_history.len() > 50)
+                );
+
+                if should_try_compaction {
                     compaction_attempted = true;
                     log(&format!("[{}] Attempting context compaction ({} messages)",
                         log_prefix, conversation_history.len()));
@@ -1116,7 +1176,9 @@ async fn run_agent_with_events(
                             }).await;
 
                             // Replace history with compacted version and retry
+                            // Reset rate limit retries since context is now smaller
                             conversation_history = compacted.messages;
+                            rate_limit_retries = 0;
                             continue;
                         }
                         Err(compact_err) => {

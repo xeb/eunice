@@ -145,9 +145,17 @@ impl SessionStorage {
                 created_at INTEGER NOT NULL,
                 UNIQUE(session_id, sequence_num)
             );
+            CREATE TABLE IF NOT EXISTS compactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                summary TEXT NOT NULL,
+                compacted_through_seq INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            );
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id, sequence_num);
+            CREATE INDEX IF NOT EXISTS idx_compactions_session_id ON compactions(session_id);
             "#,
         )?;
         Ok(())
@@ -405,7 +413,7 @@ impl SessionStorage {
         }
     }
 
-    /// Get conversation history for a session
+    /// Get conversation history for a session (full history for replay/display)
     pub async fn get_history(&self, session_id: &str) -> Result<Vec<Message>> {
         match self {
             SessionStorage::Memory(store) => {
@@ -433,6 +441,152 @@ impl SessionStorage {
                     }
                 }
                 Ok(history)
+            }
+        }
+    }
+
+    /// Get conversation history optimized for LLM context (uses compaction if available)
+    /// Returns: (messages_for_llm, total_message_count, needs_compaction)
+    pub async fn get_history_for_llm(
+        &self,
+        session_id: &str,
+        _recent_messages_to_keep: usize,
+        compaction_threshold: usize,
+    ) -> Result<(Vec<Message>, usize, bool)> {
+        match self {
+            SessionStorage::Memory(store) => {
+                let store = store.read().await;
+                let history = store.get(session_id).map(|s| s.history.clone()).unwrap_or_default();
+                let total = history.len();
+                let needs_compaction = total > compaction_threshold;
+                Ok((history, total, needs_compaction))
+            }
+            SessionStorage::Sqlite { conn, .. } => {
+                let conn = conn.lock().await;
+
+                // Get total message count
+                let total: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM events WHERE session_id = ?
+                     AND event_type IN ('user_message', 'assistant_message', 'tool_message')",
+                    [session_id],
+                    |row| row.get(0),
+                )?;
+                let total = total as usize;
+
+                // Check if we have a compaction
+                let compaction: Option<(String, i64)> = conn.query_row(
+                    "SELECT summary, compacted_through_seq FROM compactions
+                     WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+                    [session_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).ok();
+
+                let mut history = Vec::new();
+
+                if let Some((summary, compacted_seq)) = compaction {
+                    // Start with compaction summary as system context
+                    history.push(Message::User {
+                        content: format!(
+                            "[Previous conversation summary]\n{}\n[End of summary - recent messages follow]",
+                            summary
+                        ),
+                    });
+
+                    // Get only messages after the compaction point
+                    let mut stmt = conn.prepare(
+                        "SELECT event_type, content FROM events WHERE session_id = ?
+                         AND event_type IN ('user_message', 'assistant_message', 'tool_message')
+                         AND sequence_num > ?
+                         ORDER BY sequence_num ASC",
+                    )?;
+                    let rows = stmt.query_map(params![session_id, compacted_seq], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?;
+
+                    for row in rows {
+                        let (event_type, content) = row?;
+                        if let Ok(msg) = serde_json::from_str::<Message>(&content) {
+                            history.push(msg);
+                        } else if event_type == "user_message" {
+                            history.push(Message::User { content });
+                        }
+                    }
+
+                    // Check if we need another compaction (recent messages after last compaction > threshold)
+                    let needs_compaction = history.len() > compaction_threshold;
+                    Ok((history, total, needs_compaction))
+                } else {
+                    // No compaction - return full history and flag if compaction needed
+                    let mut stmt = conn.prepare(
+                        "SELECT event_type, content FROM events WHERE session_id = ?
+                         AND event_type IN ('user_message', 'assistant_message', 'tool_message')
+                         ORDER BY sequence_num ASC",
+                    )?;
+                    let rows = stmt.query_map([session_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?;
+
+                    for row in rows {
+                        let (event_type, content) = row?;
+                        if let Ok(msg) = serde_json::from_str::<Message>(&content) {
+                            history.push(msg);
+                        } else if event_type == "user_message" {
+                            history.push(Message::User { content });
+                        }
+                    }
+
+                    let needs_compaction = total > compaction_threshold;
+                    Ok((history, total, needs_compaction))
+                }
+            }
+        }
+    }
+
+    /// Save a compaction summary for a session
+    pub async fn save_compaction(&self, session_id: &str, summary: &str) -> Result<()> {
+        match self {
+            SessionStorage::Memory(_) => {
+                // In-memory doesn't persist compactions
+                Ok(())
+            }
+            SessionStorage::Sqlite { conn, .. } => {
+                let conn = conn.lock().await;
+                let now = chrono::Utc::now().timestamp();
+
+                // Get the current max sequence number
+                let max_seq: i64 = conn.query_row(
+                    "SELECT COALESCE(MAX(sequence_num), 0) FROM events WHERE session_id = ?",
+                    [session_id],
+                    |row| row.get(0),
+                )?;
+
+                conn.execute(
+                    "INSERT INTO compactions (session_id, summary, compacted_through_seq, created_at)
+                     VALUES (?, ?, ?, ?)",
+                    params![session_id, summary, max_seq, now],
+                )?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Get the latest compaction for a session (if any)
+    #[allow(dead_code)]
+    pub async fn get_compaction(&self, session_id: &str) -> Result<Option<String>> {
+        match self {
+            SessionStorage::Memory(_) => Ok(None),
+            SessionStorage::Sqlite { conn, .. } => {
+                let conn = conn.lock().await;
+                let result: rusqlite::Result<String> = conn.query_row(
+                    "SELECT summary FROM compactions WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+                    [session_id],
+                    |row| row.get(0),
+                );
+                match result {
+                    Ok(summary) => Ok(Some(summary)),
+                    Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+                    Err(e) => Err(e.into()),
+                }
             }
         }
     }
