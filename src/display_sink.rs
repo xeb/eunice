@@ -4,6 +4,7 @@
 //! the TUI mode to use SharedWriter while normal mode uses println!().
 
 use colored::*;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
@@ -26,31 +27,49 @@ pub enum DisplayEvent {
     StreamEnd,
     /// Error message
     Error { message: String },
-    /// Debug message (only shown in verbose mode)
-    Debug { message: String },
-    /// Newline (for future use)
-    #[allow(dead_code)]
-    Newline,
 }
 
 /// Trait for display output sinks
 pub trait DisplaySink: Send + Sync {
     /// Write a display event
     fn write_event(&self, event: DisplayEvent);
-
-    /// Check if verbose mode is enabled
-    #[allow(dead_code)]
-    fn is_verbose(&self) -> bool;
 }
 
-/// Standard output sink using println!()
+/// Standard output sink using println!() with animated spinner
 pub struct StdDisplaySink {
-    verbose: bool,
+    spinner: Mutex<Option<ProgressBar>>,
 }
 
 impl StdDisplaySink {
-    pub fn new(verbose: bool) -> Self {
-        Self { verbose }
+    pub fn new() -> Self {
+        Self {
+            spinner: Mutex::new(None),
+        }
+    }
+
+    fn start_spinner(&self) {
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                .template("  {spinner:.magenta} {msg:.magenta}")
+                .unwrap(),
+        );
+        spinner.set_message("Thinking...");
+        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+        *self.spinner.lock().unwrap() = Some(spinner);
+    }
+
+    fn stop_spinner(&self) {
+        if let Some(spinner) = self.spinner.lock().unwrap().take() {
+            spinner.finish_and_clear();
+        }
+    }
+}
+
+impl Default for StdDisplaySink {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -58,10 +77,10 @@ impl DisplaySink for StdDisplaySink {
     fn write_event(&self, event: DisplayEvent) {
         match event {
             DisplayEvent::ThinkingStart => {
-                println!("  {} Thinking...", "⋯".yellow());
+                self.start_spinner();
             }
             DisplayEvent::ThinkingStop => {
-                // No-op for standard output
+                self.stop_spinner();
             }
             DisplayEvent::ToolCall { name, arguments } => {
                 println!("  {} {}", "→".blue(), name.bright_blue());
@@ -84,8 +103,8 @@ impl DisplaySink for StdDisplaySink {
                     let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
                     let remaining = lines.len() - limit;
                     format!(
-                        "{}\n    ...{} more lines",
-                        truncated.join("\n    "),
+                        "{}\\n    ...{} more lines",
+                        truncated.join("\\n    "),
                         remaining
                     )
                 } else {
@@ -93,7 +112,7 @@ impl DisplaySink for StdDisplaySink {
                         .lines()
                         .map(|l| format!("    {}", l))
                         .collect::<Vec<_>>()
-                        .join("\n")
+                        .join("\\n")
                 };
 
                 if !output.trim().is_empty() {
@@ -116,62 +135,19 @@ impl DisplaySink for StdDisplaySink {
             DisplayEvent::Error { message } => {
                 eprintln!("{} {}", "❌".red(), message.red());
             }
-            DisplayEvent::Debug { message } => {
-                if self.verbose {
-                    eprintln!("  {}", message.dimmed());
-                }
-            }
-            DisplayEvent::Newline => {
-                println!();
-            }
         }
-    }
-
-    fn is_verbose(&self) -> bool {
-        self.verbose
-    }
-}
-
-/// Silent sink that discards all output
-pub struct SilentDisplaySink;
-
-impl DisplaySink for SilentDisplaySink {
-    fn write_event(&self, event: DisplayEvent) {
-        // Only show responses and streams, discard everything else
-        match event {
-            DisplayEvent::Response { content } => {
-                let trimmed = content.trim();
-                if !trimmed.is_empty() {
-                    println!("{}", trimmed);
-                }
-            }
-            DisplayEvent::StreamChunk { content } => {
-                print!("{}", content);
-                let _ = std::io::stdout().flush();
-            }
-            DisplayEvent::StreamEnd => {
-                println!();
-            }
-            _ => {}
-        }
-    }
-
-    fn is_verbose(&self) -> bool {
-        false
     }
 }
 
 /// TUI display sink using SharedWriter for coordinated output
 pub struct TuiDisplaySink {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    verbose: bool,
 }
 
 impl TuiDisplaySink {
-    pub fn new<W: Write + Send + 'static>(writer: W, verbose: bool) -> Self {
+    pub fn new<W: Write + Send + 'static>(writer: W) -> Self {
         Self {
             writer: Arc::new(Mutex::new(Box::new(writer))),
-            verbose,
         }
     }
 }
@@ -216,8 +192,8 @@ impl DisplaySink for TuiDisplaySink {
                     let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
                     let remaining = lines.len() - limit;
                     format!(
-                        "{}\n    ...{} more lines",
-                        truncated.join("\n    "),
+                        "{}\\n    ...{} more lines",
+                        truncated.join("\\n    "),
                         remaining
                     )
                 } else {
@@ -225,7 +201,7 @@ impl DisplaySink for TuiDisplaySink {
                         .lines()
                         .map(|l| format!("    {}", l))
                         .collect::<Vec<_>>()
-                        .join("\n")
+                        .join("\\n")
                 };
 
                 if !output.trim().is_empty() {
@@ -248,27 +224,11 @@ impl DisplaySink for TuiDisplaySink {
             DisplayEvent::Error { message } => {
                 let _ = writeln!(writer, "{RED}❌ {}{RESET}", message);
             }
-            DisplayEvent::Debug { message } => {
-                if self.verbose {
-                    let _ = writeln!(writer, "  {DIM}{}{RESET}", message);
-                }
-            }
-            DisplayEvent::Newline => {
-                let _ = writeln!(writer);
-            }
         }
-    }
-
-    fn is_verbose(&self) -> bool {
-        self.verbose
     }
 }
 
-/// Create a display sink based on mode
-pub fn create_display_sink(silent: bool, verbose: bool) -> Arc<dyn DisplaySink> {
-    if silent {
-        Arc::new(SilentDisplaySink)
-    } else {
-        Arc::new(StdDisplaySink::new(verbose))
-    }
+/// Create a display sink for standard output
+pub fn create_display_sink() -> Arc<dyn DisplaySink> {
+    Arc::new(StdDisplaySink::new())
 }

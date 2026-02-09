@@ -106,13 +106,10 @@ async fn show_command_menu(ctx: &ReadlineAsyncContext) -> Result<Option<String>>
 }
 
 /// Run TUI mode with proper readline and output coordination
-#[allow(clippy::too_many_arguments)]
 pub async fn run_tui_mode(
     client: &Client,
     provider_info: &ProviderInfo,
     initial_prompt: Option<&str>,
-    silent: bool,
-    verbose: bool,
 ) -> Result<()> {
     // Create readline context with custom prompt
     let prompt = format!("{PURPLE}>{RESET} ");
@@ -126,8 +123,6 @@ pub async fn run_tui_mode(
             client,
             &provider_info.resolved_model,
             initial_prompt,
-            silent,
-            verbose,
         )
         .await;
     };
@@ -155,14 +150,15 @@ pub async fn run_tui_mode(
 
     // Process initial prompt if provided
     if let Some(prompt_text) = initial_prompt {
-        writeln!(shared_writer, "{DIM}Processing initial prompt...{RESET}\n")?;
+        // Show the user's prompt
+        writeln!(shared_writer, "{PURPLE}>{RESET} {}", prompt_text)?;
+        writeln!(shared_writer)?;
         process_prompt(
             &mut ctx,
             client,
             provider_info,
             prompt_text,
             &tool_registry,
-            verbose,
             &mut conversation_history,
             &mut output_store,
             &mut session_usage,
@@ -269,7 +265,6 @@ pub async fn run_tui_mode(
                     provider_info,
                     input,
                     &tool_registry,
-                    verbose,
                     &mut conversation_history,
                     &mut output_store,
                     &mut session_usage,
@@ -357,7 +352,6 @@ async fn process_prompt(
     provider_info: &ProviderInfo,
     prompt: &str,
     tool_registry: &ToolRegistry,
-    verbose: bool,
     conversation_history: &mut Vec<Message>,
     output_store: &mut OutputStore,
     session_usage: &mut SessionUsage,
@@ -367,7 +361,7 @@ async fn process_prompt(
 
     // Create TuiDisplaySink using the SharedWriter for coordinated output
     let display: Arc<dyn crate::display_sink::DisplaySink> = Arc::new(
-        TuiDisplaySink::new(ctx.clone_shared_writer(), verbose)
+        TuiDisplaySink::new(ctx.clone_shared_writer())
     );
 
     // Create cancellation channel

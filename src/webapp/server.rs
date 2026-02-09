@@ -19,7 +19,6 @@ pub struct AppState {
     pub provider_info: ProviderInfo,
     pub tool_registry: Arc<ToolRegistry>,
     pub tool_output_limit: usize,
-    pub verbose: bool,
     /// Active query cancellation sender
     pub cancel_tx: Arc<Mutex<Option<watch::Sender<bool>>>>,
     /// Session storage (SQLite or in-memory)
@@ -31,7 +30,6 @@ pub async fn run_server(
     webapp_config: WebappConfig,
     client: Client,
     provider_info: ProviderInfo,
-    verbose: bool,
 ) -> Result<()> {
     // Initialize storage (always use in-memory for v1.0.0)
     let storage = SessionStorage::new(false)?;
@@ -49,7 +47,6 @@ pub async fn run_server(
         provider_info,
         tool_registry: Arc::new(tool_registry),
         tool_output_limit: 50,
-        verbose,
         cancel_tx: Arc::new(Mutex::new(None)),
         storage,
     });

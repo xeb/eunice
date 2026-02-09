@@ -144,6 +144,24 @@ echo "Total: $total lines"
 cargo build --release && ls -lh target/release/eunice
 ```
 
+### Version String
+
+The version includes a 5-character git hash, embedded at compile time via `build.rs`:
+
+```
+$ eunice --version
+eunice 1.0.0 (f434f)
+```
+
+The hash is captured using:
+```rust
+// build.rs
+println!("cargo:rustc-env=GIT_HASH={}", git_hash);
+
+// main.rs
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
+```
+
 ## Development Workflow
 
 ### Adding a New Provider
@@ -188,6 +206,10 @@ cargo build --release && ls -lh target/release/eunice
   - Removed DMN mode
   - Removed browser/mcpz binaries
   - Single binary: eunice
+  - Native Gemini API streaming support
+  - Parallel function calling (grouped tool responses)
+  - Animated thinking spinner (purple/magenta)
+  - Git hash in version string (5 characters)
 
 ## Releasing
 

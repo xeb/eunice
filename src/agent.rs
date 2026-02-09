@@ -123,10 +123,6 @@ pub async fn run_agent_cancellable(
         content: prompt.to_string(),
     });
 
-    display.write_event(DisplayEvent::Debug {
-        message: format!("Sending prompt: {}", prompt),
-    });
-
     // Track if we've already tried compression this loop iteration
     let mut compaction_attempted = false;
 
@@ -143,10 +139,6 @@ pub async fn run_agent_cancellable(
         }
 
         let tools_option = if tools.is_empty() { None } else { Some(tools.as_slice()) };
-
-        display.write_event(DisplayEvent::Debug {
-            message: "Calling LLM...".to_string(),
-        });
 
         // Track whether we used streaming (to skip duplicate Response display)
         let mut used_streaming = false;
@@ -253,26 +245,9 @@ pub async fn run_agent_cancellable(
                 {
                     let config = compaction_config.as_ref().unwrap();
                     if config.enabled {
-                        display.write_event(DisplayEvent::Debug {
-                            message: "Context exhausted. Compacting conversation history...".to_string(),
-                        });
-
                         // Attempt compaction
                         match compact_context(client, model, conversation_history, config).await {
                             Ok(compacted) => {
-                                let method = if compacted.used_full_summarization {
-                                    "full summarization"
-                                } else {
-                                    "lightweight compaction"
-                                };
-                                display.write_event(DisplayEvent::Debug {
-                                    message: format!(
-                                        "Compacted to {:.0}% of original size using {}",
-                                        compacted.compaction_ratio * 100.0,
-                                        method
-                                    ),
-                                });
-
                                 // Replace conversation history with compacted version
                                 conversation_history.clear();
                                 conversation_history.extend(compacted.messages);
@@ -315,22 +290,12 @@ pub async fn run_agent_cancellable(
 
         // Check for tool calls
         let Some(tool_calls) = &choice.message.tool_calls else {
-            display.write_event(DisplayEvent::Debug {
-                message: "No tool calls, agent loop complete".to_string(),
-            });
             break;
         };
 
         if tool_calls.is_empty() {
-            display.write_event(DisplayEvent::Debug {
-                message: "Empty tool calls, agent loop complete".to_string(),
-            });
             break;
         }
-
-        display.write_event(DisplayEvent::Debug {
-            message: format!("Processing {} tool call(s)", tool_calls.len()),
-        });
 
         // Execute each tool call
         for tool_call in tool_calls {

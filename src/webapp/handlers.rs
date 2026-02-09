@@ -578,15 +578,9 @@ impl DisplaySink for WebappDisplaySink {
             DisplayEvent::Error { message } => {
                 SseEvent::Error { message }
             }
-            DisplayEvent::Debug { .. } => return,
-            DisplayEvent::Newline => return,
         };
 
         let _ = self.tx.try_send(sse_event);
-    }
-
-    fn is_verbose(&self) -> bool {
-        false
     }
 }
 

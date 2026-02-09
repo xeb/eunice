@@ -371,8 +371,6 @@ pub async fn interactive_mode(
     client: &Client,
     model: &str,
     initial_prompt: Option<&str>,
-    silent: bool,
-    verbose: bool,
 ) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
     let mut input_history: Vec<String> = Vec::new();
@@ -384,9 +382,7 @@ pub async fn interactive_mode(
     let tool_count = tool_registry.get_tools().len();
 
     // Show model info once at startup
-    if !silent {
-        display::print_model_info(model, client.provider());
-    }
+    display::print_model_info(model, client.provider());
 
     // Process initial prompt if provided
     if let Some(prompt) = initial_prompt {
@@ -403,8 +399,6 @@ pub async fn interactive_mode(
             model,
             prompt,
             &tool_registry,
-            silent,
-            verbose,
             &mut conversation_history,
             Some(cancel_rx),
             &mut output_store,
@@ -479,8 +473,6 @@ pub async fn interactive_mode(
             model,
             input,
             &tool_registry,
-            silent,
-            verbose,
             &mut conversation_history,
             Some(cancel_rx),
             &mut output_store,
@@ -522,15 +514,13 @@ async fn run_prompt(
     model: &str,
     prompt: &str,
     tool_registry: &ToolRegistry,
-    silent: bool,
-    verbose: bool,
     conversation_history: &mut Vec<Message>,
     cancel_rx: Option<watch::Receiver<bool>>,
     output_store: &mut OutputStore,
     session_usage: &mut SessionUsage,
 ) -> Result<bool> {
     // Create display sink for output
-    let display = create_display_sink(silent, verbose);
+    let display = create_display_sink();
 
     // Run agent
     let result = run_agent_cancellable(

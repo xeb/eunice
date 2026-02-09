@@ -27,7 +27,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LLMS_FULL_TXT: &str = include_str!("../llms-full.txt");
 
 #[derive(Parser)]
-#[command(name = "eunice", about = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support", version = VERSION)]
+#[command(name = "eunice", about = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 struct Args {
     /// AI model to use
     #[arg(long)]
@@ -75,14 +75,6 @@ struct Args {
     /// Update eunice to the latest version
     #[arg(long)]
     update: bool,
-
-    /// Enable verbose debug output
-    #[arg(long)]
-    verbose: bool,
-
-    /// Suppress non-essential output
-    #[arg(long)]
-    silent: bool,
 }
 
 /// Auto-discover prompt files in priority order
@@ -251,21 +243,13 @@ async fn main() -> Result<()> {
     if args.webapp && args.chat {
         return Err(anyhow!("--webapp and --chat cannot be used together"));
     }
-    if args.webapp && args.silent {
-        return Err(anyhow!("--webapp and --silent cannot be used together"));
-    }
-    if args.chat && args.silent {
-        return Err(anyhow!("--chat and --silent cannot be used together"));
-    }
     if args.chat && !atty::is(atty::Stream::Stdin) {
         return Err(anyhow!("--chat requires an interactive terminal (TTY)"));
     }
 
     // Ensure default skills are installed
     if let Err(e) = skills::ensure_default_skills() {
-        if args.verbose {
-            eprintln!("Warning: failed to install default skills: {}", e);
-        }
+        eprintln!("Warning: failed to install default skills: {}", e);
     }
 
     // Resolve prompt
@@ -284,15 +268,13 @@ async fn main() -> Result<()> {
     let provider_info = detect_provider(&model)?;
 
     if !supports_tools(&provider_info.provider, &model) {
-        if !args.silent {
-            eprintln!("Warning: Model '{}' may not support function calling.", model);
-            eprintln!("Running in text-only mode (no Bash/Read/Write/Skill tools available).");
-            eprintln!("Tip: For full tool support, try: llama3.1, qwen2.5, or mistral-nemo\n");
-        }
+        eprintln!("Warning: Model '{}' may not support function calling.", model);
+        eprintln!("Running in text-only mode (no Bash/Read/Write/Skill tools available).");
+        eprintln!("Tip: For full tool support, try: llama3.1, qwen2.5, or mistral-nemo\n");
     }
 
     // Create client
-    let client = Client::new(&provider_info, args.verbose)?;
+    let client = Client::new(&provider_info)?;
 
     // Webapp mode
     if args.webapp {
@@ -304,7 +286,6 @@ async fn main() -> Result<()> {
             webapp_config,
             client,
             provider_info,
-            args.verbose,
         ).await;
     }
 
@@ -314,8 +295,6 @@ async fn main() -> Result<()> {
             &client,
             &provider_info,
             prompt.as_deref(),
-            args.silent,
-            args.verbose,
         ).await;
     }
 
@@ -323,12 +302,10 @@ async fn main() -> Result<()> {
     let prompt = prompt.unwrap();
 
     // Show model info
-    if !args.silent {
-        display::print_model_info(&provider_info.resolved_model, &provider_info.provider);
-    }
+    display::print_model_info(&provider_info.resolved_model, &provider_info.provider);
 
     // Create display sink
-    let display = create_display_sink(args.silent, args.verbose);
+    let display = create_display_sink();
 
     // Create tool registry
     let tool_registry = tools::ToolRegistry::new();

@@ -32,13 +32,12 @@ pub struct Client {
     api_key: String,
     provider: Provider,
     use_native_gemini_api: bool,
-    verbose: bool,
     retry_config: RetryConfig,
 }
 
 impl Client {
     /// Create a new client for the given provider
-    pub fn new(provider_info: &ProviderInfo, verbose: bool) -> Result<Self> {
+    pub fn new(provider_info: &ProviderInfo) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -62,7 +61,6 @@ impl Client {
             api_key: provider_info.api_key.clone(),
             provider: provider_info.provider.clone(),
             use_native_gemini_api: provider_info.use_native_gemini_api,
-            verbose,
             retry_config: RetryConfig::default(),
         })
     }
@@ -234,20 +232,11 @@ impl Client {
                 let error_text = response.text().await.unwrap_or_default();
 
                 if attempt >= self.retry_config.max_retries {
-                    let debug_info = if self.verbose {
-                        format!(
-                            "\n\n--- Request Body (--verbose) ---\n{}",
-                            serde_json::to_string_pretty(&gemini_request).unwrap_or_else(|_| "Failed to serialize request".to_string())
-                        )
-                    } else {
-                        "\n\nTip: Use --verbose to see the full request body.".to_string()
-                    };
                     return Err(anyhow!(
-                        "Gemini API request failed with status {} after {} retries: {}{}",
+                        "Gemini API request failed with status {} after {} retries: {}",
                         status,
                         attempt,
-                        error_text,
-                        debug_info
+                        error_text
                     ));
                 }
 
@@ -277,19 +266,10 @@ impl Client {
 
             if !response.status().is_success() {
                 let error_text = response.text().await.unwrap_or_default();
-                let debug_info = if self.verbose {
-                    format!(
-                        "\n\n--- Request Body (--verbose) ---\n{}",
-                        serde_json::to_string_pretty(&gemini_request).unwrap_or_else(|_| "Failed to serialize request".to_string())
-                    )
-                } else {
-                    "\n\nTip: Use --verbose to see the full request body.".to_string()
-                };
                 return Err(anyhow!(
-                    "Gemini API request failed with status {}: {}{}",
+                    "Gemini API request failed with status {}: {}",
                     status,
-                    error_text,
-                    debug_info
+                    error_text
                 ));
             }
 

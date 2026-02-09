@@ -1,5 +1,5 @@
 use crate::models::Provider;
-use crate::provider::get_available_models;
+use crate::provider::{get_available_models, supports_tools};
 use colored::*;
 use std::env;
 
@@ -26,6 +26,7 @@ pub fn print_user_stopped() {
 /// Print available models in a list format
 pub fn print_model_list() {
     println!("\n{}\n", "Available Models".bold().underline());
+    println!("{}", "✓ = supports function calling (tools)\n".dimmed());
 
     let models = get_available_models();
 
@@ -34,11 +35,16 @@ pub fn print_model_list() {
         let status = if available { "available" } else { "unavailable" };
         let key_status = get_key_status(&provider, available);
 
+        // Check if all models in this provider support tools
+        let all_support_tools = matches!(provider, Provider::OpenAI | Provider::Gemini | Provider::Anthropic);
+        let tools_note = if all_support_tools { " ✓" } else { "" };
+
         println!(
-            "{} {} ({}) - {}",
+            "{} {} ({}){}  {}",
             icon,
             provider.to_string().bold(),
             status,
+            tools_note.green(),
             key_status.dimmed()
         );
 
@@ -46,7 +52,19 @@ pub fn print_model_list() {
             println!("   {}", "No models available".dimmed());
         } else {
             for model in &model_list {
-                println!("   {} {}", "-".dimmed(), model);
+                // For Ollama, check each model individually
+                let tool_indicator = if provider == Provider::Ollama {
+                    // Extract just the model name (before any colon for tags)
+                    let model_name = model.split(':').next().unwrap_or(model);
+                    if supports_tools(&provider, model_name) {
+                        " ✓".green().to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+                println!("   {} {}{}", "-".dimmed(), model, tool_indicator);
             }
         }
         println!();
