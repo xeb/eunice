@@ -75,6 +75,10 @@ struct Args {
     /// Update eunice to the latest version
     #[arg(long)]
     update: bool,
+
+    /// Force reinstall even if already up to date (use with --update)
+    #[arg(short, long)]
+    force: bool,
 }
 
 /// Auto-discover prompt files in priority order
@@ -143,27 +147,33 @@ fn is_newer_version(remote: &str, local: &str) -> bool {
 }
 
 /// Update eunice to the latest version from GitHub
-fn run_update() -> Result<()> {
+fn run_update(force: bool) -> Result<()> {
     use std::process::{Command, Stdio};
 
-    println!("Checking for updates...");
-    println!("Current version: {}", VERSION);
-
-    // Check remote version
-    if let Some(remote_version) = fetch_remote_version() {
-        println!("Remote version:  {}", remote_version);
+    if force {
+        println!("Force reinstall requested...");
+        println!("Current version: {}", VERSION);
         println!();
-
-        if !is_newer_version(&remote_version, VERSION) {
-            println!("Already up to date!");
-            return Ok(());
-        }
-
-        println!("Update available: {} -> {}", VERSION, remote_version);
     } else {
-        println!("Could not fetch remote version, proceeding with update...");
+        println!("Checking for updates...");
+        println!("Current version: {}", VERSION);
+
+        // Check remote version
+        if let Some(remote_version) = fetch_remote_version() {
+            println!("Remote version:  {}", remote_version);
+            println!();
+
+            if !is_newer_version(&remote_version, VERSION) {
+                println!("Already up to date!");
+                return Ok(());
+            }
+
+            println!("Update available: {} -> {}", VERSION, remote_version);
+        } else {
+            println!("Could not fetch remote version, proceeding with update...");
+        }
+        println!();
     }
-    println!();
 
     // Check if cargo is available
     let cargo_check = Command::new("cargo")
@@ -209,7 +219,7 @@ async fn main() -> Result<()> {
 
     // Handle --update
     if args.update {
-        return run_update();
+        return run_update(args.force);
     }
 
     // Handle --llms-txt
