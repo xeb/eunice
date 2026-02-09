@@ -1,4 +1,3 @@
-use crate::api_keys::ApiKeyRotator;
 use crate::compact::{extract_retry_delay, is_rate_limit_error};
 use crate::models::{
     ChatCompletionRequest, ChatCompletionResponse, GeminiContent, GeminiPart, GeminiRequest, GeminiTool,
@@ -35,22 +34,11 @@ pub struct Client {
     use_native_gemini_api: bool,
     verbose: bool,
     retry_config: RetryConfig,
-    key_rotator: Option<ApiKeyRotator>,
 }
 
 impl Client {
     /// Create a new client for the given provider
-    #[allow(dead_code)]
     pub fn new(provider_info: &ProviderInfo, verbose: bool) -> Result<Self> {
-        Self::new_with_keys(provider_info, verbose, None)
-    }
-
-    /// Create a new client with optional key rotation
-    pub fn new_with_keys(
-        provider_info: &ProviderInfo,
-        verbose: bool,
-        key_rotator: Option<ApiKeyRotator>,
-    ) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -76,26 +64,15 @@ impl Client {
             use_native_gemini_api: provider_info.use_native_gemini_api,
             verbose,
             retry_config: RetryConfig::default(),
-            key_rotator,
         })
-    }
-
-    /// Get the current API key (from rotator or static)
-    fn current_api_key(&self) -> &str {
-        if let Some(ref rotator) = self.key_rotator {
-            rotator.current_key()
-        } else {
-            &self.api_key
-        }
     }
 
     /// Add auth header to a request based on provider
     fn add_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let key = self.current_api_key();
         match self.provider {
-            Provider::Anthropic => req.header("x-api-key", key),
+            Provider::Anthropic => req.header("x-api-key", &self.api_key),
             Provider::Ollama => req, // No auth needed
-            _ => req.header(AUTHORIZATION, format!("Bearer {}", key)),
+            _ => req.header(AUTHORIZATION, format!("Bearer {}", self.api_key)),
         }
     }
 
@@ -151,16 +128,6 @@ impl Client {
             if Self::is_retryable_status(status) {
                 let error_text = response.text().await.unwrap_or_default();
 
-                // Try key rotation first on 429
-                if status == 429 {
-                    if let Some(ref rotator) = self.key_rotator {
-                        if let Some(_new_key) = rotator.rotate() {
-                            eprintln!("⏳ Rate limit (429): rotating API key...");
-                            continue; // Immediate retry with new key (doesn't count as attempt)
-                        }
-                    }
-                }
-
                 if attempt >= self.retry_config.max_retries {
                     return Err(anyhow!(
                         "API request failed with status {} after {} retries: {}",
@@ -191,11 +158,6 @@ impl Client {
                 );
                 tokio::time::sleep(delay).await;
                 attempt += 1;
-
-                // Reset key rotator on retry so we start fresh
-                if let Some(ref rotator) = self.key_rotator {
-                    rotator.reset();
-                }
                 continue;
             }
 
@@ -206,11 +168,6 @@ impl Client {
                     status,
                     error_text
                 ));
-            }
-
-            // Success - reset key rotator
-            if let Some(ref rotator) = self.key_rotator {
-                rotator.reset();
             }
 
             let response_body = response
@@ -261,12 +218,10 @@ impl Client {
 
         let mut attempt = 0u32;
         loop {
-            // Build request with x-goog-api-key header (per-request for key rotation)
-            let api_key = self.current_api_key().to_string();
             let response = self
                 .http
                 .post(&url)
-                .header("x-goog-api-key", &api_key)
+                .header("x-goog-api-key", &self.api_key)
                 .header(CONTENT_TYPE, "application/json")
                 .json(&gemini_request)
                 .send()
@@ -277,16 +232,6 @@ impl Client {
 
             if Self::is_retryable_status(status) {
                 let error_text = response.text().await.unwrap_or_default();
-
-                // Try key rotation first on 429
-                if status == 429 {
-                    if let Some(ref rotator) = self.key_rotator {
-                        if let Some(_new_key) = rotator.rotate() {
-                            eprintln!("⏳ Rate limit (429): rotating API key...");
-                            continue; // Immediate retry with new key
-                        }
-                    }
-                }
 
                 if attempt >= self.retry_config.max_retries {
                     let debug_info = if self.verbose {
@@ -327,10 +272,6 @@ impl Client {
                 );
                 tokio::time::sleep(delay).await;
                 attempt += 1;
-
-                if let Some(ref rotator) = self.key_rotator {
-                    rotator.reset();
-                }
                 continue;
             }
 
@@ -352,11 +293,6 @@ impl Client {
                 ));
             }
 
-            // Success - reset key rotator
-            if let Some(ref rotator) = self.key_rotator {
-                rotator.reset();
-            }
-
             // Get raw response text first so we can inspect it
             let response_text = response
                 .text()
@@ -372,7 +308,196 @@ impl Client {
         }
     }
 
+    /// Send a streaming chat completion request using native Gemini API
+    /// Calls the callback for each text chunk as it arrives
+    /// Returns the complete response with all function calls
+    pub async fn chat_completion_streaming<F>(
+        &self,
+        model: &str,
+        messages: serde_json::Value,
+        tools: Option<&[Tool]>,
+        mut on_chunk: F,
+    ) -> Result<ChatCompletionResponse>
+    where
+        F: FnMut(&str),
+    {
+        // Only streaming for native Gemini API
+        if !self.use_native_gemini_api {
+            // Fall back to non-streaming for other providers
+            return self.chat_completion(model, messages, tools).await;
+        }
+
+        use crate::models::GeminiFunctionDeclaration;
+        use futures::StreamExt;
+
+        let messages: Vec<Message> = serde_json::from_value(messages)?;
+        let contents = self.convert_messages_to_gemini(&messages)?;
+
+        // Convert tools to Gemini format
+        let gemini_tools = tools.map(|t| {
+            let declarations: Vec<GeminiFunctionDeclaration> = t
+                .iter()
+                .map(|tool| GeminiFunctionDeclaration {
+                    name: tool.function.name.clone(),
+                    description: tool.function.description.clone(),
+                    parameters: Self::clean_schema_for_gemini(&tool.function.parameters),
+                })
+                .collect();
+            vec![GeminiTool {
+                function_declarations: Some(declarations),
+                code_execution: None,
+            }]
+        });
+
+        let gemini_request = GeminiRequest {
+            contents,
+            tools: gemini_tools,
+        };
+
+        // Use streamGenerateContent endpoint
+        let url = format!("{}{}:streamGenerateContent?alt=sse", self.base_url, model);
+
+        let response = self
+            .http
+            .post(&url)
+            .header("x-goog-api-key", &self.api_key)
+            .header(CONTENT_TYPE, "application/json")
+            .json(&gemini_request)
+            .send()
+            .await
+            .context("Failed to send Gemini streaming request")?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "Gemini streaming request failed with status {}: {}",
+                status,
+                error_text
+            ));
+        }
+
+        // Collect all text and function calls from the stream
+        let mut all_text = String::new();
+        let mut all_tool_calls: Vec<crate::models::ToolCall> = Vec::new();
+        let mut usage_metadata: Option<crate::models::GeminiUsageMetadata> = None;
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.context("Failed to read stream chunk")?;
+            let chunk_str = String::from_utf8_lossy(&chunk);
+
+            buffer.push_str(&chunk_str);
+
+            // Process complete SSE events in the buffer
+            // SSE format: "data: {json}\n\n" or "data: {json}\r\n\r\n"
+            loop {
+                // Find "data: " prefix
+                let Some(data_start) = buffer.find("data: ") else {
+                    // No more data: prefixes, but check for raw JSON (error responses)
+                    if buffer.trim_start().starts_with('{') {
+                        // Try to parse as error or raw JSON - just clear the buffer
+                        if serde_json::from_str::<serde_json::Value>(buffer.trim()).is_ok() {
+                            buffer.clear();
+                        }
+                    }
+                    break;
+                };
+
+                let json_start = data_start + 6;
+
+                // Find the end of the JSON (either \n\n, \r\n\r\n, or another "data: ")
+                let json_end = buffer[json_start..]
+                    .find("\n\ndata: ")
+                    .or_else(|| buffer[json_start..].find("\r\n\r\n"))
+                    .or_else(|| buffer[json_start..].find("\n\n"))
+                    .map(|i| json_start + i);
+
+                let json_end = match json_end {
+                    Some(end) => end,
+                    None => {
+                        // No clear end found - try parsing what we have
+                        // This handles the case where we're at the end of the stream
+                        if buffer.ends_with("\n") || buffer.ends_with("\r\n") {
+                            buffer.len()
+                        } else {
+                            break; // Wait for more data
+                        }
+                    }
+                };
+
+                let json_str = buffer[json_start..json_end].trim();
+
+                // Parse the JSON chunk
+                if let Ok(chunk_response) = serde_json::from_str::<GeminiResponse>(json_str) {
+                    // Extract text and stream it
+                    if !chunk_response.candidates.is_empty() {
+                        let candidate = &chunk_response.candidates[0];
+                        for part in &candidate.content.parts {
+                            if let Some(ref text) = part.text {
+                                on_chunk(text);
+                                all_text.push_str(text);
+                            }
+                            // Collect function calls
+                            if let Some(ref fc) = part.function_call {
+                                let id = match &part.thought_signature {
+                                    Some(sig) => format!("{}::{}", fc.name, sig),
+                                    None => fc.name.clone(),
+                                };
+                                all_tool_calls.push(crate::models::ToolCall {
+                                    id,
+                                    call_type: "function".to_string(),
+                                    function: crate::models::FunctionCall {
+                                        name: fc.name.clone(),
+                                        arguments: fc.args.to_string(),
+                                    },
+                                });
+                            }
+                        }
+                    }
+                    // Capture usage metadata from last chunk
+                    if chunk_response.usage_metadata.is_some() {
+                        usage_metadata = chunk_response.usage_metadata;
+                    }
+                }
+
+                // Remove processed data from buffer
+                buffer = buffer[json_end..].trim_start_matches(['\n', '\r']).to_string();
+            }
+        }
+
+        // Build the final response
+        let tool_calls = if all_tool_calls.is_empty() {
+            None
+        } else {
+            Some(all_tool_calls)
+        };
+
+        Ok(ChatCompletionResponse {
+            choices: vec![crate::models::Choice {
+                message: crate::models::AssistantMessage {
+                    content: if all_text.is_empty() { None } else { Some(all_text) },
+                    tool_calls,
+                },
+            }],
+            usage: usage_metadata.map(|u| crate::models::UsageStats {
+                prompt_tokens: u.prompt_token_count,
+                completion_tokens: u.candidates_token_count,
+                total_tokens: u.total_token_count,
+                cached_tokens: u.cached_content_token_count,
+            }),
+        })
+    }
+
+    /// Check if streaming is supported for the current provider
+    pub fn supports_streaming(&self) -> bool {
+        self.use_native_gemini_api
+    }
+
     /// Send a chat completion request with an image
+    #[allow(dead_code)]
     pub async fn chat_completion_with_image(
         &self,
         model: &str,
@@ -414,11 +539,10 @@ impl Client {
             };
 
             let url = format!("{}{}:generateContent", self.base_url, model);
-            let api_key = self.current_api_key().to_string();
             let response = self
                 .http
                 .post(&url)
-                .header("x-goog-api-key", &api_key)
+                .header("x-goog-api-key", &self.api_key)
                 .json(&gemini_request)
                 .send()
                 .await
@@ -487,14 +611,29 @@ impl Client {
     }
 
     /// Convert OpenAI-style messages to Gemini contents format
+    /// Groups consecutive Tool messages into a single content block for parallel function calling
     fn convert_messages_to_gemini(&self, messages: &[Message]) -> Result<Vec<GeminiContent>> {
         use crate::models::{GeminiFunctionCallRequest, GeminiFunctionResponse};
 
         let mut contents = Vec::new();
+        let mut pending_tool_parts: Vec<GeminiPart> = Vec::new();
+
+        // Helper to flush pending tool parts
+        let flush_tool_parts = |contents: &mut Vec<GeminiContent>, parts: &mut Vec<GeminiPart>| {
+            if !parts.is_empty() {
+                contents.push(GeminiContent {
+                    parts: std::mem::take(parts),
+                    role: Some("user".to_string()),
+                });
+            }
+        };
 
         for message in messages {
             match message {
                 Message::User { content } => {
+                    // Flush any pending tool responses before user message
+                    flush_tool_parts(&mut contents, &mut pending_tool_parts);
+
                     contents.push(GeminiContent {
                         parts: vec![GeminiPart {
                             text: Some(content.clone()),
@@ -507,6 +646,9 @@ impl Client {
                     });
                 }
                 Message::Assistant { content, tool_calls } => {
+                    // Flush any pending tool responses before assistant message
+                    flush_tool_parts(&mut contents, &mut pending_tool_parts);
+
                     let mut parts = Vec::new();
 
                     // Add text content if present
@@ -578,22 +720,23 @@ impl Client {
                         None
                     };
 
-                    contents.push(GeminiContent {
-                        parts: vec![GeminiPart {
-                            text: None,
-                            inline_data: None,
-                            function_call: None,
-                            function_response: Some(GeminiFunctionResponse {
-                                name: function_name,
-                                response: response_value,
-                            }),
-                            thought_signature,
-                        }],
-                        role: Some("user".to_string()),
+                    // Group consecutive tool responses into pending_tool_parts
+                    pending_tool_parts.push(GeminiPart {
+                        text: None,
+                        inline_data: None,
+                        function_call: None,
+                        function_response: Some(GeminiFunctionResponse {
+                            name: function_name,
+                            response: response_value,
+                        }),
+                        thought_signature,
                     });
                 }
             }
         }
+
+        // Flush any remaining tool parts at the end
+        flush_tool_parts(&mut contents, &mut pending_tool_parts);
 
         Ok(contents)
     }

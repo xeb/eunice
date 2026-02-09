@@ -2,6 +2,38 @@ use crate::models::{OllamaTagsResponse, Provider, ProviderInfo};
 use anyhow::{anyhow, Result};
 use std::env;
 
+/// Check if a model supports function/tool calling
+pub fn supports_tools(provider: &Provider, model: &str) -> bool {
+    match provider {
+        // All modern OpenAI models support tools
+        Provider::OpenAI => true,
+
+        // All Gemini models we support have tool capability
+        Provider::Gemini => true,
+
+        // All Claude models support tools
+        Provider::Anthropic => true,
+
+        // Ollama: check by model family
+        Provider::Ollama => {
+            let model_lower = model.to_lowercase();
+
+            // Known tool-supporting model families
+            let tool_families = [
+                "llama3.1", "llama3.2", "llama3.3",
+                "qwen2", "qwen2.5", "qwen3",
+                "mistral-nemo", "mistral-large",
+                "command-r",
+                "granite",
+                "hermes",
+                "deepseek",
+            ];
+
+            tool_families.iter().any(|f| model_lower.contains(f))
+        }
+    }
+}
+
 /// Check if Ollama is available and optionally if a specific model exists
 pub fn check_ollama_available(model: Option<&str>) -> Result<Vec<String>> {
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());

@@ -1,13 +1,11 @@
 use crate::agent::{run_agent_cancellable, AgentStatus};
 use crate::client::Client;
-use crate::compact::CompactionConfig;
-use crate::config::DMN_INSTRUCTIONS;
 use crate::display;
 use crate::display_sink::create_display_sink;
-use crate::mcp::McpManager;
 use crate::models::Message;
-use crate::orchestrator::AgentOrchestrator;
 use crate::output_store::OutputStore;
+use crate::tools::ToolRegistry;
+use crate::usage::SessionUsage;
 use anyhow::Result;
 use colored::Colorize;
 use crossterm::cursor::{MoveTo, MoveToColumn, MoveUp, RestorePosition, SavePosition};
@@ -19,7 +17,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 /// Available slash commands for autocomplete
-const SLASH_COMMANDS: &[&str] = &["/help", "/mcp"];
+const SLASH_COMMANDS: &[&str] = &["/help", "/clear", "/status"];
 
 /// Get matching slash commands for autocomplete
 fn get_matching_commands(prefix: &str) -> Vec<&'static str> {
@@ -79,7 +77,8 @@ fn print_help() {
     println!("{}", "Interactive Mode Commands".bold().underline());
     println!();
     println!("  {}       Show this help message", "/help".cyan());
-    println!("  {}        List configured MCP servers", "/mcp".cyan());
+    println!("  {}      Clear conversation history", "/clear".cyan());
+    println!("  {}     Show current status", "/status".cyan());
     println!("  {}       Exit interactive mode", "exit".cyan());
     println!("  {}       Exit interactive mode", "quit".cyan());
     println!();
@@ -99,40 +98,21 @@ fn print_help() {
     println!();
 }
 
-/// Print MCP server information
-fn print_mcp_servers(mcp_manager: &Option<&mut McpManager>) {
+/// Print status information
+fn print_status(model: &str, tool_count: usize, history_len: usize, session_usage: &SessionUsage) {
     println!();
-    if let Some(manager) = mcp_manager {
-        let server_info = manager.get_server_info();
-        if server_info.is_empty() {
-            println!("{}", "No MCP servers configured.".dimmed());
-        } else {
-            println!("{}", "Configured MCP Servers".bold().underline());
-            println!();
-            for (name, tool_count, tools) in &server_info {
-                println!(
-                    "  {} {} ({} tools)",
-                    "●".green(),
-                    name.cyan().bold(),
-                    tool_count
-                );
-                for tool in tools {
-                    println!("    {} {}", "→".dimmed(), tool.dimmed());
-                }
-            }
-        }
-
-        // Show failed servers
-        let failed = manager.get_failed_servers();
-        if !failed.is_empty() {
-            println!();
-            println!("{}", "Failed Servers".red().bold());
-            for (name, error) in &failed {
-                println!("  {} {} - {}", "✗".red(), name.red(), error.dimmed());
-            }
-        }
-    } else {
-        println!("{}", "No MCP servers configured.".dimmed());
+    println!("{}", "Status".bold().underline());
+    println!();
+    println!("  {} {}", "Model:".cyan(), model);
+    println!("  {} {}", "Tools:".cyan(), tool_count);
+    println!("  {} {} messages", "History:".cyan(), history_len);
+    if session_usage.has_usage() {
+        println!("  {} {} input, {} output, {} cached",
+            "Tokens:".cyan(),
+            session_usage.total_input_tokens,
+            session_usage.total_output_tokens,
+            session_usage.total_cached_tokens
+        );
     }
     println!();
 }
@@ -391,57 +371,21 @@ pub async fn interactive_mode(
     client: &Client,
     model: &str,
     initial_prompt: Option<&str>,
-    tool_output_limit: usize,
-    mut mcp_manager: Option<&mut McpManager>,
-    orchestrator: Option<&AgentOrchestrator>,
-    agent_name: Option<&str>,
     silent: bool,
     verbose: bool,
-    dmn: bool,
-    enable_image_tool: bool,
-    enable_search_tool: bool,
 ) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
-    let mut dmn_injected = false;
     let mut input_history: Vec<String> = Vec::new();
     let mut output_store = OutputStore::new();
+    let mut session_usage = SessionUsage::new();
 
-    // Wait for MCP servers to be ready before showing prompt
-    if let Some(ref mut manager) = mcp_manager {
-        if manager.has_pending_servers() {
-            let names = manager.pending_server_names();
-            display::debug(&format!("Waiting for MCP server(s) to initialize: {}", names.join(", ")), verbose);
-            if !silent {
-                println!("Starting MCP servers: {}...", names.join(", "));
-            }
-            manager.await_all_servers().await;
-        } else {
-            manager.await_all_servers().await;
-        }
-    }
+    // Create tool registry
+    let tool_registry = ToolRegistry::new();
+    let tool_count = tool_registry.get_tools().len();
 
-    // Show model/MCP info once at startup
+    // Show model info once at startup
     if !silent {
         display::print_model_info(model, client.provider());
-
-        if let Some(ref manager) = mcp_manager {
-            let server_info = manager.get_server_info();
-            display::print_mcp_info(&server_info);
-        }
-
-        if dmn {
-            display::print_dmn_mode();
-        }
-
-        // Detect research mode: search enabled + multi-agent orchestration (not DMN)
-        let research = !dmn && enable_search_tool && orchestrator.as_ref().map_or(false, |o| o.has_agents());
-        if research {
-            display::print_research_mode();
-        }
-
-        if let Some(name) = agent_name {
-            eprintln!("🤖 Multi-Agent Mode: starting as '{}'", name);
-        }
     }
 
     // Process initial prompt if provided
@@ -458,19 +402,13 @@ pub async fn interactive_mode(
             client,
             model,
             prompt,
-            tool_output_limit,
-            &mut mcp_manager,
-            orchestrator,
-            agent_name,
+            &tool_registry,
             silent,
             verbose,
-            dmn,
-            enable_image_tool,
-            enable_search_tool,
-            &mut dmn_injected,
             &mut conversation_history,
             Some(cancel_rx),
             &mut output_store,
+            &mut session_usage,
         )
         .await;
 
@@ -510,8 +448,14 @@ pub async fn interactive_mode(
             continue;
         }
 
-        if input.eq_ignore_ascii_case("/mcp") {
-            print_mcp_servers(&mcp_manager);
+        if input.eq_ignore_ascii_case("/clear") {
+            conversation_history.clear();
+            println!("\n{}\n", "Conversation history cleared.".green());
+            continue;
+        }
+
+        if input.eq_ignore_ascii_case("/status") {
+            print_status(model, tool_count, conversation_history.len(), &session_usage);
             continue;
         }
 
@@ -533,19 +477,13 @@ pub async fn interactive_mode(
             client,
             model,
             input,
-            tool_output_limit,
-            &mut mcp_manager,
-            orchestrator,
-            agent_name,
+            &tool_registry,
             silent,
             verbose,
-            dmn,
-            enable_image_tool,
-            enable_search_tool,
-            &mut dmn_injected,
             &mut conversation_history,
             Some(cancel_rx),
             &mut output_store,
+            &mut session_usage,
         )
         .await;
 
@@ -561,102 +499,60 @@ pub async fn interactive_mode(
         }
     }
 
+    // Print session usage summary
+    if session_usage.has_usage() {
+        println!();
+        println!("{}", "Session Summary".dimmed());
+        println!("  {} {} input, {} output, {} cached",
+            "Tokens:".dimmed(),
+            session_usage.total_input_tokens,
+            session_usage.total_output_tokens,
+            session_usage.total_cached_tokens
+        );
+    }
+
     Ok(())
 }
 
-/// Run a single prompt - either through orchestrator (multi-agent) or directly
+/// Run a single prompt through the agent
 /// Returns true if the prompt was cancelled by the user
 async fn run_prompt(
     client: &Client,
     model: &str,
     prompt: &str,
-    tool_output_limit: usize,
-    mcp_manager: &mut Option<&mut McpManager>,
-    orchestrator: Option<&AgentOrchestrator>,
-    agent_name: Option<&str>,
+    tool_registry: &ToolRegistry,
     silent: bool,
     verbose: bool,
-    dmn: bool,
-    enable_image_tool: bool,
-    enable_search_tool: bool,
-    dmn_injected: &mut bool,
     conversation_history: &mut Vec<Message>,
     cancel_rx: Option<watch::Receiver<bool>>,
     output_store: &mut OutputStore,
+    session_usage: &mut SessionUsage,
 ) -> Result<bool> {
     // Create display sink for output
     let display = create_display_sink(silent, verbose);
 
-    // Use orchestrator if available (multi-agent mode)
-    let use_multi_agent = orchestrator.is_some() && agent_name.is_some() && mcp_manager.is_some();
+    // Run agent
+    let result = run_agent_cancellable(
+        client,
+        model,
+        prompt,
+        50, // tool_output_limit
+        tool_registry,
+        display,
+        conversation_history,
+        cancel_rx,
+        None, // compaction_config
+        Some(output_store),
+    )
+    .await?;
 
-    if use_multi_agent {
-        let orch = orchestrator.unwrap();
-        let name = agent_name.unwrap();
-        let manager = mcp_manager.as_mut().unwrap();
-        let result = orch
-            .run_agent(
-                client,
-                model,
-                name,
-                prompt,
-                None,
-                manager,
-                tool_output_limit,
-                display,
-                0,
-                None, // No caller for root agent
-                cancel_rx,
-            )
-            .await?;
-        Ok(result.status == AgentStatus::Cancelled)
-    } else {
-        // Single-agent mode (original behavior)
-        let final_prompt = inject_dmn_instructions_if_needed(prompt, dmn_injected, dmn);
+    // Accumulate usage
+    session_usage.total_input_tokens += result.usage.total_input_tokens;
+    session_usage.total_output_tokens += result.usage.total_output_tokens;
+    session_usage.total_cached_tokens += result.usage.total_cached_tokens;
+    session_usage.api_calls += result.usage.api_calls;
 
-        // Enable compaction in DMN mode
-        let compaction_config = if dmn {
-            Some(CompactionConfig::default())
-        } else {
-            None
-        };
-
-        // Note: Interactive mode doesn't yet support --shell/--filesystem flags for builtin tools
-        let result = run_agent_cancellable(
-            client,
-            model,
-            &final_prompt,
-            tool_output_limit,
-            mcp_manager.as_deref_mut(),
-            None, // builtin_registry - interactive mode uses MCP servers
-            display,
-            conversation_history,
-            enable_image_tool,
-            enable_search_tool,
-            cancel_rx,
-            compaction_config,
-            Some(output_store),
-        )
-        .await?;
-        Ok(result.status == AgentStatus::Cancelled)
-    }
-}
-
-/// Inject DMN instructions if in DMN mode and not already injected
-fn inject_dmn_instructions_if_needed(
-    prompt: &str,
-    dmn_injected: &mut bool,
-    dmn: bool,
-) -> String {
-    if dmn && !*dmn_injected {
-        *dmn_injected = true;
-        format!(
-            "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
-            DMN_INSTRUCTIONS, prompt
-        )
-    } else {
-        prompt.to_string()
-    }
+    Ok(result.status == AgentStatus::Cancelled)
 }
 
 /// Monitor for escape key press and signal cancellation

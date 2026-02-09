@@ -1,8 +1,6 @@
 use crate::client::Client;
-use crate::config::has_mcpz;
-use crate::mcp::McpManager;
 use crate::models::{ProviderInfo, WebappConfig};
-use crate::orchestrator::AgentOrchestrator;
+use crate::tools::ToolRegistry;
 use anyhow::Result;
 use axum::{
     routing::{get, post},
@@ -19,18 +17,12 @@ use super::persistence::SessionStorage;
 pub struct AppState {
     pub client: Arc<Client>,
     pub provider_info: ProviderInfo,
-    pub mcp_manager: Arc<Mutex<Option<McpManager>>>,
-    pub orchestrator: Option<Arc<AgentOrchestrator>>,
-    pub agent_name: Option<String>,
+    pub tool_registry: Arc<ToolRegistry>,
     pub tool_output_limit: usize,
     pub verbose: bool,
-    pub dmn: bool,
-    pub research: bool,
-    pub enable_image_tool: bool,
-    pub enable_search_tool: bool,
     /// Active query cancellation sender
     pub cancel_tx: Arc<Mutex<Option<watch::Sender<bool>>>>,
-    /// Session storage (SQLite if mcpz available, otherwise in-memory)
+    /// Session storage (SQLite or in-memory)
     pub storage: SessionStorage,
 }
 
@@ -39,38 +31,25 @@ pub async fn run_server(
     webapp_config: WebappConfig,
     client: Client,
     provider_info: ProviderInfo,
-    mcp_manager: Option<McpManager>,
-    orchestrator: Option<AgentOrchestrator>,
-    agent_name: Option<String>,
-    tool_output_limit: usize,
     verbose: bool,
-    dmn: bool,
-    research: bool,
-    enable_image_tool: bool,
-    enable_search_tool: bool,
 ) -> Result<()> {
-    // Initialize storage based on mcpz availability
-    let mcpz_available = has_mcpz();
-    let storage = SessionStorage::new(mcpz_available)?;
+    // Initialize storage (always use in-memory for v1.0.0)
+    let storage = SessionStorage::new(false)?;
 
-    if storage.is_persistent() {
-        println!("Session persistence enabled (SQLite)");
-    } else {
-        println!("Session persistence disabled (in-memory only)");
-    }
+    println!("Session persistence: in-memory");
+
+    // Create tool registry
+    let tool_registry = ToolRegistry::new();
+    let tool_count = tool_registry.get_tools().len();
+
+    println!("Tools available: {}", tool_count);
 
     let state = Arc::new(AppState {
         client: Arc::new(client),
         provider_info,
-        mcp_manager: Arc::new(Mutex::new(mcp_manager)),
-        orchestrator: orchestrator.map(Arc::new),
-        agent_name,
-        tool_output_limit,
+        tool_registry: Arc::new(tool_registry),
+        tool_output_limit: 50,
         verbose,
-        dmn,
-        research,
-        enable_image_tool,
-        enable_search_tool,
         cancel_tx: Arc::new(Mutex::new(None)),
         storage,
     });

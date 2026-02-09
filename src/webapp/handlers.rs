@@ -1,8 +1,5 @@
 use super::persistence::SessionMetadata;
 use super::server::AppState;
-use crate::agent;
-use crate::compact::{compact_context, extract_retry_delay, is_context_exhausted_error, is_rate_limit_error, CompactionConfig};
-use crate::config::DMN_INSTRUCTIONS;
 use crate::models::Message;
 use crate::usage::SessionUsage;
 use axum::{
@@ -65,13 +62,10 @@ pub struct StatusResponse {
     version: String,
     model: String,
     provider: String,
-    mode: String,
-    agent: Option<String>,
-    mcp_servers: Vec<String>,
     tools_count: usize,
     /// Authenticated user from proxy headers (if present)
     authenticated_user: Option<String>,
-    /// Whether session persistence is enabled (SQLite)
+    /// Whether session persistence is enabled
     persistence_enabled: bool,
 }
 
@@ -80,31 +74,7 @@ pub async fn status(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> Json<StatusResponse> {
-    let mcp_manager = state.mcp_manager.lock().await;
-    let (servers, mut tools_count) = if let Some(ref manager) = *mcp_manager {
-        let info = manager.get_server_info();
-        let servers: Vec<String> = info.iter().map(|(name, _, _)| name.clone()).collect();
-        let tools: usize = info.iter().map(|(_, count, _)| count).sum();
-        (servers, tools)
-    } else {
-        (vec![], 0)
-    };
-
-    // Add built-in tools to count
-    if state.enable_image_tool {
-        tools_count += 1;
-    }
-    if state.enable_search_tool {
-        tools_count += 1;
-    }
-
-    let mode = if state.research {
-        "research"
-    } else if state.dmn {
-        "dmn"
-    } else {
-        "standard"
-    };
+    let tools_count = state.tool_registry.get_tools().len();
 
     // Extract authenticated user from proxy headers
     let authenticated_user = extract_user_identity(&headers);
@@ -113,127 +83,38 @@ pub async fn status(
         version: env!("CARGO_PKG_VERSION").to_string(),
         model: state.provider_info.resolved_model.clone(),
         provider: state.provider_info.provider.to_string(),
-        mode: mode.to_string(),
-        agent: state.agent_name.clone(),
-        mcp_servers: servers,
         tools_count,
         authenticated_user,
         persistence_enabled: state.storage.is_persistent(),
     })
 }
 
-/// Agent info for config response
-#[derive(Serialize)]
-pub struct AgentInfo {
-    name: String,
-    tools: Vec<String>,
-    can_invoke: Vec<String>,
-}
-
-/// Server info for config response
-#[derive(Serialize)]
-pub struct ServerInfo {
-    name: String,
-    transport: String,
-    connection: String,
-    tool_count: usize,
-}
-
 /// Tool info for config response
 #[derive(Serialize)]
 pub struct ToolInfo {
     name: String,
-    server: String,
     description: Option<String>,
 }
 
 /// Config response
 #[derive(Serialize)]
 pub struct ConfigResponse {
-    agents: Vec<AgentInfo>,
-    servers: Vec<ServerInfo>,
     tools: Vec<ToolInfo>,
 }
 
 /// Config endpoint handler - returns detailed configuration
 pub async fn config(State(state): State<Arc<AppState>>) -> Json<ConfigResponse> {
-    let mcp_manager = state.mcp_manager.lock().await;
+    let tools: Vec<ToolInfo> = state
+        .tool_registry
+        .get_tools()
+        .iter()
+        .map(|tool| ToolInfo {
+            name: tool.function.name.clone(),
+            description: Some(tool.function.description.clone()),
+        })
+        .collect();
 
-    // Get agents from orchestrator
-    let agents: Vec<AgentInfo> = if let Some(ref orch) = state.orchestrator {
-        orch.agent_names()
-            .iter()
-            .filter_map(|name| {
-                orch.get_agent(name).map(|agent| AgentInfo {
-                    name: name.clone(),
-                    tools: agent.tools.clone(),
-                    can_invoke: agent.can_invoke.clone(),
-                })
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-
-    // Get servers and tools from MCP manager
-    let (servers, mut tools) = if let Some(ref manager) = *mcp_manager {
-        let server_info = manager.get_server_info();
-        let servers: Vec<ServerInfo> = server_info
-            .iter()
-            .map(|(name, count, _)| ServerInfo {
-                name: name.clone(),
-                transport: "stdio".to_string(), // Could be enhanced to detect HTTP
-                connection: "connected".to_string(),
-                tool_count: *count,
-            })
-            .collect();
-
-        let tools: Vec<ToolInfo> = manager
-            .get_tools()
-            .iter()
-            .map(|tool| {
-                // Extract server name from tool prefix (e.g., "shell_execute" -> "shell")
-                let server = tool
-                    .function
-                    .name
-                    .split('_')
-                    .next()
-                    .unwrap_or("unknown")
-                    .to_string();
-                ToolInfo {
-                    name: tool.function.name.clone(),
-                    server,
-                    description: Some(tool.function.description.clone()),
-                }
-            })
-            .collect();
-
-        (servers, tools)
-    } else {
-        (vec![], vec![])
-    };
-
-    // Add built-in tools if enabled
-    if state.enable_image_tool {
-        tools.push(ToolInfo {
-            name: agent::INTERPRET_IMAGE_TOOL_NAME.to_string(),
-            server: "built-in".to_string(),
-            description: Some("Analyze images and PDFs using multimodal AI".to_string()),
-        });
-    }
-    if state.enable_search_tool {
-        tools.push(ToolInfo {
-            name: agent::SEARCH_QUERY_TOOL_NAME.to_string(),
-            server: "built-in".to_string(),
-            description: Some("Web search using Gemini with Google Search grounding".to_string()),
-        });
-    }
-
-    Json(ConfigResponse {
-        agents,
-        servers,
-        tools,
-    })
+    Json(ConfigResponse { tools })
 }
 
 /// Query request
@@ -391,16 +272,12 @@ pub async fn get_session_history(
     } else {
         // Validate session ownership for authenticated users
         if let Some(ref user) = authenticated_user {
-            // Check if the session belongs to this user
             if let Ok(Some(session)) = state.storage.get_session(&request.session_id).await {
-                // If session has a user_id, it must match the authenticated user
                 if let Some(ref session_user) = session.user_id {
                     if session_user != user {
-                        // Session belongs to a different user - deny access
                         return Json(SessionHistoryResponse { exists: false, messages: vec![] });
                     }
                 }
-                // Anonymous sessions (user_id = None) can be accessed by anyone
             }
         }
         request.session_id.clone()
@@ -468,12 +345,10 @@ pub struct ClearSessionResponse {
 }
 
 /// Clear session history (for authenticated users to start fresh)
-/// Creates a new session and returns its ID and name
 pub async fn clear_session(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
 ) -> Json<ClearSessionResponse> {
-    // Check for authenticated user
     if let Some(user) = extract_user_identity(&headers) {
         match state.storage.clear_user_session(&user).await {
             Ok(new_session) => {
@@ -505,8 +380,25 @@ pub struct SessionEventsRequest {
     session_id: String,
 }
 
+/// SSE event types
+#[derive(Serialize, Clone, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SseEvent {
+    Thinking { elapsed_seconds: u64 },
+    ToolCall { name: String, arguments: String },
+    ToolResult { name: String, result: String, truncated: bool },
+    Response { content: String },
+    /// Streaming chunk (partial response)
+    StreamChunk { content: String },
+    Error { message: String },
+    /// Session ID confirmation (sent at start of query)
+    SessionId { session_id: String },
+    /// Token usage summary for this query
+    Usage { input_tokens: u64, output_tokens: u64, cached_tokens: u64, estimated_cost: f64 },
+    Done,
+}
+
 /// Session events endpoint - replay stored events and subscribe to live events if query is running
-/// This allows users to reconnect and see events that happened while they were disconnected
 pub async fn session_events(
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
@@ -538,7 +430,6 @@ pub async fn session_events(
     };
 
     // Get stored events and check if query is running from storage
-    // If access denied, return empty events
     let (stored_events, broadcast_rx, query_running) = if access_denied {
         (Vec::new(), None, false)
     } else if let Some((events, event_tx, running)) =
@@ -567,7 +458,7 @@ pub async fn session_events(
                 let mut stream = BroadcastStream::new(broadcast_rx);
                 while let Some(Ok(event)) = stream.next().await {
                     if tx_clone.send(event).await.is_err() {
-                        break;  // Receiver dropped
+                        break;
                     }
                 }
                 log(&format!("[{}] Live event subscription ended", session_short_owned));
@@ -578,13 +469,11 @@ pub async fn session_events(
     // First send replay events, then live events
     let tx_replay = tx.clone();
     tokio::spawn(async move {
-        // Send all stored events first
         for event in stored_events {
             if tx_replay.send(event).await.is_err() {
-                return;  // Receiver dropped
+                return;
             }
         }
-        // If no live events, send Done to close the stream
         if !has_live {
             let _ = tx_replay.send(SseEvent::Done).await;
         }
@@ -597,12 +486,10 @@ pub async fn session_events(
             SseEvent::Thinking { .. } => "thinking",
             SseEvent::ToolCall { .. } => "tool_call",
             SseEvent::ToolResult { .. } => "tool_result",
-            SseEvent::AgentInvoke { .. } => "agent_invoke",
-            SseEvent::AgentResult { .. } => "agent_result",
             SseEvent::Response { .. } => "response",
+            SseEvent::StreamChunk { .. } => "stream_chunk",
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
-            SseEvent::Compacted { .. } => "compacted",
             SseEvent::Usage { .. } => "usage",
             SseEvent::Done => "done",
         };
@@ -618,32 +505,7 @@ pub async fn session_events(
     )
 }
 
-/// SSE event types
-#[derive(Serialize, Clone, Debug)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SseEvent {
-    Thinking { elapsed_seconds: u64 },
-    ToolCall { name: String, arguments: String },
-    ToolResult { name: String, result: String, truncated: bool },
-    /// Agent being invoked (multi-agent mode)
-    AgentInvoke { agent_name: String, task: String },
-    /// Agent invocation completed (multi-agent mode)
-    AgentResult { agent_name: String, result: String, truncated: bool },
-    Response { content: String },
-    Error { message: String },
-    /// Session ID confirmation (sent at start of query)
-    SessionId { session_id: String },
-    /// Context was compacted due to size limits
-    Compacted { message: String },
-    /// Token usage summary for this query
-    Usage { input_tokens: u64, output_tokens: u64, cached_tokens: u64, estimated_cost: f64 },
-    Done,
-}
-
 /// Helper to send events to multiple destinations
-/// - mpsc channel (current SSE stream subscriber)
-/// - session store (for replay on reconnect)
-/// - broadcast channel (for re-subscribers while query is running)
 struct EventSender {
     tx: mpsc::Sender<SseEvent>,
     state: Arc<AppState>,
@@ -656,14 +518,13 @@ impl EventSender {
         // Store in session for replay
         self.state.storage.push_runtime_event(&self.session_id, event.clone()).await;
 
-        // Broadcast to any re-subscribers (ignore errors - no subscribers is fine)
+        // Broadcast to any re-subscribers
         let _ = self.broadcast_tx.send(event.clone());
 
-        // Send to current SSE stream (ignore errors - client may have disconnected)
+        // Send to current SSE stream
         let _ = self.tx.send(event).await;
     }
 
-    /// Clone the mpsc sender for use in spawned tasks (e.g., thinking timer)
     fn tx_clone(&self) -> mpsc::Sender<SseEvent> {
         self.tx.clone()
     }
@@ -672,13 +533,15 @@ impl EventSender {
 use crate::display_sink::{DisplayEvent, DisplaySink};
 
 /// Display sink for webapp that converts DisplayEvents to SseEvents
+#[allow(dead_code)]
 pub struct WebappDisplaySink {
     tx: mpsc::Sender<SseEvent>,
-    #[allow(dead_code)]  // May be used for future truncation
+    #[allow(dead_code)]
     tool_output_limit: usize,
 }
 
 impl WebappDisplaySink {
+    #[allow(dead_code)]
     pub fn new(tx: mpsc::Sender<SseEvent>, tool_output_limit: usize) -> Self {
         Self { tx, tool_output_limit }
     }
@@ -687,13 +550,8 @@ impl WebappDisplaySink {
 impl DisplaySink for WebappDisplaySink {
     fn write_event(&self, event: DisplayEvent) {
         let sse_event = match event {
-            DisplayEvent::ThinkingStart => {
-                // Thinking is handled by a separate timer in the webapp
-                return;
-            }
-            DisplayEvent::ThinkingStop => {
-                return;
-            }
+            DisplayEvent::ThinkingStart => return,
+            DisplayEvent::ThinkingStop => return,
             DisplayEvent::ToolCall { name, arguments } => {
                 SseEvent::ToolCall { name, arguments }
             }
@@ -705,23 +563,7 @@ impl DisplaySink for WebappDisplaySink {
                     (result, false)
                 };
                 SseEvent::ToolResult {
-                    name: String::new(),  // Name is sent with ToolCall
-                    result: display_result,
-                    truncated,
-                }
-            }
-            DisplayEvent::AgentInvoke { agent_name, task } => {
-                SseEvent::AgentInvoke { agent_name, task }
-            }
-            DisplayEvent::AgentResult { agent_name, result, limit } => {
-                let (display_result, truncated) = if result.lines().count() > limit && limit > 0 {
-                    let lines: Vec<&str> = result.lines().take(limit).collect();
-                    (lines.join("\n"), true)
-                } else {
-                    (result, false)
-                };
-                SseEvent::AgentResult {
-                    agent_name,
+                    name: String::new(),
                     result: display_result,
                     truncated,
                 }
@@ -729,19 +571,17 @@ impl DisplaySink for WebappDisplaySink {
             DisplayEvent::Response { content } => {
                 SseEvent::Response { content }
             }
+            DisplayEvent::StreamChunk { content } => {
+                SseEvent::StreamChunk { content }
+            }
+            DisplayEvent::StreamEnd => return, // No separate event needed
             DisplayEvent::Error { message } => {
                 SseEvent::Error { message }
             }
-            DisplayEvent::Debug { .. } => {
-                // Don't send debug events to webapp
-                return;
-            }
-            DisplayEvent::Newline => {
-                return;
-            }
+            DisplayEvent::Debug { .. } => return,
+            DisplayEvent::Newline => return,
         };
 
-        // Use blocking send since write_event is not async
         let _ = self.tx.try_send(sse_event);
     }
 
@@ -782,17 +622,15 @@ pub async fn query(
     let user_info = authenticated_user.as_deref().unwrap_or("anonymous");
     log(&format!("Query from {}: \"{}\"", user_info, prompt_preview));
 
-    // Get or create session using storage layer
-    // IMPORTANT: Always respect request.session_id if provided - user chose that session!
+    // Get or create session
     let (session_id, session_name) = match request.session_id {
         Some(ref id) if !id.is_empty() => {
-            // User specified a session - validate ownership before using
+            // User specified a session - validate ownership
             if let Some(ref user) = authenticated_user {
-                // Check if the session belongs to this user
                 if let Ok(Some(session)) = state.storage.get_session(id).await {
                     if let Some(ref session_user) = session.user_id {
                         if session_user != user {
-                            // Session belongs to a different user - create new session for this user
+                            // Session belongs to a different user - create new session
                             log(&format!("Session {} belongs to different user, creating new session", &id[..8.min(id.len())]));
                             match state.storage.create_session(Some(user)).await {
                                 Ok(new_session) => {
@@ -802,11 +640,9 @@ pub async fn query(
                                 Err(_) => (uuid::Uuid::new_v4().to_string(), "unknown".to_string()),
                             }
                         } else {
-                            // Session belongs to this user - use it
                             (session.id, session.name)
                         }
                     } else {
-                        // Anonymous session - ensure and use it
                         let user_ref = authenticated_user.as_deref();
                         match state.storage.ensure_session(id, user_ref).await {
                             Ok(session) => (session.id, session.name),
@@ -814,7 +650,6 @@ pub async fn query(
                         }
                     }
                 } else {
-                    // Session doesn't exist - create it
                     let user_ref = authenticated_user.as_deref();
                     match state.storage.ensure_session(id, user_ref).await {
                         Ok(session) => (session.id, session.name),
@@ -822,7 +657,6 @@ pub async fn query(
                     }
                 }
             } else {
-                // Anonymous user - just use the session
                 let user_ref = authenticated_user.as_deref();
                 match state.storage.ensure_session(id, user_ref).await {
                     Ok(session) => (session.id, session.name),
@@ -834,14 +668,11 @@ pub async fn query(
             }
         }
         _ => {
-            // No session specified - get or create one
             if let Some(ref user) = authenticated_user {
-                // Get or create session for authenticated user
                 match state.storage.get_or_create_user_session(user).await {
                     Ok(session) => (session.id, session.name),
                     Err(e) => {
                         log(&format!("Failed to get/create session for {}: {}", user, e));
-                        // Create fallback session
                         match state.storage.create_session(Some(user)).await {
                             Ok(s) => (s.id, s.name),
                             Err(_) => (uuid::Uuid::new_v4().to_string(), "unknown".to_string()),
@@ -849,7 +680,6 @@ pub async fn query(
                     }
                 }
             } else {
-                // Create new anonymous session
                 match state.storage.create_session(None).await {
                     Ok(session) => (session.id, session.name),
                     Err(e) => {
@@ -861,7 +691,6 @@ pub async fn query(
         }
     };
 
-    // Log session info
     log(&format!(
         "Session: {} ({}) for {}",
         &session_id[..8.min(session_id.len())],
@@ -869,10 +698,10 @@ pub async fn query(
         user_info
     ));
 
-    // Create broadcast channel for this query (for re-subscribers)
+    // Create broadcast channel for this query
     let (broadcast_tx, _) = broadcast::channel::<SseEvent>(100);
 
-    // Set up session for this query: clear old events, store broadcast sender, mark as running
+    // Set up session for this query
     state.storage.clear_runtime_events(&session_id).await;
     state.storage.set_runtime_state(
         &session_id,
@@ -881,7 +710,7 @@ pub async fn query(
         true,
     ).await;
 
-    // Create event sender that stores events and broadcasts to re-subscribers
+    // Create event sender
     let event_sender = EventSender {
         tx,
         state: state.clone(),
@@ -901,12 +730,10 @@ pub async fn query(
             SseEvent::Thinking { .. } => "thinking",
             SseEvent::ToolCall { .. } => "tool_call",
             SseEvent::ToolResult { .. } => "tool_result",
-            SseEvent::AgentInvoke { .. } => "agent_invoke",
-            SseEvent::AgentResult { .. } => "agent_result",
             SseEvent::Response { .. } => "response",
+            SseEvent::StreamChunk { .. } => "stream_chunk",
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
-            SseEvent::Compacted { .. } => "compacted",
             SseEvent::Usage { .. } => "usage",
             SseEvent::Done => "done",
         };
@@ -951,119 +778,28 @@ async fn run_agent_with_events(
         session_id: session_id.clone(),
     }).await;
 
-    // Proactive compaction thresholds
-    const COMPACTION_THRESHOLD: usize = 100;  // Compact when context exceeds this many messages
-    const RECENT_MESSAGES_TO_KEEP: usize = 30; // Keep this many recent messages after compaction
-
-    // Load existing history from storage (uses compaction if available)
-    let (mut incoming_history, total_messages, needs_compaction) = state
+    // Load existing history
+    let incoming_history = state
         .storage
-        .get_history_for_llm(&session_id, RECENT_MESSAGES_TO_KEEP, COMPACTION_THRESHOLD)
+        .get_history(&session_id)
         .await
-        .unwrap_or_else(|_| (Vec::new(), 0, false));
-    log(&format!("[{}] Loaded {} messages for LLM (total in session: {})", log_prefix, incoming_history.len(), total_messages));
+        .unwrap_or_default();
+    log(&format!("[{}] Loaded {} messages", log_prefix, incoming_history.len()));
 
-    // Proactive compaction if context is too large
-    if needs_compaction && incoming_history.len() > COMPACTION_THRESHOLD {
-        log(&format!("[{}] Proactive compaction needed ({} messages > {})", log_prefix, incoming_history.len(), COMPACTION_THRESHOLD));
-
-        event_sender.send(SseEvent::Compacted {
-            message: format!("Compacting conversation history ({} messages)...", incoming_history.len()),
-        }).await;
-
-        let compaction_config = CompactionConfig::default();
-        match compact_context(
-            &state.client,
-            &state.provider_info.resolved_model,
-            &incoming_history,
-            &compaction_config,
-        ).await {
-            Ok(compacted) => {
-                let compaction_msg = format!(
-                    "Context compacted proactively ({} → {} messages, {:.1}%)",
-                    incoming_history.len(),
-                    compacted.messages.len(),
-                    compacted.compaction_ratio * 100.0
-                );
-                log(&format!("[{}] {}", log_prefix, compaction_msg));
-
-                // Save compaction summary to database for future requests
-                if !compacted.summary.is_empty() {
-                    if let Err(e) = state.storage.save_compaction(&session_id, &compacted.summary).await {
-                        log(&format!("[{}] Failed to save compaction: {}", log_prefix, e));
-                    } else {
-                        log(&format!("[{}] Compaction summary saved to database", log_prefix));
-                    }
-                }
-
-                event_sender.send(SseEvent::Compacted {
-                    message: compaction_msg,
-                }).await;
-
-                incoming_history = compacted.messages;
-            }
-            Err(e) => {
-                log(&format!("[{}] Proactive compaction failed: {:#}", log_prefix, e));
-                // Continue with original history - will fail later if context is too large
-            }
-        }
-    }
-
-    // Prepare the prompt with DMN instructions if needed (only for first message in session)
-    let final_prompt = if state.dmn && incoming_history.is_empty() {
-        format!(
-            "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
-            DMN_INSTRUCTIONS, prompt
-        )
-    } else {
-        prompt
-    };
-
-    // Get MCP manager
-    let mut mcp_guard = state.mcp_manager.lock().await;
-
-    // Build tool list
-    let mut tools = mcp_guard
-        .as_ref()
-        .map(|m| m.get_tools())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|t| !t.function.name.is_empty())
-        .collect::<Vec<_>>();
-
-    if state.enable_image_tool {
-        tools.push(agent::get_interpret_image_tool_spec());
-    }
-    if state.enable_search_tool {
-        tools.push(agent::get_search_query_tool_spec());
-    }
-
-    // Add invoke tools if orchestrator is present (multi-agent mode)
-    let current_agent = state.agent_name.as_deref().unwrap_or("root");
-    if let Some(ref orchestrator) = state.orchestrator {
-        let invoke_tools = orchestrator.get_invoke_tools(current_agent);
-        log(&format!("[{}] Adding {} invoke tools for agent '{}'", log_prefix, invoke_tools.len(), current_agent));
-        tools.extend(invoke_tools);
-    }
-
-    let tools_option = if tools.is_empty() { None } else { Some(tools) };
-
-    // Build conversation history from incoming history + new user message
+    // Build conversation history
     let mut conversation_history: Vec<Message> = incoming_history;
     conversation_history.push(Message::User {
-        content: final_prompt.clone(),
+        content: prompt.clone(),
     });
 
-    // Compaction config
-    let compaction_config = CompactionConfig::default();
-    let mut compaction_attempted = false;
-    let mut rate_limit_retries = 0u32;
-    const MAX_RATE_LIMIT_RETRIES: u32 = 3;
+    // Get tools
+    let tools = state.tool_registry.get_tools();
+    let tools_option = if tools.is_empty() { None } else { Some(tools) };
 
     // Token usage tracking
     let mut session_usage = SessionUsage::new();
 
-    // Thinking timer - uses raw mpsc sender (not stored/broadcast since it's high-frequency)
+    // Thinking timer
     let tx_thinking = event_sender.tx_clone();
     let cancel_rx_thinking = cancel_rx.clone();
     let thinking_handle = tokio::spawn(async move {
@@ -1123,82 +859,16 @@ async fn run_agent_with_events(
                 r
             }
             Err(e) => {
-                // Use {:#} to get full error chain from anyhow
                 let error_msg = format!("{:#}", e);
                 log(&format!("[{}] LLM error: {}", log_prefix, error_msg));
-
-                // Check for rate limit errors first - these should be retried, not compacted
-                if is_rate_limit_error(&error_msg) && rate_limit_retries < MAX_RATE_LIMIT_RETRIES {
-                    rate_limit_retries += 1;
-                    let delay = extract_retry_delay(&error_msg).unwrap_or(10).min(60);
-                    log(&format!("[{}] Rate limit hit, retrying in {}s (attempt {}/{})",
-                        log_prefix, delay, rate_limit_retries, MAX_RATE_LIMIT_RETRIES));
-
-                    event_sender.send(SseEvent::Compacted {
-                        message: format!("Rate limit hit. Retrying in {}s...", delay),
-                    }).await;
-
-                    tokio::time::sleep(Duration::from_secs(delay)).await;
-                    continue;
-                }
-
-                // If rate limit retries exhausted with large context, try compaction as fallback
-                // Large context (>50 messages) likely contributes to quota usage
-                let should_try_compaction = !compaction_attempted && (
-                    is_context_exhausted_error(&error_msg) ||
-                    (is_rate_limit_error(&error_msg) && conversation_history.len() > 50)
-                );
-
-                if should_try_compaction {
-                    compaction_attempted = true;
-                    log(&format!("[{}] Attempting context compaction ({} messages)",
-                        log_prefix, conversation_history.len()));
-
-                    // Attempt compaction
-                    match compact_context(
-                        &state.client,
-                        &state.provider_info.resolved_model,
-                        &conversation_history,
-                        &compaction_config,
-                    ).await {
-                        Ok(compacted) => {
-                            let compaction_msg = if compacted.used_full_summarization {
-                                format!("Context compacted via summarization ({} → {} messages, {:.1}%)",
-                                    conversation_history.len(), compacted.messages.len(), compacted.compaction_ratio * 100.0)
-                            } else {
-                                format!("Context compacted via trimming ({} → {} messages, {:.1}%)",
-                                    conversation_history.len(), compacted.messages.len(), compacted.compaction_ratio * 100.0)
-                            };
-                            log(&format!("[{}] {}", log_prefix, compaction_msg));
-
-                            event_sender.send(SseEvent::Compacted {
-                                message: compaction_msg,
-                            }).await;
-
-                            // Replace history with compacted version and retry
-                            // Reset rate limit retries since context is now smaller
-                            conversation_history = compacted.messages;
-                            rate_limit_retries = 0;
-                            continue;
-                        }
-                        Err(compact_err) => {
-                            log(&format!("[{}] Compaction failed: {:#}", log_prefix, compact_err));
-                            event_sender.send(SseEvent::Error {
-                                message: format!("Context exhausted and compaction failed: {:#}", compact_err),
-                            }).await;
-                            break;
-                        }
-                    }
-                } else {
-                    event_sender.send(SseEvent::Error {
-                        message: format!("API error: {:#}", e),
-                    }).await;
-                    break;
-                }
+                event_sender.send(SseEvent::Error {
+                    message: format!("API error: {:#}", e),
+                }).await;
+                break;
             }
         };
 
-        // Track token usage from response
+        // Track token usage
         if let Some(ref usage) = response.usage {
             session_usage.add(usage);
         }
@@ -1249,109 +919,46 @@ async fn run_agent_with_events(
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
 
-            // Check if this is an invoke call (multi-agent mode)
-            let is_invoke = state.orchestrator.as_ref()
-                .map(|o| o.is_invoke_tool(tool_name))
-                .unwrap_or(false);
+            // Send tool call event
+            event_sender.send(SseEvent::ToolCall {
+                name: tool_name.clone(),
+                arguments: arguments.clone(),
+            }).await;
 
-            let result = if is_invoke {
-                // Handle agent invocation
-                let target_agent = state.orchestrator.as_ref()
-                    .and_then(|o| o.get_invoke_target(tool_name))
-                    .unwrap_or("unknown");
-                let task = args.get("task").and_then(|t| t.as_str()).unwrap_or("");
-
-                log(&format!("[{}] Invoking agent '{}' with task: {}", log_prefix, target_agent, task));
-
-                // Send agent invoke event
-                event_sender.send(SseEvent::AgentInvoke {
-                    agent_name: target_agent.to_string(),
-                    task: task.to_string(),
-                }).await;
-
-                // Create display sink for the subagent
-                let display = Arc::new(WebappDisplaySink::new(event_sender.tx_clone(), state.tool_output_limit));
-
-                // Execute the invoke through orchestrator
-                let invoke_result = if let (Some(ref orchestrator), Some(ref mut manager)) = (&state.orchestrator, mcp_guard.as_mut()) {
-                    orchestrator.handle_invoke_webapp(
-                        &state.client,
-                        &state.provider_info.resolved_model,
-                        tool_name,
-                        &args,
-                        manager,
-                        state.tool_output_limit,
-                        display,
-                        0,  // depth
-                        current_agent,
-                    ).await
-                } else {
-                    "Error: Orchestrator not available".to_string()
-                };
-
-                // Send agent result event
-                let (display_result, truncated) = if invoke_result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
-                    let lines: Vec<&str> = invoke_result.lines().take(state.tool_output_limit).collect();
-                    (lines.join("\n"), true)
-                } else {
-                    (invoke_result.clone(), false)
-                };
-
-                event_sender.send(SseEvent::AgentResult {
-                    agent_name: target_agent.to_string(),
-                    result: display_result,
-                    truncated,
-                }).await;
-
-                invoke_result
+            // Execute tool
+            let tool_result = if state.tool_registry.has_tool(tool_name) {
+                state.tool_registry.execute(tool_name, args).await
+                    .unwrap_or_else(|e| format!("Error: {}", e))
             } else {
-                // Regular tool call
-                event_sender.send(SseEvent::ToolCall {
-                    name: tool_name.clone(),
-                    arguments: arguments.clone(),
-                }).await;
-
-                // Execute tool
-                let tool_result = if tool_name == agent::INTERPRET_IMAGE_TOOL_NAME {
-                    agent::execute_interpret_image(&state.client, &state.provider_info.resolved_model, args).await
-                } else if tool_name == agent::SEARCH_QUERY_TOOL_NAME {
-                    agent::execute_search_query(args).await
-                } else if let Some(ref mut manager) = *mcp_guard {
-                    manager.execute_tool(tool_name, args).await
-                } else {
-                    Ok("Error: No MCP manager available".to_string())
-                }
-                .unwrap_or_else(|e| format!("Error: {}", e));
-
-                let result_preview = if tool_result.len() > 80 {
-                    format!("{}...", &tool_result[..80])
-                } else {
-                    tool_result.clone()
-                };
-                log(&format!("[{}] Tool result: {} chars ({})", log_prefix, tool_result.len(), result_preview.replace('\n', " ")));
-
-                // Truncate result for display
-                let (display_result, truncated) = if tool_result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
-                    let lines: Vec<&str> = tool_result.lines().take(state.tool_output_limit).collect();
-                    (lines.join("\n"), true)
-                } else {
-                    (tool_result.clone(), false)
-                };
-
-                // Send tool result event
-                event_sender.send(SseEvent::ToolResult {
-                    name: tool_name.clone(),
-                    result: display_result,
-                    truncated,
-                }).await;
-
-                tool_result
+                format!("Error: Unknown tool '{}'", tool_name)
             };
+
+            let result_preview = if tool_result.len() > 80 {
+                format!("{}...", &tool_result[..80])
+            } else {
+                tool_result.clone()
+            };
+            log(&format!("[{}] Tool result: {} chars ({})", log_prefix, tool_result.len(), result_preview.replace('\n', " ")));
+
+            // Truncate result for display
+            let (display_result, truncated) = if tool_result.lines().count() > state.tool_output_limit && state.tool_output_limit > 0 {
+                let lines: Vec<&str> = tool_result.lines().take(state.tool_output_limit).collect();
+                (lines.join("\n"), true)
+            } else {
+                (tool_result.clone(), false)
+            };
+
+            // Send tool result event
+            event_sender.send(SseEvent::ToolResult {
+                name: tool_name.clone(),
+                result: display_result,
+                truncated,
+            }).await;
 
             // Add tool result to history
             conversation_history.push(Message::Tool {
                 tool_call_id: tool_call.id.clone(),
-                content: result,
+                content: tool_result,
             });
         }
     }
@@ -1363,7 +970,7 @@ async fn run_agent_with_events(
     let _ = state.storage.set_history(&session_id, &conversation_history).await;
     state.storage.set_runtime_state(&session_id, Vec::new(), None, false).await;
 
-    // Persist events to storage (for SQLite mode)
+    // Persist events to storage
     for msg in &conversation_history {
         let (event_type, content) = match msg {
             Message::User { .. } => ("user_message", serde_json::to_string(msg).unwrap_or_default()),

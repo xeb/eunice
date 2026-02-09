@@ -14,8 +14,8 @@ use tempfile::TempDir;
 const MAX_MEMORY_SIZE: usize = 1024 * 1024;
 
 /// Default number of lines to show at start and end
-const DEFAULT_HEAD_LINES: usize = 50;
-const DEFAULT_TAIL_LINES: usize = 50;
+const DEFAULT_HEAD_LINES: usize = 10;
+const DEFAULT_TAIL_LINES: usize = 10;
 
 /// Storage backend for output data
 enum OutputStorage {
@@ -279,16 +279,16 @@ mod tests {
         assert!(truncated.contains("lines omitted"));
         assert!(truncated.contains("get_output"));
 
-        // Should show first lines
+        // Should show first 10 lines
         assert!(truncated.contains("line 1"));
-        assert!(truncated.contains("line 50"));
+        assert!(truncated.contains("line 10"));
 
-        // Should show last lines
+        // Should show last 10 lines
         assert!(truncated.contains("line 200"));
-        assert!(truncated.contains("line 151"));
+        assert!(truncated.contains("line 191"));
 
         // Should NOT show middle lines in truncated output
-        assert!(!truncated.contains("line 75"));
+        assert!(!truncated.contains("line 50"));
     }
 
     #[test]

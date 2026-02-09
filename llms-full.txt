@@ -1,0 +1,157 @@
+# Eunice v1.0.0
+
+An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
+
+## Overview
+
+Eunice is a command-line tool that provides an AI assistant with 4 built-in tools: Bash, Read, Write, and Skill. It emphasizes "sophisticated simplicity" - minimal configuration with maximum capability.
+
+## Installation
+
+```bash
+cargo install --git ssh://git@github.com/xeb/eunice.git
+```
+
+Or from source:
+
+```bash
+git clone git@github.com:xeb/eunice.git
+cd eunice
+cargo install --path .
+```
+
+## Quick Start
+
+```bash
+# Set your API key
+export GEMINI_API_KEY=your_key_here
+# or
+export OPENAI_API_KEY=your_key_here
+# or
+export ANTHROPIC_API_KEY=your_key_here
+
+# Run with a prompt
+eunice "List all files in the current directory"
+
+# Interactive chat mode
+eunice --chat
+```
+
+## Built-in Tools
+
+Eunice provides 4 built-in tools that are always available:
+
+### Bash
+Execute shell commands. Returns stdout, stderr, and exit code.
+
+### Read
+Read file contents. Returns file content or error if file doesn't exist.
+
+### Write
+Write content to a file. Creates parent directories if needed.
+
+### Skill
+Discover and describe available skills. Skills are user-defined prompts stored in ~/.eunice/skills/.
+
+## Skills System
+
+Skills are reusable prompts stored in `~/.eunice/skills/<skill-name>/SKILL.md`. Each skill file must have a `## Description` section.
+
+### Default Skills
+
+Eunice includes default skills that are auto-installed on first run:
+- **image_analysis**: Analyze images using multimodal AI
+- **web_search**: Search the web for information
+- **git_helper**: Git operations and best practices
+
+### Creating Custom Skills
+
+```bash
+mkdir -p ~/.eunice/skills/my_skill
+cat > ~/.eunice/skills/my_skill/SKILL.md << 'EOF'
+# My Custom Skill
+
+## Description
+A helpful skill that does something useful.
+
+## Instructions
+When invoked, do the following...
+EOF
+```
+
+## Supported Providers
+
+### Google Gemini (Default)
+Set `GEMINI_API_KEY`. Default model: `gemini-3-flash-preview`
+
+### OpenAI
+Set `OPENAI_API_KEY`. Models: gpt-4o, gpt-4o-mini, o1, o3, etc.
+
+### Anthropic Claude
+Set `ANTHROPIC_API_KEY`. Models: claude-sonnet-4, claude-opus-4, etc.
+
+### Ollama (Local)
+Runs against localhost:11434. Supports tool-capable models like llama3.1, qwen2.5, etc.
+
+## CLI Reference
+
+```
+eunice [OPTIONS] [PROMPT]
+
+Arguments:
+  [PROMPT]  The prompt to send to the AI
+
+Options:
+      --model <MODEL>   AI model to use
+      --prompt <TEXT>   System prompt (inline text or file path)
+      --chat            Interactive chat mode
+      --webapp          Start web server interface
+      --list-models     List available AI models
+      --list-tools      List the 4 built-in tools
+      --llms-txt        Output full LLM context documentation
+      --update          Update eunice to the latest version
+      --verbose         Enable verbose debug output
+      --silent          Suppress non-essential output
+  -h, --help            Print help
+  -V, --version         Print version
+```
+
+## Webapp Mode
+
+Start a web server interface:
+
+```bash
+eunice --webapp
+```
+
+Opens at http://localhost:8080 by default.
+
+## Configuration
+
+No configuration files required. Eunice uses environment variables for API keys and smart defaults for everything else.
+
+### Environment Variables
+
+- `GEMINI_API_KEY` - Google AI Studio API key
+- `OPENAI_API_KEY` - OpenAI API key
+- `ANTHROPIC_API_KEY` - Anthropic API key
+- `OLLAMA_HOST` - Ollama server address (default: localhost:11434)
+
+### Prompt Files
+
+Eunice auto-discovers prompt files in the current directory:
+- prompt.txt, prompt.md
+- instruction.txt, instruction.md
+- instructions.txt, instructions.md
+
+## Version
+
+v1.0.0
+
+## License
+
+MIT License
+
+## Homepage
+
+https://longrunningagents.com

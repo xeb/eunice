@@ -18,12 +18,12 @@ pub enum DisplayEvent {
     ToolCall { name: String, arguments: String },
     /// Tool result received
     ToolResult { result: String, limit: usize },
-    /// Agent being invoked (multi-agent mode)
-    AgentInvoke { agent_name: String, task: String },
-    /// Agent invocation result (multi-agent mode)
-    AgentResult { agent_name: String, result: String, limit: usize },
-    /// Response content from LLM
+    /// Response content from LLM (complete)
     Response { content: String },
+    /// Streaming chunk from LLM (partial, no newline)
+    StreamChunk { content: String },
+    /// Streaming complete (print newline)
+    StreamEnd,
     /// Error message
     Error { message: String },
     /// Debug message (only shown in verbose mode)
@@ -39,6 +39,7 @@ pub trait DisplaySink: Send + Sync {
     fn write_event(&self, event: DisplayEvent);
 
     /// Check if verbose mode is enabled
+    #[allow(dead_code)]
     fn is_verbose(&self) -> bool;
 }
 
@@ -99,46 +100,18 @@ impl DisplaySink for StdDisplaySink {
                     println!("{}", output.dimmed());
                 }
             }
-            DisplayEvent::AgentInvoke { agent_name, task } => {
-                println!("  {} {} {}", "🔀".cyan(), "invoke".cyan(), agent_name.bright_cyan());
-                // Show task in grey
-                let task_preview = if task.len() > 200 {
-                    format!("{}...", &task[..200])
-                } else {
-                    task
-                };
-                for line in task_preview.lines() {
-                    println!("    {}", line.dimmed());
-                }
-            }
-            DisplayEvent::AgentResult { agent_name, result, limit } => {
-                println!("  {} {} {}", "✓".green(), "returned".green(), agent_name.bright_green());
-                // Show truncated result
-                let lines: Vec<&str> = result.lines().collect();
-                let output = if limit > 0 && lines.len() > limit {
-                    let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
-                    let remaining = lines.len() - limit;
-                    format!(
-                        "{}\n    ...{} more lines",
-                        truncated.join("\n    "),
-                        remaining
-                    )
-                } else {
-                    result
-                        .lines()
-                        .map(|l| format!("    {}", l))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                };
-                if !output.trim().is_empty() {
-                    println!("{}", output.dimmed());
-                }
-            }
             DisplayEvent::Response { content } => {
                 let trimmed = content.trim();
                 if !trimmed.is_empty() {
                     println!("{}", trimmed);
                 }
+            }
+            DisplayEvent::StreamChunk { content } => {
+                print!("{}", content);
+                let _ = std::io::stdout().flush();
+            }
+            DisplayEvent::StreamEnd => {
+                println!();
             }
             DisplayEvent::Error { message } => {
                 eprintln!("{} {}", "❌".red(), message.red());
@@ -164,12 +137,22 @@ pub struct SilentDisplaySink;
 
 impl DisplaySink for SilentDisplaySink {
     fn write_event(&self, event: DisplayEvent) {
-        // Only show responses, discard everything else
-        if let DisplayEvent::Response { content } = event {
-            let trimmed = content.trim();
-            if !trimmed.is_empty() {
-                println!("{}", trimmed);
+        // Only show responses and streams, discard everything else
+        match event {
+            DisplayEvent::Response { content } => {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    println!("{}", trimmed);
+                }
             }
+            DisplayEvent::StreamChunk { content } => {
+                print!("{}", content);
+                let _ = std::io::stdout().flush();
+            }
+            DisplayEvent::StreamEnd => {
+                println!();
+            }
+            _ => {}
         }
     }
 
@@ -249,50 +232,18 @@ impl DisplaySink for TuiDisplaySink {
                     let _ = writeln!(writer, "{DIM}{}{RESET}", output);
                 }
             }
-            DisplayEvent::AgentInvoke { agent_name, task } => {
-                const CYAN: &str = "\x1b[36m";
-                const BRIGHT_CYAN: &str = "\x1b[96m";
-                let _ = writeln!(writer, "  {CYAN}🔀 invoke{RESET} {BRIGHT_CYAN}{}{RESET}", agent_name);
-                // Show task in grey
-                let task_preview = if task.len() > 200 {
-                    format!("{}...", &task[..200])
-                } else {
-                    task
-                };
-                for line in task_preview.lines() {
-                    let _ = writeln!(writer, "    {DIM}{}{RESET}", line);
-                }
-            }
-            DisplayEvent::AgentResult { agent_name, result, limit } => {
-                const GREEN: &str = "\x1b[32m";
-                const BRIGHT_GREEN: &str = "\x1b[92m";
-                let _ = writeln!(writer, "  {GREEN}✓ returned{RESET} {BRIGHT_GREEN}{}{RESET}", agent_name);
-                // Show truncated result
-                let lines: Vec<&str> = result.lines().collect();
-                let output = if limit > 0 && lines.len() > limit {
-                    let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
-                    let remaining = lines.len() - limit;
-                    format!(
-                        "{}\n    ...{} more lines",
-                        truncated.join("\n    "),
-                        remaining
-                    )
-                } else {
-                    result
-                        .lines()
-                        .map(|l| format!("    {}", l))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                };
-                if !output.trim().is_empty() {
-                    let _ = writeln!(writer, "{DIM}{}{RESET}", output);
-                }
-            }
             DisplayEvent::Response { content } => {
                 let trimmed = content.trim();
                 if !trimmed.is_empty() {
                     let _ = writeln!(writer, "{}", trimmed);
                 }
+            }
+            DisplayEvent::StreamChunk { content } => {
+                let _ = write!(writer, "{}", content);
+                let _ = writer.flush();
+            }
+            DisplayEvent::StreamEnd => {
+                let _ = writeln!(writer);
             }
             DisplayEvent::Error { message } => {
                 let _ = writeln!(writer, "{RED}❌ {}{RESET}", message);

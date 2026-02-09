@@ -447,6 +447,7 @@ impl SessionStorage {
 
     /// Get conversation history optimized for LLM context (uses compaction if available)
     /// Returns: (messages_for_llm, total_message_count, needs_compaction)
+    #[allow(dead_code)]
     pub async fn get_history_for_llm(
         &self,
         session_id: &str,
@@ -543,6 +544,7 @@ impl SessionStorage {
     }
 
     /// Save a compaction summary for a session
+    #[allow(dead_code)]
     pub async fn save_compaction(&self, session_id: &str, summary: &str) -> Result<()> {
         match self {
             SessionStorage::Memory(_) => {

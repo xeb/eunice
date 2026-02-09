@@ -1,230 +1,16 @@
-use crate::builtin_tools::BuiltinToolRegistry;
 use crate::client::Client;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::display_sink::{DisplayEvent, DisplaySink};
-use crate::mcp::McpManager;
 use crate::models::{FunctionSpec, Message, Tool};
 use crate::output_store::OutputStore;
+use crate::tools::ToolRegistry;
 use crate::usage::SessionUsage;
-use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use anyhow::{anyhow, Result};
 use std::sync::Arc;
 use tokio::sync::watch;
 
-// --- Built-in interpret_image tool ---
-pub const INTERPRET_IMAGE_TOOL_NAME: &str = "interpret_image";
-
-// --- Built-in search_query tool ---
-pub const SEARCH_QUERY_TOOL_NAME: &str = "search_query";
-
 // --- Built-in get_output tool ---
 pub const GET_OUTPUT_TOOL_NAME: &str = "get_output";
-
-/// Get the tool spec for the built-in interpret_image tool
-pub fn get_interpret_image_tool_spec() -> Tool {
-    Tool {
-        tool_type: "function".to_string(),
-        function: FunctionSpec {
-            name: INTERPRET_IMAGE_TOOL_NAME.to_string(),
-            description: "Analyzes an image or PDF file and returns a text description. Supports PNG, JPEG, GIF, WebP images and PDF documents. The user's request will be used to guide the analysis.".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "The path to the image file to analyze."
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "description": "A specific prompt to guide the image analysis."
-                    }
-                },
-                "required": ["file_path", "prompt"]
-            }),
-        },
-    }
-}
-
-pub async fn execute_interpret_image(
-    client: &Client,
-    model: &str,
-    args: serde_json::Value,
-) -> Result<String> {
-    let file_path = args["file_path"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Missing file_path"))?;
-    let prompt = args["prompt"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Missing prompt"))?;
-
-    // Read the image file
-    let image_bytes = std::fs::read(file_path)
-        .with_context(|| format!("Failed to read image file: {}", file_path))?;
-
-    // Guess MIME type from extension
-    let mime_type = match std::path::Path::new(file_path)
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_lowercase())
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("pdf") => "application/pdf",
-        _ => "application/octet-stream", // Default
-    };
-
-    // Base64 encode the image
-    let image_base64 = STANDARD.encode(&image_bytes);
-
-    // Call the client's multimodal chat completion method
-    let response = client
-        .chat_completion_with_image(model, prompt, &image_base64, mime_type)
-        .await?;
-
-    // Extract text from the response
-    let content = response
-        .choices
-        .get(0)
-        .and_then(|c| c.message.content.as_ref())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "No text content received from model.".to_string());
-
-    Ok(content)
-}
-
-/// Get the tool spec for the built-in search_query tool
-pub fn get_search_query_tool_spec() -> Tool {
-    Tool {
-        tool_type: "function".to_string(),
-        function: FunctionSpec {
-            name: SEARCH_QUERY_TOOL_NAME.to_string(),
-            description: "Search the web using Gemini models with Google Search grounding. Use 'flash' for quick knowledge queries (fast, cheap), use 'pro' for medium complexity queries requiring deeper analysis, and use 'pro_preview' for the hardest queries requiring maximum reasoning capability.".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query to send to the model with Google Search grounding."
-                    },
-                    "model": {
-                        "type": "string",
-                        "enum": ["flash", "pro", "pro_preview"],
-                        "description": "The Gemini model to use. 'flash' (gemini-2.5-flash) for quick queries, 'pro' (gemini-2.5-pro) for medium complexity, 'pro_preview' (gemini-3-pro-preview) for hardest queries."
-                    }
-                },
-                "required": ["query", "model"]
-            }),
-        },
-    }
-}
-
-/// Execute search_query tool using Gemini API with Google Search grounding
-pub async fn execute_search_query(
-    args: serde_json::Value,
-) -> Result<String> {
-    let query = args["query"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Missing query"))?;
-    let model_choice = args["model"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Missing model"))?;
-
-    // Map model choice to actual model name
-    let model = match model_choice {
-        "flash" => "gemini-2.5-flash",
-        "pro" => "gemini-2.5-pro",
-        "pro_preview" => "gemini-3-pro-preview",
-        _ => return Err(anyhow!("Invalid model choice: {}. Must be 'flash', 'pro', or 'pro_preview'", model_choice)),
-    };
-
-    // Get API key from environment
-    let api_key = std::env::var("GEMINI_API_KEY")
-        .context("GEMINI_API_KEY environment variable not set")?;
-
-    // Build the request
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-        model
-    );
-
-    let request_body = serde_json::json!({
-        "contents": [
-            {
-                "parts": [
-                    {"text": query}
-                ]
-            }
-        ],
-        "tools": [
-            {
-                "google_search": {}
-            }
-        ]
-    });
-
-    // Make the HTTP request
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .header("x-goog-api-key", &api_key)
-        .header("Content-Type", "application/json")
-        .json(&request_body)
-        .send()
-        .await
-        .context("Failed to send search request to Gemini")?;
-
-    if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(anyhow!("Gemini search request failed: {}", error_text));
-    }
-
-    let response_json: serde_json::Value = response
-        .json()
-        .await
-        .context("Failed to parse Gemini search response")?;
-
-    // Extract the text response
-    let text = response_json["candidates"]
-        .get(0)
-        .and_then(|c| c["content"]["parts"].as_array())
-        .and_then(|parts| {
-            parts.iter()
-                .filter_map(|p| p["text"].as_str())
-                .collect::<Vec<_>>()
-                .first()
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "No text response from search".to_string());
-
-    // Extract grounding metadata if available
-    let mut result = text;
-
-    if let Some(grounding) = response_json["candidates"]
-        .get(0)
-        .and_then(|c| c.get("groundingMetadata"))
-    {
-        if let Some(sources) = grounding.get("groundingChunks").and_then(|c| c.as_array()) {
-            let source_urls: Vec<String> = sources
-                .iter()
-                .filter_map(|s| {
-                    let web = s.get("web")?;
-                    let uri = web.get("uri")?.as_str()?;
-                    let title = web.get("title").and_then(|t| t.as_str()).unwrap_or("Source");
-                    Some(format!("- [{}]({})", title, uri))
-                })
-                .collect();
-
-            if !source_urls.is_empty() {
-                result = format!("{}\n\n**Sources:**\n{}", result, source_urls.join("\n"));
-            }
-        }
-    }
-
-    Ok(result)
-}
 
 /// Get the tool spec for the built-in get_output tool
 pub fn get_get_output_tool_spec() -> Tool {
@@ -232,7 +18,7 @@ pub fn get_get_output_tool_spec() -> Tool {
         tool_type: "function".to_string(),
         function: FunctionSpec {
             name: GET_OUTPUT_TOOL_NAME.to_string(),
-            description: "Retrieve a range of lines from a previous tool output by its ID. Tool outputs that are too large are automatically truncated, showing the first and last 50 lines. Use this tool to retrieve the middle sections or re-read specific ranges.".to_string(),
+            description: "Retrieve a range of lines from a previous tool output by its ID. Tool outputs that are too large are automatically truncated, showing the first and last 10 lines. Use this tool to retrieve the middle sections or re-read specific ranges.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -297,12 +83,9 @@ pub async fn run_agent(
     model: &str,
     prompt: &str,
     tool_output_limit: usize,
-    mcp_manager: Option<&mut McpManager>,
-    builtin_registry: Option<&BuiltinToolRegistry>,
+    tool_registry: &ToolRegistry,
     display: Arc<dyn DisplaySink>,
     conversation_history: &mut Vec<Message>,
-    enable_image_tool: bool,
-    enable_search_tool: bool,
     compaction_config: Option<CompactionConfig>,
     output_store: Option<&mut OutputStore>,
 ) -> Result<AgentResult> {
@@ -311,12 +94,9 @@ pub async fn run_agent(
         model,
         prompt,
         tool_output_limit,
-        mcp_manager,
-        builtin_registry,
+        tool_registry,
         display,
         conversation_history,
-        enable_image_tool,
-        enable_search_tool,
         None,
         compaction_config,
         output_store,
@@ -331,44 +111,20 @@ pub async fn run_agent_cancellable(
     model: &str,
     prompt: &str,
     tool_output_limit: usize,
-    mut mcp_manager: Option<&mut McpManager>,
-    builtin_registry: Option<&BuiltinToolRegistry>,
+    tool_registry: &ToolRegistry,
     display: Arc<dyn DisplaySink>,
     conversation_history: &mut Vec<Message>,
-    enable_image_tool: bool,
-    enable_search_tool: bool,
     cancel_rx: Option<watch::Receiver<bool>>,
     compaction_config: Option<CompactionConfig>,
     mut output_store: Option<&mut OutputStore>,
 ) -> Result<AgentResult> {
-    let _verbose = display.is_verbose(); // Used by display sink internally
-    // Build the prompt, including any failed server info
-    let final_prompt = if let Some(ref manager) = mcp_manager {
-        let failed = manager.get_failed_servers();
-        if failed.is_empty() {
-            prompt.to_string()
-        } else {
-            let errors: Vec<String> = failed
-                .iter()
-                .map(|(name, err)| format!("- {}: {}", name, err))
-                .collect();
-            format!(
-                "{}\n\n[SYSTEM NOTE: The following MCP servers failed to connect. You cannot use tools from these servers:\n{}]",
-                prompt,
-                errors.join("\n")
-            )
-        }
-    } else {
-        prompt.to_string()
-    };
-
     // Add user message to history
     conversation_history.push(Message::User {
-        content: final_prompt.clone(),
+        content: prompt.to_string(),
     });
 
     display.write_event(DisplayEvent::Debug {
-        message: format!("Sending prompt: {}", final_prompt),
+        message: format!("Sending prompt: {}", prompt),
     });
 
     // Track if we've already tried compression this loop iteration
@@ -379,32 +135,11 @@ pub async fn run_agent_cancellable(
 
     loop {
         // Get available tools
-        let mut tools = mcp_manager
-            .as_ref()
-            .map(|m| m.get_tools())
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| !t.function.name.is_empty())
-            .collect::<Vec<_>>();
-
-        // Add built-in interpret_image tool when enabled (via --dmn or --images)
-        if enable_image_tool {
-            tools.push(get_interpret_image_tool_spec());
-        }
-
-        // Add built-in search_query tool when enabled (via --dmn or --search)
-        if enable_search_tool {
-            tools.push(get_search_query_tool_spec());
-        }
+        let mut tools = tool_registry.get_tools();
 
         // Add built-in get_output tool when output_store is enabled
         if output_store.is_some() {
             tools.push(get_get_output_tool_spec());
-        }
-
-        // Add tools from BuiltinToolRegistry (shell, filesystem, browser)
-        if let Some(registry) = builtin_registry {
-            tools.extend(registry.get_tools());
         }
 
         let tools_option = if tools.is_empty() { None } else { Some(tools.as_slice()) };
@@ -413,11 +148,55 @@ pub async fn run_agent_cancellable(
             message: "Calling LLM...".to_string(),
         });
 
-        // Start thinking indicator
-        display.write_event(DisplayEvent::ThinkingStart);
+        // Track whether we used streaming (to skip duplicate Response display)
+        let mut used_streaming = false;
 
-        // Call the LLM with optional cancellation support
-        let response = {
+        // Call the LLM - use streaming if available
+        let response = if client.supports_streaming() {
+            // Streaming mode - no thinking indicator, stream chunks directly
+            let display_clone = Arc::clone(&display);
+            let mut streamed_any = false;
+
+            let api_call = client.chat_completion_streaming(
+                model,
+                serde_json::to_value(&*conversation_history)?,
+                tools_option.as_deref(),
+                |chunk| {
+                    streamed_any = true;
+                    display_clone.write_event(DisplayEvent::StreamChunk {
+                        content: chunk.to_string(),
+                    });
+                },
+            );
+
+            let result = if let Some(ref mut rx) = cancel_rx.clone() {
+                tokio::select! {
+                    result = api_call => result,
+                    _ = rx.changed() => {
+                        if streamed_any {
+                            display.write_event(DisplayEvent::StreamEnd);
+                        }
+                        return Ok(AgentResult {
+                            status: AgentStatus::Cancelled,
+                            usage: session_usage,
+                        });
+                    }
+                }
+            } else {
+                api_call.await
+            };
+
+            // End the stream if we streamed any content
+            if streamed_any {
+                display.write_event(DisplayEvent::StreamEnd);
+                used_streaming = true;
+            }
+
+            result
+        } else {
+            // Non-streaming mode - show thinking indicator
+            display.write_event(DisplayEvent::ThinkingStart);
+
             let api_call = client.chat_completion(
                 model,
                 serde_json::to_value(&*conversation_history)?,
@@ -467,7 +246,7 @@ pub async fn run_agent_cancellable(
                     let config = compaction_config.as_ref().unwrap();
                     if config.enabled {
                         display.write_event(DisplayEvent::Debug {
-                            message: "⚠️  Context exhausted. Compacting conversation history...".to_string(),
+                            message: "Context exhausted. Compacting conversation history...".to_string(),
                         });
 
                         // Attempt compaction
@@ -480,7 +259,7 @@ pub async fn run_agent_cancellable(
                                 };
                                 display.write_event(DisplayEvent::Debug {
                                     message: format!(
-                                        "✓ Compacted to {:.0}% of original size using {}",
+                                        "Compacted to {:.0}% of original size using {}",
                                         compacted.compaction_ratio * 100.0,
                                         method
                                     ),
@@ -517,11 +296,13 @@ pub async fn run_agent_cancellable(
         };
         conversation_history.push(assistant_message);
 
-        // Display content if present (always show)
-        if let Some(content) = &choice.message.content {
-            display.write_event(DisplayEvent::Response {
-                content: content.clone(),
-            });
+        // Display content if present (skip if we already streamed it)
+        if !used_streaming {
+            if let Some(content) = &choice.message.content {
+                display.write_event(DisplayEvent::Response {
+                    content: content.clone(),
+                });
+            }
         }
 
         // Check for tool calls
@@ -557,14 +338,8 @@ pub async fn run_agent_cancellable(
             // Parse arguments
             let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
 
-            // Execute tool via MCP manager or built-in handlers
-            let result = if tool_name == INTERPRET_IMAGE_TOOL_NAME {
-                execute_interpret_image(client, model, args).await
-                    .unwrap_or_else(|e| format!("Error: {}", e))
-            } else if tool_name == SEARCH_QUERY_TOOL_NAME {
-                execute_search_query(args).await
-                    .unwrap_or_else(|e| format!("Error: {}", e))
-            } else if tool_name == GET_OUTPUT_TOOL_NAME {
+            // Execute tool
+            let result = if tool_name == GET_OUTPUT_TOOL_NAME {
                 // Handle get_output tool
                 if let Some(ref store) = output_store {
                     execute_get_output(store, args)
@@ -572,26 +347,12 @@ pub async fn run_agent_cancellable(
                 } else {
                     "Error: Output store not available".to_string()
                 }
-            } else if builtin_registry.as_ref().map_or(false, |r| r.has_tool(tool_name)) {
-                // Execute tool via BuiltinToolRegistry (shell, filesystem, browser)
-                let raw_result = builtin_registry.unwrap().execute_tool(tool_name, args)
+            } else if tool_registry.has_tool(tool_name) {
+                // Execute via ToolRegistry
+                let raw_result = tool_registry.execute(tool_name, args).await
                     .unwrap_or_else(|e| format!("Error: {}", e));
 
-                // Store output if store is enabled (for potential later retrieval)
-                if let Some(ref mut store) = output_store {
-                    match store.store(raw_result) {
-                        Ok((_id, truncated)) => truncated,
-                        Err(_) => "Error: Failed to store output".to_string(),
-                    }
-                } else {
-                    raw_result
-                }
-            } else if let Some(ref mut manager) = mcp_manager.as_deref_mut() {
-                // Execute MCP tool and optionally store output
-                let raw_result = manager.execute_tool(tool_name, args).await
-                    .unwrap_or_else(|e| format!("Error: {}", e));
-
-                // Store output if store is enabled (for potential later retrieval)
+                // Store output if store is enabled
                 if let Some(ref mut store) = output_store {
                     match store.store(raw_result) {
                         Ok((_id, truncated)) => truncated,
@@ -601,7 +362,7 @@ pub async fn run_agent_cancellable(
                     raw_result
                 }
             } else {
-                format!("Error: Unknown tool '{}' (no MCP manager or built-in registry available)", tool_name)
+                format!("Error: Unknown tool '{}'", tool_name)
             };
 
             // Display result
@@ -627,65 +388,6 @@ pub async fn run_agent_cancellable(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_interpret_image_tool_spec() {
-        let spec = get_interpret_image_tool_spec();
-        assert_eq!(spec.function.name, INTERPRET_IMAGE_TOOL_NAME);
-        assert_eq!(spec.tool_type, "function");
-        assert!(spec.function.description.contains("image"));
-
-        // Check parameters
-        let params = &spec.function.parameters;
-        assert_eq!(params["type"], "object");
-        assert!(params["properties"]["file_path"]["type"].as_str() == Some("string"));
-        assert!(params["properties"]["prompt"]["type"].as_str() == Some("string"));
-
-        // Check required fields
-        let required = params["required"].as_array().unwrap();
-        assert!(required.contains(&serde_json::json!("file_path")));
-        assert!(required.contains(&serde_json::json!("prompt")));
-    }
-
-    #[test]
-    fn test_search_query_tool_spec() {
-        let spec = get_search_query_tool_spec();
-        assert_eq!(spec.function.name, SEARCH_QUERY_TOOL_NAME);
-        assert_eq!(spec.tool_type, "function");
-        assert!(spec.function.description.contains("Search"));
-        assert!(spec.function.description.contains("Google Search"));
-
-        // Check parameters
-        let params = &spec.function.parameters;
-        assert_eq!(params["type"], "object");
-        assert!(params["properties"]["query"]["type"].as_str() == Some("string"));
-        assert!(params["properties"]["model"]["type"].as_str() == Some("string"));
-
-        // Check enum values for model
-        let model_enum = params["properties"]["model"]["enum"].as_array().unwrap();
-        assert!(model_enum.contains(&serde_json::json!("flash")));
-        assert!(model_enum.contains(&serde_json::json!("pro")));
-        assert!(model_enum.contains(&serde_json::json!("pro_preview")));
-
-        // Check required fields
-        let required = params["required"].as_array().unwrap();
-        assert!(required.contains(&serde_json::json!("query")));
-        assert!(required.contains(&serde_json::json!("model")));
-    }
-
-    #[test]
-    fn test_search_query_tool_description_contains_guidance() {
-        let spec = get_search_query_tool_spec();
-        let desc = &spec.function.description;
-
-        // Should contain guidance for each model tier
-        assert!(desc.contains("flash"));
-        assert!(desc.contains("pro"));
-        assert!(desc.contains("pro_preview"));
-        assert!(desc.contains("quick"));
-        assert!(desc.contains("medium complexity"));
-        assert!(desc.contains("hardest"));
-    }
 
     #[test]
     fn test_get_output_tool_spec() {

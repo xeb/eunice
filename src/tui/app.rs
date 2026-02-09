@@ -2,14 +2,11 @@
 
 use crate::agent::{self, AgentStatus};
 use crate::client::Client;
-use crate::compact;
-use crate::config::DMN_INSTRUCTIONS;
 use crate::display_sink::TuiDisplaySink;
-use crate::mcp::McpManager;
 use crate::models::Message;
-use crate::orchestrator::AgentOrchestrator;
 use crate::models::ProviderInfo;
 use crate::output_store::OutputStore;
+use crate::tools::ToolRegistry;
 use crate::usage::SessionUsage;
 
 use anyhow::{anyhow, Result};
@@ -50,14 +47,10 @@ fn print_status(
     shared_writer: &mut SharedWriter,
     model: &str,
     tool_count: usize,
-    agent_name: Option<&str>,
 ) -> std::io::Result<()> {
     write!(shared_writer, "  {DIM}")?;
     write!(shared_writer, "{PURPLE}model:{RESET}{DIM} {model}")?;
     write!(shared_writer, "  {PURPLE}tools:{RESET}{DIM} {tool_count}")?;
-    if let Some(agent) = agent_name {
-        write!(shared_writer, "  {PURPLE}agent:{RESET}{DIM} {agent}")?;
-    }
     writeln!(shared_writer, "{RESET}\n")?;
     Ok(())
 }
@@ -118,15 +111,8 @@ pub async fn run_tui_mode(
     client: &Client,
     provider_info: &ProviderInfo,
     initial_prompt: Option<&str>,
-    tool_output_limit: usize,
-    mut mcp_manager: Option<&mut McpManager>,
-    orchestrator: Option<&AgentOrchestrator>,
-    agent_name: Option<&str>,
-    silent: bool,  // Used in fallback to interactive mode; TUI uses SharedWriter
+    silent: bool,
     verbose: bool,
-    dmn: bool,
-    enable_image_tool: bool,
-    enable_search_tool: bool,
 ) -> Result<()> {
     // Create readline context with custom prompt
     let prompt = format!("{PURPLE}>{RESET} ");
@@ -140,15 +126,8 @@ pub async fn run_tui_mode(
             client,
             &provider_info.resolved_model,
             initial_prompt,
-            tool_output_limit,
-            mcp_manager,
-            orchestrator,
-            agent_name,
             silent,
             verbose,
-            dmn,
-            enable_image_tool,
-            enable_search_tool,
         )
         .await;
     };
@@ -158,36 +137,11 @@ pub async fn run_tui_mode(
     // Print header and status
     print_header(&mut shared_writer)?;
 
-    // Count tools
-    let tool_count = if let Some(ref manager) = mcp_manager {
-        let mut count = manager.get_tools().len();
-        if enable_image_tool {
-            count += 1;
-        }
-        if enable_search_tool {
-            count += 1;
-        }
-        count
-    } else {
-        let mut count = 0;
-        if enable_image_tool {
-            count += 1;
-        }
-        if enable_search_tool {
-            count += 1;
-        }
-        count
-    };
+    // Create tool registry and count tools
+    let tool_registry = ToolRegistry::new();
+    let tool_count = tool_registry.get_tools().len();
 
-    print_status(&mut shared_writer, &provider_info.resolved_model, tool_count, agent_name)?;
-
-    if dmn {
-        writeln!(
-            shared_writer,
-            "  {YELLOW}DMN Mode Active{RESET} - Autonomous execution enabled\n"
-        )?;
-    }
-
+    print_status(&mut shared_writer, &provider_info.resolved_model, tool_count)?;
     print_help(&mut shared_writer)?;
 
     // Conversation history
@@ -207,14 +161,8 @@ pub async fn run_tui_mode(
             client,
             provider_info,
             prompt_text,
-            tool_output_limit,
-            &mut mcp_manager,
-            orchestrator,
-            agent_name,
+            &tool_registry,
             verbose,
-            dmn,
-            enable_image_tool,
-            enable_search_tool,
             &mut conversation_history,
             &mut output_store,
             &mut session_usage,
@@ -261,7 +209,6 @@ pub async fn run_tui_mode(
                                 &mut sw,
                                 &provider_info.resolved_model,
                                 tool_count,
-                                agent_name,
                             )?;
                             writeln!(
                                 sw,
@@ -306,14 +253,8 @@ pub async fn run_tui_mode(
                     client,
                     provider_info,
                     input,
-                    tool_output_limit,
-                    &mut mcp_manager,
-                    orchestrator,
-                    agent_name,
+                    &tool_registry,
                     verbose,
-                    dmn,
-                    enable_image_tool,
-                    enable_search_tool,
                     &mut conversation_history,
                     &mut output_store,
                     &mut session_usage,
@@ -351,7 +292,6 @@ pub async fn run_tui_mode(
     }
 
     // Clear any prompt that r3bl_tui might print during cleanup
-    // This prevents the extra "> " appearing after "Goodbye!"
     execute!(std::io::stdout(), cursor::MoveToColumn(0), Clear(ClearType::CurrentLine))?;
 
     Ok(())
@@ -401,14 +341,8 @@ async fn process_prompt(
     client: &Client,
     provider_info: &ProviderInfo,
     prompt: &str,
-    tool_output_limit: usize,
-    mcp_manager: &mut Option<&mut McpManager>,
-    orchestrator: Option<&AgentOrchestrator>,
-    agent_name: Option<&str>,
+    tool_registry: &ToolRegistry,
     verbose: bool,
-    dmn: bool,
-    enable_image_tool: bool,
-    enable_search_tool: bool,
     conversation_history: &mut Vec<Message>,
     output_store: &mut OutputStore,
     session_usage: &mut SessionUsage,
@@ -417,27 +351,9 @@ async fn process_prompt(
     writeln!(shared_writer)?;
 
     // Create TuiDisplaySink using the SharedWriter for coordinated output
-    // This is the key change - all display output goes through the SharedWriter
     let display: Arc<dyn crate::display_sink::DisplaySink> = Arc::new(
         TuiDisplaySink::new(ctx.clone_shared_writer(), verbose)
     );
-
-    // Prepare the final prompt
-    let final_prompt = if dmn {
-        format!(
-            "{}\n\n---\n\n# USER REQUEST\n\n{}\n\n---\n\nYou are now in DMN (Default Mode Network) autonomous batch mode. Execute the user request above completely using your available MCP tools. Do not stop for confirmation.",
-            DMN_INSTRUCTIONS, prompt
-        )
-    } else {
-        prompt.to_string()
-    };
-
-    // Enable compaction in DMN mode
-    let compaction_config = if dmn {
-        Some(compact::CompactionConfig::default())
-    } else {
-        None
-    };
 
     // Create cancellation channel
     let (cancel_tx, cancel_rx) = watch::channel(false);
@@ -447,57 +363,28 @@ async fn process_prompt(
         monitor_cancel_keys(cancel_tx).await;
     });
 
-    // Run the agent with the TuiDisplaySink - all output is coordinated through SharedWriter
-    let result = match (orchestrator, agent_name) {
-        (Some(orch), Some(name)) if mcp_manager.is_some() => {
-            // Multi-agent mode with cancellation support
-            let manager = mcp_manager.as_deref_mut().unwrap();
-            orch.run_agent(
-                client,
-                &provider_info.resolved_model,
-                name,
-                &final_prompt,
-                None,
-                manager,
-                tool_output_limit,
-                display,
-                0,
-                None,
-                Some(cancel_rx),
-            )
-            .await
-            .map(|r| {
-                if r.status == AgentStatus::Cancelled { Some(true) } else { None }
-            })
-        }
-        _ => {
-            // Single-agent mode with cancellation support
-            agent::run_agent_cancellable(
-                client,
-                &provider_info.resolved_model,
-                &final_prompt,
-                tool_output_limit,
-                mcp_manager.as_deref_mut(),
-                None, // builtin_registry - TUI uses MCP servers via --dmn
-                display,
-                conversation_history,
-                enable_image_tool,
-                enable_search_tool,
-                Some(cancel_rx),
-                compaction_config,
-                Some(output_store),
-            )
-            .await
-            .map(|r| {
-                // Accumulate usage from this run
-                session_usage.total_input_tokens += r.usage.total_input_tokens;
-                session_usage.total_output_tokens += r.usage.total_output_tokens;
-                session_usage.total_cached_tokens += r.usage.total_cached_tokens;
-                session_usage.api_calls += r.usage.api_calls;
-                if r.status == AgentStatus::Cancelled { Some(true) } else { None }
-            })
-        }
-    };
+    // Run the agent with the TuiDisplaySink
+    let result = agent::run_agent_cancellable(
+        client,
+        &provider_info.resolved_model,
+        prompt,
+        50, // tool_output_limit
+        tool_registry,
+        display,
+        conversation_history,
+        Some(cancel_rx),
+        None, // compaction_config
+        Some(output_store),
+    )
+    .await
+    .map(|r| {
+        // Accumulate usage from this run
+        session_usage.total_input_tokens += r.usage.total_input_tokens;
+        session_usage.total_output_tokens += r.usage.total_output_tokens;
+        session_usage.total_cached_tokens += r.usage.total_cached_tokens;
+        session_usage.api_calls += r.usage.api_calls;
+        if r.status == AgentStatus::Cancelled { Some(true) } else { None }
+    });
 
     // Stop cancel key monitoring
     cancel_handle.abort();

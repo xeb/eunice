@@ -1,8 +1,8 @@
-# Eunice - Development Guide
+# Eunice v1.0.0 - Development Guide
 
 ## About
 
-Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It supports **multi-agent orchestration** where agents can invoke other agents as tools. It emphasizes "sophisticated simplicity".
+Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" - minimal configuration with maximum capability.
 
 ## Architecture
 
@@ -11,96 +11,122 @@ Eunice is an agentic CLI runner written in Rust that provides a unified interfac
 The codebase uses a provider abstraction layer that routes requests to different AI APIs:
 
 ```
-User Input → Provider Detection → Client → API Request → Response
+User Input -> Provider Detection -> Client -> API Request -> Response
 ```
 
 **Special Case: Gemini API Dual Support**
 - Most models: Use OpenAI-compatible API (`/v1beta/openai/`)
-- `gemini-3-pro-preview`: Uses native Gemini API (`/v1beta/models/{model}:generateContent`)
+- `gemini-3-*-preview`: Uses native Gemini API (`/v1beta/models/{model}:generateContent`)
 
 ### Key Components
 
 1. **Provider Detection** (`src/provider.rs`)
-   - Detects model → provider mapping
-   - Handles model aliases (e.g., `sonnet` → `claude-sonnet-4-20250514`)
+   - Detects model -> provider mapping
+   - Handles model aliases (e.g., `sonnet` -> `claude-sonnet-4-...`)
    - Sets `use_native_gemini_api` flag for special models
+   - `supports_tools()` function for Ollama model capability detection
 
 2. **Client** (`src/client.rs`)
    - HTTP client with provider-specific headers
-   - Message format conversion (OpenAI ↔ Gemini)
-   - 429 retry logic with 6-second backoff (DMN mode only)
-   - API key rotation support via `ApiKeyRotator`
+   - Message format conversion (OpenAI <-> Gemini)
+   - Retry logic for transient failures
 
-3. **API Key Rotation** (`src/api_keys.rs`)
-   - Loads multiple keys per provider from `~/.eunice/api_keys.toml`
-   - Thread-safe rotation via atomic index
-   - Auto-rotates on 429 rate limit errors
-   - Resets to primary key after successful requests
+3. **Tools** (`src/tools/`)
+   - `ToolRegistry` - centralized registry for 4 built-in tools
+   - `BashTool` - shell command execution
+   - `ReadTool` - file reading with binary detection
+   - `WriteTool` - file writing with directory creation
+   - `SkillTool` - skill discovery and search
 
-4. **MCP Integration** (`src/mcp/`)
-   - Manages multiple MCP server subprocesses (stdio) or HTTP connections
-   - Supports two transports: stdio (command/args) and Streamable HTTP (url)
-   - JSON-RPC communication
-   - Tool discovery and routing
-   - Failed server reporting to model
+4. **Skills** (`src/skills.rs`)
+   - `~/.eunice/skills/<name>/SKILL.md` format
+   - `ensure_default_skills()` - auto-install on first run
+   - `discover_skills()` - keyword-based skill matching
 
-5. **DMN Mode** (`src/config.rs`)
-   - Default Mode Network: Autonomous batch execution
-   - Minimal tool set: shell + filesystem + browser (interpret_image is built-in)
-   - Browser automation (optional, requires Chrome and mcpz)
-   - Shell provides access to grep, curl, wget, git, etc.
-   - Includes comprehensive system instructions
-
-6. **Agent Loop** (`src/agent.rs`)
+5. **Agent Loop** (`src/agent.rs`)
    - Main conversation loop
-   - Tool execution with spinners
+   - Tool execution with output store
    - Conversation history management
-   - Built-in `interpret_image` tool for multimodal analysis
+   - Built-in `get_output` tool for large output retrieval
 
-7. **Multi-Agent Orchestrator** (`src/orchestrator/`)
-   - Manages agent configurations and prompts
-   - Creates `invoke_*` tools for agent-to-agent calls
-   - Filters MCP tools by agent permissions
-   - Handles recursive agent invocation with depth tracking
-   - **Design decision**: Output store is shared across all agents (not per-agent isolation) because agents often work on the same files
-
-8. **Output Store** (`src/output_store.rs`)
-   - Stores full tool outputs in memory (or temp files for >1MB)
+6. **Output Store** (`src/output_store.rs`)
+   - Stores full tool outputs in memory
    - Truncates output to first 50 + last 50 lines for LLM context
    - Provides `get_output` tool for retrieving middle sections
-   - Session-scoped: outputs persist until session ends
 
-9. **TUI vs Interactive Mode**
-   - **TUI mode** (`src/tui/app.rs`): Uses `r3bl_tui` library for enhanced terminal interface with command menu, bracketed paste, and full readline support
-   - **Interactive mode** (`src/interactive.rs`): Simpler REPL loop with basic readline, used as fallback when TUI cannot initialize
-   - **Code flow**: `eunice` (no prompt, TTY) → TUI mode; `eunice` (no prompt, no TTY) → Interactive mode fallback
-   - **Design decision**: Keep both modes separate - TUI provides better UX when available, interactive mode ensures functionality in all terminal environments
-   - Both modes share the same `OutputStore` instance per session
+7. **TUI Mode** (`src/tui/app.rs`)
+   - Uses `r3bl_tui` library for enhanced terminal interface
+   - Command menu, readline support, cancel with Escape
+
+8. **Interactive Mode** (`src/interactive.rs`)
+   - Simpler REPL loop with basic readline
+   - Fallback when TUI cannot initialize
+
+9. **Webapp Mode** (`src/webapp/`)
+   - Axum web server with SSE streaming
+   - Session persistence (in-memory)
+   - Multi-turn conversations
 
 ## Testing
 
-The project includes **30 unit tests** covering:
+The project includes **102 unit tests** covering:
 - Provider detection logic
 - Message format conversions
 - Response parsing
-- Gemini API serialization/deserialization
-- Multi-agent orchestrator logic
+- Tool execution
+- Session persistence
 
 Run tests with:
 ```bash
 cargo test
-# or
-make test
 ```
 
-## Line Count and Binary Size Guidelines
+## File Structure
 
-When updating the codebase, **ALWAYS** update both metrics in README.md:
+```
+src/
+├── main.rs              - CLI entry, arg parsing
+├── lib.rs               - Library exports
+├── models.rs            - Data structures
+├── client.rs            - HTTP client, format conversions
+├── provider.rs          - Provider detection
+├── agent.rs             - Agent loop with tool execution
+├── tools/
+│   ├── mod.rs           - ToolRegistry
+│   ├── bash.rs          - Bash tool
+│   ├── read.rs          - Read tool
+│   ├── write.rs         - Write tool
+│   └── skill.rs         - Skill tool
+├── skills.rs            - Skill system
+├── display.rs           - Terminal UI output
+├── display_sink.rs      - Display abstraction (stdout/TUI)
+├── interactive.rs       - Interactive REPL mode
+├── compact.rs           - Context compaction
+├── output_store.rs      - Large output storage
+├── usage.rs             - Token usage tracking
+├── tui/
+│   ├── mod.rs
+│   └── app.rs           - TUI mode with r3bl_tui
+└── webapp/
+    ├── mod.rs
+    ├── server.rs        - Axum web server
+    ├── handlers.rs      - HTTP/SSE handlers
+    └── persistence.rs   - Session storage
+
+skills/
+├── image_analysis/SKILL.md
+├── web_search/SKILL.md
+└── git_helper/SKILL.md
+```
+
+## Line Count and Binary Size
+
+When updating the codebase, update both metrics in README.md:
 
 ### Count Implementation Lines
 ```bash
 total=0
-for file in src/*.rs src/mcp/*.rs src/orchestrator/*.rs src/mcpz/*.rs src/mcpz/http/*.rs src/mcpz/servers/*.rs src/webapp/*.rs src/tui/*.rs src/browser/*.rs; do
+for file in src/*.rs src/tools/*.rs src/webapp/*.rs src/tui/*.rs; do
   test -f "$file" || continue
   test_start=$(grep -n "^#\[cfg(test)\]" "$file" 2>/dev/null | cut -d: -f1 | head -1)
   if [ -n "$test_start" ]; then
@@ -115,12 +141,8 @@ echo "Total: $total lines"
 
 ### Check Binary Size
 ```bash
-make binary-size
-# or
-cargo build --release && ls -lh target/release/eunice target/release/mcpz target/release/browser
+cargo build --release && ls -lh target/release/eunice
 ```
-
-**Important**: Update both values in README.md after any code changes.
 
 ## Development Workflow
 
@@ -129,503 +151,51 @@ cargo build --release && ls -lh target/release/eunice target/release/mcpz target
 1. Update `Provider` enum in `src/models.rs`
 2. Add detection logic in `src/provider.rs::detect_provider()`
 3. Handle authentication in `src/client.rs::new()`
-4. Add provider-specific logic if needed
-5. Add tests in `src/provider.rs`
+4. Add `supports_tools()` logic if needed
+5. Add tests
 
-### Adding a New Model
+### Adding a New Built-in Tool
 
-1. If using existing provider API format, just add to available models list
-2. If using different API format (like gemini-3-pro-preview):
-   - Add flag to `ProviderInfo`
-   - Implement format conversion in `Client`
-   - Add tests for conversions
+1. Create `src/tools/newtool.rs` with struct and `get_spec()`/`execute()` methods
+2. Add to `ToolRegistry` in `src/tools/mod.rs`
+3. Update `--list-tools` output
+4. Add tests
 
-## Native Gemini API Implementation
+### Creating a Skill
 
-The `gemini-3-pro-preview` model uses a different API format:
-
-**Request Format:**
-```json
-{
-  "contents": [
-    {
-      "parts": [{"text": "user message"}],
-      "role": "user"
-    }
-  ]
-}
-```
-
-**Authentication:**
-- Header: `x-goog-api-key: $GEMINI_API_KEY`
-- URL: `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent`
-
-**Conversion Logic:**
-- `Message::User` → role: "user"
-- `Message::Assistant` → role: "model"
-- `Message::Tool` → converted to `functionResponse` (user role)
-
-## Multi-Agent Architecture
-
-Eunice supports multi-agent orchestration where agents can invoke other agents as tools.
-
-### Configuration
-
-Agents are defined in `eunice.toml`:
-
-```toml
-[mcpServers.shell]
-command = "mcpz"
-args = ["server", "shell"]
-
-# Global tool filtering (optional)
-allowedTools = ["shell_*"]           # Whitelist: only these patterns
-deniedTools = ["*_background"]       # Blacklist: exclude these patterns
-
-[agents.coordinator]
-prompt = "You are the coordinator..."
-root = true                          # Mark this as the entry-point agent
-tools = []                           # Tool patterns this agent can use
-can_invoke = ["worker"]              # Agents this agent can call
-
-[agents.worker]
-prompt = "agents/worker.md"          # Can be file path
-model = "gemini-3-flash-preview"     # Optional: use different model (faster/cheaper)
-tools = ["shell_*"]                  # Supports wildcards: shell_*, *_read, etc.
-can_invoke = []
-```
-
-### Root Agent Selection
-
-The root agent is the entry-point agent that runs first. It's determined by:
-
-1. **`root = true` flag**: If an agent has `root = true`, it becomes the root agent
-2. **Name-based fallback**: If no `root = true` exists, an agent named "root" is used
-3. **First agent fallback**: If neither exists, the first agent in config is used
-
-**Conflict detection**:
-- Error if multiple agents have `root = true`
-- Error if one agent has `root = true` AND another agent is named "root"
-
-### Per-Agent Models
-
-Each agent can specify its own model via the optional `model` field:
-
-- **Default**: Agents without `model` use the `--model` flag value (or auto-detected default)
-- **Override**: Specify `model = "gemini-3-flash-preview"` for faster/cheaper execution
-- **Validation**: All agent models are validated at startup (API key + model availability)
-
-Use faster models (e.g., `gemini-3-flash-preview`) for simpler agents and reserve powerful models for coordinators.
-
-### How It Works
-
-1. When `[agents]` section exists, multi-agent mode is auto-enabled
-2. Root agent is determined by `root = true` flag, or agent named "root" (or specify with `--agent name`)
-3. Each agent gets `invoke_*` tools for agents in `can_invoke`
-4. Agent invocation is recursive with depth tracking
-5. MCP tools are filtered per-agent based on `tools` list
-6. Each agent uses its own model (or default if not specified)
-
-### CLI Usage
-
-```bash
-eunice "task"                    # Uses root agent if agents configured
-eunice --agent worker "task"     # Use specific agent
-eunice --list-agents             # Show configured agents
-```
-
-## Image and PDF Interpretation
-
-Eunice includes a built-in `interpret_image` tool for multimodal analysis of images and PDF documents.
-
-### Enabling
-
-- **DMN mode**: Auto-enabled with `--dmn`
-- **Standalone**: Use `--images` flag
-
-### Implementation (`src/agent.rs`)
-
-1. `get_interpret_image_tool_spec()` - Returns tool definition
-2. `execute_interpret_image()` - Reads file, base64 encodes, calls multimodal API
-3. Tool is added when `enable_image_tool` flag is true
-
-### Multimodal API Support (`src/client.rs`)
-
-- `chat_completion_with_image()` method handles both:
-  - Native Gemini API (via `inlineData`)
-  - OpenAI-compatible API (via `image_url` content blocks)
-
-### Supported Formats
-
-- Images: PNG, JPEG, GIF, WebP
-- Documents: PDF
-
-### CLI Usage
-
-```bash
-eunice --images "Describe screenshot.png"
-eunice --dmn "Analyze diagram.jpg and summarize it"
-eunice --dmn "Extract text from document.pdf"
-```
-
-## Web Search
-
-Eunice includes a built-in `search_query` tool for web searches using Gemini models with Google Search grounding.
-
-### Enabling
-
-- **DMN mode**: Auto-enabled with `--dmn`
-- **Standalone**: Use `--search` flag
-
-### Implementation (`src/agent.rs`)
-
-1. `get_search_query_tool_spec()` - Returns tool definition with model enum
-2. `execute_search_query()` - Makes Gemini API request with `google_search` tool
-3. Tool is added when `enable_search_tool` flag is true
-
-### Model Selection
-
-- `flash` (gemini-2.5-flash): Quick knowledge queries, fast and cheap
-- `pro` (gemini-2.5-pro): Medium complexity queries requiring deeper analysis
-- `pro_preview` (gemini-3-pro-preview): Hardest queries requiring maximum reasoning
-
-### CLI Usage
-
-```bash
-eunice --search --no-mcp "What are the latest AI developments?"
-eunice --dmn "Search for the current weather in Tokyo"
-```
-
-## Research Mode
-
-Eunice includes a built-in `--research` mode for multi-agent research orchestration using Gemini with Google Search grounding.
-
-### Enabling
-
-Use `--research` flag (requires `GEMINI_API_KEY`):
-
-```bash
-eunice --research "Best laptops of 2025"
-eunice --research --chat  # Interactive chat mode for research
-```
-
-### Architecture
-
-Research mode uses 4 embedded agents following the orchestrator-workers pattern:
-
-1. **root** (coordinator): Breaks research into subtopics, delegates to workers, manages workflow
-2. **researcher**: Uses `search_query` tool with `pro_preview` model, saves notes to `research_notes/`
-3. **report_writer**: Reads research notes, synthesizes into reports in `reports/`
-4. **evaluator**: Reviews reports, returns APPROVED or NEEDS_REVISION (one revision cycle)
-
-### Implementation (`src/config.rs`)
-
-- `get_research_mcp_config()` - Returns embedded agent configuration (filesystem + browser MCP servers)
-- `has_gemini_api_key()` - Checks for required API key
-- Embedded prompts: `RESEARCH_LEAD_PROMPT`, `RESEARCH_RESEARCHER_PROMPT`, etc.
-- Researcher agent has access to browser tools (optional, for JavaScript-heavy pages)
-
-### Workflow
-
-1. User provides research topic
-2. Root agent breaks into 2-4 subtopics
-3. Researcher agents search web and save notes
-4. Report writer synthesizes findings
-5. Evaluator reviews (one revision if needed)
-6. Final report in `reports/` directory
-
-### CLI Flags
-
-- `--research`: Enable research mode (conflicts with `--dmn`)
-- `--research --interact`: Interactive research sessions
-- `--research --list-agents`: Show embedded agents
-- `--research --config eunice.toml`: Merge MCP servers from config (agents ignored)
-
-## API Key Rotation
-
-Eunice supports automatic API key rotation when rate limits are encountered.
-
-### Configuration (`~/.eunice/api_keys.toml`)
-
-```toml
-[gemini]
-keys = ["AIza...", "AIza...", "AIza..."]
-
-[anthropic]
-keys = ["sk-ant-1...", "sk-ant-2..."]
-
-[openai]
-keys = ["sk-proj-1...", "sk-proj-2..."]
-```
-
-### Implementation (`src/api_keys.rs`)
-
-1. `ApiKeysConfig` - TOML configuration struct for all providers
-2. `ApiKeyRotator` - Thread-safe rotation via `AtomicUsize` index
-3. `build_rotator()` - Combines env var key (first) with file keys, deduplicates
-
-### Rotation Logic (`src/client.rs`)
-
-1. On 429 error, `rotate()` is called to try next key
-2. Returns `None` if all keys exhausted (back to index 0)
-3. After successful request, `reset()` returns to primary key
-4. Works for both OpenAI-compatible and native Gemini APIs
-
-### CLI Option
-
-```bash
-eunice --api-keys /path/to/api_keys.toml "prompt"
-# Default: ~/.eunice/api_keys.toml (auto-loaded if exists)
-```
-
-## Key Design Decisions
-
-1. **OpenAI-Compatible as Default**: Most providers offer OpenAI-compatible APIs
-2. **Per-Model API Selection**: Uses `use_native_gemini_api` flag for special cases
-3. **Message Format Abstraction**: Internal `Message` enum converts to provider formats
-4. **DMN Mode for Autonomy**: Automatic retry and continuous execution
-5. **MCP for Extensibility**: Tools provided via Model Context Protocol servers
-6. **Agents as Tools**: Agent-to-agent calls are just tool calls, reusing MCP infrastructure
-7. **Built-in Tools**: Special tools like `interpret_image` and `search_query` are handled directly by the agent
-8. **Three Binaries**: eunice, mcpz, and browser are bundled together - one install gets all tools
-
-## mcpz Architecture
-
-mcpz is a runtime MCP router tool bundled with eunice. It provides:
-
-### Package Routing
-- Searches crates.io, PyPI, and npm for MCP server packages
-- Caches user selections in `~/.cache/mcpz/package_mapping.toml`
-- Runs packages via `npx -y`, `uvx`, or `cargo install` + binary execution
-
-### Built-in MCP Servers
-
-| Server | Module | Description |
-|--------|--------|-------------|
-| `shell` | `mcpz/servers/shell.rs` | Execute shell commands with allow/deny patterns |
-| `filesystem` | `mcpz/servers/filesystem.rs` | File operations with directory sandboxing |
-| `sql` | `mcpz/servers/sql.rs` | Query PostgreSQL, MySQL, SQLite databases |
-| `browser` | `mcpz/servers/browser.rs` | Chrome automation via DevTools Protocol |
-
-### HTTP Transport (`mcpz/http/`)
-
-All built-in servers support HTTP transport in addition to stdio:
-- `HttpServerConfig` - Port, host, TLS configuration
-- `SessionManager` - UUID-based session tracking with TTL
-- `TlsConfig` - Self-signed certificate generation or custom certs
-- Endpoint: `POST/GET/DELETE /mcp` per MCP Streamable HTTP spec
-
-### Key Types
-
-- `McpServer` trait (`servers/common.rs`) - Common interface for all servers
-- `JsonRpcRequest`/`JsonRpcResponse` - MCP JSON-RPC message types
-- `PackageType` enum - Cargo, Python, or Npm package types
-- `PackageCache` - TOML-serialized HashMap for package selections
-
-## Browser CLI Architecture
-
-The `browser` binary provides standalone Chrome automation from the command line, using the same `BrowserServer` implementation as the MCP server.
-
-### Entry Point (`src/browser_main.rs`)
-
-- Clap-based CLI with subcommands for all browser operations
-- Global options: `--port`, `--chrome`, `--user-data-dir`, `--json`, `--quiet`, `--verbose`, `--timeout`
-- Uses `BrowserServer` from `mcpz/servers/browser.rs` for all operations
-
-### Browser Database (`src/browser/db.rs`)
-
-SQLite database at `~/.eunice/mcpz/browser.db` storing:
-- **credentials**: Username/password, tokens, cookies for authenticated sites
-- **sessions**: Saved cookie sets for session restore
-- **state**: Chrome port and user data dir for process management
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `start` | Start Chrome with remote debugging (detaches process) |
-| `stop` | Stop Chrome by finding process via DevTools port |
-| `status` | Check if Chrome is available |
-| `open <url>` | Navigate to URL |
-| `page` | Get page content (HTML or `--markdown`) |
-| `screenshot <path>` | Capture screenshot (`--full-page` option) |
-| `pdf <path>` | Save page as PDF |
-| `script <code>` | Execute JavaScript |
-| `tabs` | List open tabs |
-| `click <selector>` | Click element by CSS selector |
-| `type <text>` | Type text (with optional `--selector`) |
-| `wait <selector>` | Wait for element to appear |
-| `cred add/list/get/delete/apply` | Credential management |
-| `session save/list/load/delete` | Session management |
-
-### Design Decisions
-
-1. **Detached Chrome**: `browser start` detaches Chrome so it survives CLI exit
-2. **Port-based process management**: `browser stop` finds Chrome via lsof/pkill on DevTools port
-3. **Shared implementation**: Uses same `BrowserServer` as MCP server for consistency
-4. **SQLite persistence**: Credentials and sessions stored securely in user's home directory
-
-## File Structure
-
-```
-src/
-├── main.rs              - CLI entry, arg parsing, multi-agent detection
-├── models.rs            - Data structures + AgentConfig + WebappConfig
-├── client.rs            - HTTP client, format conversions, key rotation
-├── api_keys.rs          - API key rotation for multi-key configurations
-├── mcp/
-│   ├── mod.rs           - Module exports
-│   ├── server.rs        - MCP subprocess (stdio transport)
-│   ├── http_server.rs   - MCP HTTP client (Streamable HTTP transport)
-│   └── manager.rs       - Tool routing with async state
-├── orchestrator/
-│   ├── mod.rs           - Module exports
-│   └── orchestrator.rs  - Multi-agent coordination
-├── webapp/
-│   ├── mod.rs           - Module exports
-│   ├── server.rs        - Axum web server setup
-│   └── handlers.rs      - HTTP/SSE request handlers
-├── browser/
-│   ├── mod.rs           - Module exports
-│   ├── db.rs            - SQLite database for credentials/sessions
-│   └── output.rs        - Output formatting for browser CLI
-├── browser_main.rs      - browser binary entry point
-├── provider.rs          - Provider detection
-├── display.rs           - Terminal UI output
-├── interactive.rs       - Interactive REPL mode
-├── agent.rs             - Single-agent loop with tool execution
-├── config.rs            - Configuration loading
-├── lib.rs               - Library exports
-├── mcpz_main.rs         - mcpz binary entry point
-└── mcpz/
-    ├── mod.rs           - mcpz module exports
-    ├── cli.rs           - mcpz CLI and package routing
-    ├── http/            - HTTP transport for MCP servers
-    │   ├── mod.rs
-    │   ├── handlers.rs  - POST/GET/DELETE handlers
-    │   ├── server.rs    - Axum server setup
-    │   ├── session.rs   - Session management
-    │   └── tls.rs       - TLS/certificate handling
-    └── servers/         - Built-in MCP servers
-        ├── mod.rs
-        ├── common.rs    - Shared MCP types
-        ├── shell.rs     - Shell command execution
-        ├── filesystem.rs - Filesystem operations
-        ├── sql.rs       - SQL database queries
-        └── browser.rs   - Browser automation (shared by MCP server and CLI)
-
-webapp/
-└── index.html           - Embedded HTML/CSS/JS frontend (synth minimal aesthetic)
-
-dmn_instructions.md      - DMN system instructions (embedded via include_str!)
-```
+1. Create `skills/skill_name/SKILL.md` with `## Description` section
+2. Add to `DEFAULT_SKILLS` in `src/skills.rs` with `include_str!`
 
 ## Dependencies
 
-- **tokio**: Async runtime for HTTP and MCP communication
-- **reqwest**: HTTP client with timeout support
+- **tokio**: Async runtime
+- **reqwest**: HTTP client
 - **serde/serde_json**: Serialization
-- **clap**: CLI with aliases and env var support
+- **clap**: CLI with aliases
 - **colored**: Terminal colors
-- **indicatif**: Progress spinners with braille characters
 - **crossterm**: Terminal control
-- **anyhow/thiserror**: Error handling
-- **base64**: Image encoding for multimodal requests
-
-## Contributing
-
-When adding features:
-1. Write implementation code first
-2. Add unit tests
-3. Update line counts and binary size:
-   - Count implementation lines (see "Line Count Guidelines")
-   - Run `make binary-size` to get release binary size
-   - Update both values in README.md
-4. Update this CLAUDE.md file if structure changed
-5. Run `make test` to verify
-6. Run `cargo build --release` to check for warnings
+- **r3bl_tui**: TUI readline
+- **axum**: Web server
+- **anyhow**: Error handling
 
 ## Version History
 
-- **0.3.6**: Webapp proactive compaction (100 msg threshold, SQLite summaries); rate limit fallback to compaction; Agentic Vision code_execution for Gemini image analysis
-- **0.3.5**: Fix --native flag conflict with synthetic MCP config
-- **0.3.4**: Add --native flag, fix tool count in TUI mode
-- **0.3.3**: DMN browser automation uses CLI tool instead of MCP server
-- **0.3.2**: API key rotation (`~/.eunice/api_keys.toml`), browser CLI (`browser` binary), universal retry logic
-- **0.2.73**: Root agent selection: `root = true` flag to mark entry-point agent (backwards compatible with name-based "root")
-- **0.2.72**: Fix NEW button session bug, improve webapp logging with username and session name
-- **0.2.68**: Multi-agent: required `description` field for agents, visible invoke calls in CLI/TUI/webapp
-- **0.2.67**: Fix session switching: respect session_id from request instead of always using most recent
-- **0.2.66**: Per-agent models: agents can specify their own `model` in config, validated at startup
-- **0.2.59**: Webapp SQLite session persistence (if mcpz installed), hamburger menu with session list, cyberpunk session names
-- **0.2.58**: Display tool call arguments in grey underneath tool name in TUI and CLI output
-- **0.2.57**: Webapp event replay: reconnect to see events that happened while browser was closed; agents continue running when tab closes
-- **0.2.56**: HTTP MCP detailed errors (timeout/status/body), remove --interact flag (TUI auto-launches when no prompt given), fix TUI exit prompt
-- **0.2.55**: TUI mode: Fix line rendering (use crossterm directly instead of SharedWriter for in-place editing)
-- **0.2.54**: DMN mode is now a proper agent (shows in `--dmn --list-agents`) consistent with `--research`
-- **0.2.53**: TUI mode: Bracketed paste support for multiline paste (via Ctrl+Shift+V or terminal paste)
-- **0.2.52**: TUI mode: Escape/Ctrl+C cancellation support to stop generation mid-response
-- **0.2.51**: Add gemini-3-flash-preview as new default model; add gemini-3-flash and gemini-3-pro aliases
-- **0.2.50**: TUI DisplaySink refactor - all output routed through SharedWriter for proper terminal coordination
-- **0.2.49**: TUI mode (`--tui`) using r3bl_tui for enhanced terminal interface with command menu, trimmed response output
-- **0.2.48**: Simplified display output
-- **0.2.47**: Browser `is_available` tool for pre-checking Chrome availability
-- **0.2.46**: Browser automation MCP server for DMN and Research modes (optional, requires Chrome and mcpz)
-- **0.2.42**: Webapp: tabbed Preview/Code view for HTML and Markdown responses
-- **0.2.41**: Webapp: add console logging for debugging (sessions, queries, LLM calls, tool execution); improve spinner terminal cleanup
-- **0.2.40**: Webapp: display version number in status bar footer
-- **0.2.39**: Webapp: fix tool count in status bar to include built-in tools; add session history restoration on page refresh
-- **0.2.38**: Fix spinner terminal artifacts: explicit line clear after stopping spinner to prevent whitespace issues
-- **0.2.37**: Webapp: improved error display (HTTP errors, parse errors, connection closed without response)
-- **0.2.36**: Research mode: `--config` can now be used with `--research` to merge MCP servers (agents ignored)
-- **0.2.35**: Documentation: --webapp examples with custom host/port configuration in README and llms-full.txt
-- **0.2.34**: Webapp: server-side session management with NEW button, localStorage persistence, mobile zoom fix
-- **0.2.33**: Webapp: autoscroll fix, mobile responsive design, markdown/HTML rendering; Interactive: multiline input fix
-- **0.2.32**: Webapp multi-turn sessions with conversation history and automatic context compaction
-- **0.2.31**: Webapp config endpoint includes built-in tools (interpret_image, search_query) when enabled
-- **0.2.30**: Webapp enhancements: Config modal, agent display in status bar, auto-scroll fix
-- **0.2.29**: Webapp mode via `--webapp` flag with browser-based interface and real-time SSE streaming
-- **0.2.27**: Research mode via `--research` flag with built-in multi-agent orchestration (requires GEMINI_API_KEY)
-- **0.2.26**: Web search tool via `--search` flag using Gemini with Google Search grounding
-- **0.2.24**: Enhanced verbose logging for HTTP MCP connections (shows request/response bodies, status, content-type)
-- **0.2.23**: Auto context compression when RESOURCE_EXHAUSTED error occurs (DMN mode)
-- **0.2.22**: Added SSE response parsing for HTTP MCP servers (FastMCP compatibility)
-- **0.2.21**: Fixed HTTP MCP Accept header to include both `application/json` and `text/event-stream` per MCP spec
-- **0.2.12**: Fixed Gemini native API tool response handling (wraps non-object responses)
-- **0.2.11**: Short prefix system for tool names (m0_, m1_) to stay under Gemini's 64-char limit
-- **0.2.10**: Schema sanitization - removes `x-*` extension fields for Gemini compatibility
-- **0.2.9**: Verbose tool schema output for debugging provider compatibility
-- **0.2.8**: Configurable MCP timeout (`timeout` in config), default 10 minutes
-- **0.2.7**: Verbose MCP debugging (`--verbose`), tool name sanitization for Gemini compatibility
-- **0.2.6**: Documentation updates for PDF support
-- **0.2.5**: PDF understanding support via `interpret_image` tool
-- **0.2.4**: Minimal DMN (shell + filesystem only), Design Goals section, curl/wget for web
-- **0.2.3**: Image interpretation via `--images` flag and `interpret_image` built-in tool
-- **0.2.2**: Streamable HTTP MCP transport, failed server reporting to model
-- **0.2.1**: Embedded llms.txt/llms-full.txt via --llms-txt/--llms-full-txt flags
-- **0.2.0**: Multi-agent orchestration, agents can invoke other agents as tools
-- **0.1.12**: TOML config support, mcpz preference for DMN mode
-- **0.1.11**: Default model changed to gemini-3-pro-preview, auto-prompt discovery
-- **0.1.10**: Thinking indicator with elapsed time
-- **0.1.9**: Fixed MCP server timeout (stderr deadlock)
-- **0.1.1**: Added native Gemini API support, 429 retry, spinners, unit tests
-- **0.1.0**: Initial release with multi-provider support and MCP integration
+- **v1.0.0**: Major simplification
+  - 4 built-in tools (Bash, Read, Write, Skill)
+  - Skills system for extensibility
+  - Removed MCP servers
+  - Removed multi-agent orchestration
+  - Removed DMN mode
+  - Removed browser/mcpz binaries
+  - Single binary: eunice
 
 ## Releasing
 
-When the user says "release":
+When releasing:
 1. Run `cargo test` - all tests must pass
 2. Update LOC and binary size in README.md
 3. Bump version in Cargo.toml
 4. Git commit with descriptive message
 5. Git push
-6. **IMPORTANT**: Update version.txt for `--update` to work:
-   ```bash
-   echo "X.Y.Z" > ~/gal/projects/longrunningagents.com/version.txt
-   ```
-   The website is automatically synced via rclone, so this is all that's needed.
-7. Run `eunice --update` to verify the update works
-
-### Version Check System
-
-The `--update` flag and `install.sh` check https://longrunningagents.com/version.txt to determine if an update is needed. This file must contain just the version number (e.g., `0.2.70`). The file at `~/gal/projects/longrunningagents.com/version.txt` is automatically deployed to the website via rclone.
+6. Update version.txt: `echo "X.Y.Z" > ~/gal/projects/longrunningagents.com/version.txt`
+7. Run `eunice --update` to verify
