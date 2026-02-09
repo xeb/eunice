@@ -153,7 +153,8 @@ pub async fn run_agent_cancellable(
 
         // Call the LLM - use streaming if available
         let response = if client.supports_streaming() {
-            // Streaming mode - no thinking indicator, stream chunks directly
+            // Streaming mode - show thinking until first chunk arrives
+            display.write_event(DisplayEvent::ThinkingStart);
             let display_clone = Arc::clone(&display);
             let mut streamed_any = false;
 
@@ -162,6 +163,10 @@ pub async fn run_agent_cancellable(
                 serde_json::to_value(&*conversation_history)?,
                 tools_option.as_deref(),
                 |chunk| {
+                    if !streamed_any {
+                        // First chunk - stop thinking indicator
+                        display_clone.write_event(DisplayEvent::ThinkingStop);
+                    }
                     streamed_any = true;
                     display_clone.write_event(DisplayEvent::StreamChunk {
                         content: chunk.to_string(),
@@ -190,6 +195,9 @@ pub async fn run_agent_cancellable(
             if streamed_any {
                 display.write_event(DisplayEvent::StreamEnd);
                 used_streaming = true;
+            } else {
+                // No content streamed - stop thinking indicator
+                display.write_event(DisplayEvent::ThinkingStop);
             }
 
             result

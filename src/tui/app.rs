@@ -182,6 +182,21 @@ pub async fn run_tui_mode(
                     continue;
                 }
 
+                // Handle exit/quit without slash (case insensitive)
+                let input_lower = input.to_lowercase();
+                if input_lower == "exit" || input_lower == "quit" {
+                    let mut sw = ctx.clone_shared_writer();
+                    if session_usage.has_usage() {
+                        writeln!(sw)?;
+                        let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                        for line in summary.lines() {
+                            writeln!(sw, "{DIM}{}{RESET}", line)?;
+                        }
+                    }
+                    writeln!(sw, "\n{DIM}Goodbye!{RESET}\n")?;
+                    break;
+                }
+
                 // Handle commands
                 if input.starts_with('/') {
                     // If just "/" show command menu

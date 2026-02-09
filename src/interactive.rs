@@ -438,7 +438,8 @@ pub async fn interactive_mode(
             continue;
         }
 
-        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit")
+            || input.eq_ignore_ascii_case("/exit") || input.eq_ignore_ascii_case("/quit") {
             break;
         }
 
