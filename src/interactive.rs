@@ -1,5 +1,6 @@
 use crate::agent::{run_agent_cancellable, AgentStatus};
 use crate::client::Client;
+use crate::compact::CompactionConfig;
 use crate::display;
 use crate::display_sink::create_display_sink;
 use crate::models::Message;
@@ -532,7 +533,7 @@ async fn run_prompt(
         display,
         conversation_history,
         cancel_rx,
-        None, // compaction_config
+        Some(CompactionConfig::default()),
         Some(output_store),
     )
     .await?;

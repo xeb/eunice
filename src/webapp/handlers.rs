@@ -1,5 +1,6 @@
 use super::persistence::SessionMetadata;
 use super::server::AppState;
+use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::models::Message;
 use crate::usage::SessionUsage;
 use axum::{
@@ -816,6 +817,10 @@ async fn run_agent_with_events(
         }
     });
 
+    // Compaction config
+    let compaction_config = CompactionConfig::default();
+    let mut compaction_attempted = false;
+
     // Agent loop
     let mut loop_iteration = 0;
     loop {
@@ -850,11 +855,29 @@ async fn run_agent_with_events(
         let response = match response {
             Ok(r) => {
                 log(&format!("[{}] LLM response received", log_prefix));
+                compaction_attempted = false; // Reset on success
                 r
             }
             Err(e) => {
                 let error_msg = format!("{:#}", e);
                 log(&format!("[{}] LLM error: {}", log_prefix, error_msg));
+
+                // Try compaction if context exhausted
+                if is_context_exhausted_error(&error_msg) && !compaction_attempted {
+                    log(&format!("[{}] Context exhausted, attempting compaction...", log_prefix));
+                    match compact_context(&state.client, &state.provider_info.resolved_model, &conversation_history, &compaction_config).await {
+                        Ok(compacted) => {
+                            log(&format!("[{}] Compaction successful (ratio: {:.2})", log_prefix, compacted.compaction_ratio));
+                            conversation_history = compacted.messages;
+                            compaction_attempted = true;
+                            continue; // Retry with compacted context
+                        }
+                        Err(compact_err) => {
+                            log(&format!("[{}] Compaction failed: {:#}", log_prefix, compact_err));
+                        }
+                    }
+                }
+
                 event_sender.send(SseEvent::Error {
                     message: format!("API error: {:#}", e),
                 }).await;

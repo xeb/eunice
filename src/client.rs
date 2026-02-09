@@ -952,7 +952,7 @@ mod tests {
             resolved_model: "gemini-3-pro-preview".to_string(),
             use_native_gemini_api: true,
         };
-        Client::new(&provider_info, false).unwrap()
+        Client::new(&provider_info).unwrap()
     }
 
     #[test]

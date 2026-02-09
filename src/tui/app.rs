@@ -2,6 +2,7 @@
 
 use crate::agent::{self, AgentStatus};
 use crate::client::Client;
+use crate::compact::CompactionConfig;
 use crate::display_sink::TuiDisplaySink;
 use crate::models::Message;
 use crate::models::ProviderInfo;
@@ -382,7 +383,7 @@ async fn process_prompt(
         display,
         conversation_history,
         Some(cancel_rx),
-        None, // compaction_config
+        Some(CompactionConfig::default()),
         Some(output_store),
     )
     .await
