@@ -79,6 +79,10 @@ struct Args {
     /// Force reinstall even if already up to date (use with --update)
     #[arg(short, long)]
     force: bool,
+
+    /// Uninstall eunice
+    #[arg(long)]
+    uninstall: bool,
 }
 
 /// Auto-discover prompt files in priority order
@@ -207,6 +211,38 @@ fn run_update(force: bool) -> Result<()> {
     }
 }
 
+/// Uninstall eunice
+fn run_uninstall() -> Result<()> {
+    use std::process::{Command, Stdio};
+
+    println!("Uninstalling eunice...");
+    println!();
+
+    // Check if cargo is available
+    let cargo_check = Command::new("cargo").arg("--version").output();
+    if cargo_check.is_err() {
+        return Err(anyhow!("cargo is not installed. Manual removal required."));
+    }
+
+    // Run cargo uninstall
+    let status = Command::new("cargo")
+        .args(["uninstall", "eunice"])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    if status.success() {
+        println!();
+        println!("Uninstall complete!");
+        println!();
+        println!("Note: Configuration files in ~/.eunice/ were preserved.");
+        println!("To remove them: rm -rf ~/.eunice");
+        Ok(())
+    } else {
+        Err(anyhow!("Uninstall failed. Check the output above for details."))
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -220,6 +256,11 @@ async fn main() -> Result<()> {
     // Handle --update
     if args.update {
         return run_update(args.force);
+    }
+
+    // Handle --uninstall
+    if args.uninstall {
+        return run_uninstall();
     }
 
     // Handle --llms-txt
