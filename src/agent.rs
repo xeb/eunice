@@ -1,6 +1,7 @@
 use crate::client::Client;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::display_sink::{DisplayEvent, DisplaySink};
+use crate::key_rotation::{BadKeyAction, RateLimitAction};
 use crate::models::{FunctionSpec, Message, Tool};
 use crate::output_store::OutputStore;
 use crate::tools::ToolRegistry;
@@ -237,6 +238,57 @@ pub async fn run_agent_cancellable(
             Err(e) => {
                 // Use {:#} to get full error chain from anyhow
                 let error_msg = format!("{:#}", e);
+
+                // Check for bad API key (403, invalid key) - blacklist and rotate
+                if Client::is_bad_key_error(&error_msg) {
+                    match client.handle_bad_key() {
+                        BadKeyAction::Rotated { new_key_index } => {
+                            let (_, total) = client.key_info();
+                            display.write_event(DisplayEvent::Info {
+                                message: format!("Invalid API key, switching to key {}/{}", new_key_index, total),
+                            });
+                            continue; // Retry with new key
+                        }
+                        BadKeyAction::AllKeysBad => {
+                            display.write_event(DisplayEvent::Error {
+                                message: "All API keys are invalid".to_string(),
+                            });
+                            return Err(e);
+                        }
+                    }
+                }
+
+                // Check for rate limit / quota error (429, 503, quota exceeded)
+                if Client::is_quota_error(&error_msg) {
+                    match client.handle_rate_limit() {
+                        RateLimitAction::RetryAfterDelay(delay) => {
+                            display.write_event(DisplayEvent::Info {
+                                message: format!("Rate limited, retrying in {}s...", delay.as_secs()),
+                            });
+                            tokio::time::sleep(delay).await;
+                            continue; // Retry with same key
+                        }
+                        RateLimitAction::Rotated { new_key_index } => {
+                            let (_, total) = client.key_info();
+                            display.write_event(DisplayEvent::Info {
+                                message: format!("Rate limited, switching to key {}/{}", new_key_index, total),
+                            });
+                            continue; // Retry with new key
+                        }
+                        RateLimitAction::Exhausted { retry_after } => {
+                            display.write_event(DisplayEvent::Error {
+                                message: format!("All API keys exhausted, retry in {}m", retry_after.as_secs() / 60),
+                            });
+                            return Err(e);
+                        }
+                        RateLimitAction::CooldownReset => {
+                            display.write_event(DisplayEvent::Info {
+                                message: "Cooldown elapsed, retrying with first key...".to_string(),
+                            });
+                            continue; // Retry with first key
+                        }
+                    }
+                }
 
                 // Check if this is a context exhaustion error and we can compact
                 if is_context_exhausted_error(&error_msg)

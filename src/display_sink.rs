@@ -25,6 +25,8 @@ pub enum DisplayEvent {
     StreamChunk { content: String },
     /// Streaming complete (print newline)
     StreamEnd,
+    /// Informational message (key rotation, retries, etc.)
+    Info { message: String },
     /// Error message
     Error { message: String },
 }
@@ -132,6 +134,9 @@ impl DisplaySink for StdDisplaySink {
             DisplayEvent::StreamEnd => {
                 println!();
             }
+            DisplayEvent::Info { message } => {
+                eprintln!("{} {}", "ℹ".cyan(), message.cyan());
+            }
             DisplayEvent::Error { message } => {
                 eprintln!("{} {}", "❌".red(), message.red());
             }
@@ -160,6 +165,7 @@ impl DisplaySink for TuiDisplaySink {
         const YELLOW: &str = "\x1b[33m";
         const BLUE: &str = "\x1b[34m";
         const BRIGHT_BLUE: &str = "\x1b[94m";
+        const CYAN: &str = "\x1b[36m";
         const RED: &str = "\x1b[31m";
         const DIM: &str = "\x1b[2m";
         const RESET: &str = "\x1b[0m";
@@ -220,6 +226,9 @@ impl DisplaySink for TuiDisplaySink {
             }
             DisplayEvent::StreamEnd => {
                 let _ = writeln!(writer);
+            }
+            DisplayEvent::Info { message } => {
+                let _ = writeln!(writer, "{CYAN}ℹ {}{RESET}", message);
             }
             DisplayEvent::Error { message } => {
                 let _ = writeln!(writer, "{RED}❌ {}{RESET}", message);

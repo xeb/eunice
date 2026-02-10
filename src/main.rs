@@ -4,6 +4,7 @@ mod compact;
 mod display;
 mod display_sink;
 mod interactive;
+mod key_rotation;
 mod models;
 mod output_store;
 mod provider;

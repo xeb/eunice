@@ -1,6 +1,8 @@
 use super::persistence::SessionMetadata;
 use super::server::AppState;
+use crate::client::Client;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
+use crate::key_rotation::{BadKeyAction, RateLimitAction};
 use crate::models::Message;
 use crate::usage::SessionUsage;
 use axum::{
@@ -391,6 +393,8 @@ pub enum SseEvent {
     Response { content: String },
     /// Streaming chunk (partial response)
     StreamChunk { content: String },
+    /// Informational message (key rotation, retries, etc.)
+    Info { message: String },
     Error { message: String },
     /// Session ID confirmation (sent at start of query)
     SessionId { session_id: String },
@@ -489,6 +493,7 @@ pub async fn session_events(
             SseEvent::ToolResult { .. } => "tool_result",
             SseEvent::Response { .. } => "response",
             SseEvent::StreamChunk { .. } => "stream_chunk",
+            SseEvent::Info { .. } => "info",
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
             SseEvent::Usage { .. } => "usage",
@@ -576,6 +581,9 @@ impl DisplaySink for WebappDisplaySink {
                 SseEvent::StreamChunk { content }
             }
             DisplayEvent::StreamEnd => return, // No separate event needed
+            DisplayEvent::Info { message } => {
+                SseEvent::Info { message }
+            }
             DisplayEvent::Error { message } => {
                 SseEvent::Error { message }
             }
@@ -727,6 +735,7 @@ pub async fn query(
             SseEvent::ToolResult { .. } => "tool_result",
             SseEvent::Response { .. } => "response",
             SseEvent::StreamChunk { .. } => "stream_chunk",
+            SseEvent::Info { .. } => "info",
             SseEvent::Error { .. } => "error",
             SseEvent::SessionId { .. } => "session_id",
             SseEvent::Usage { .. } => "usage",
@@ -861,6 +870,51 @@ async fn run_agent_with_events(
             Err(e) => {
                 let error_msg = format!("{:#}", e);
                 log(&format!("[{}] LLM error: {}", log_prefix, error_msg));
+
+                // Check for bad API key (403, invalid key) - blacklist and rotate
+                if Client::is_bad_key_error(&error_msg) {
+                    match state.client.handle_bad_key() {
+                        BadKeyAction::Rotated { new_key_index } => {
+                            let (_, total) = state.client.key_info();
+                            log(&format!("[{}] Invalid API key, switching to key {}/{}", log_prefix, new_key_index, total));
+                            continue; // Retry with new key
+                        }
+                        BadKeyAction::AllKeysBad => {
+                            log(&format!("[{}] All API keys are invalid", log_prefix));
+                            event_sender.send(SseEvent::Error {
+                                message: "All API keys are invalid".to_string(),
+                            }).await;
+                            break;
+                        }
+                    }
+                }
+
+                // Check for rate limit / quota error (429, 503, quota exceeded)
+                if Client::is_quota_error(&error_msg) {
+                    match state.client.handle_rate_limit() {
+                        RateLimitAction::RetryAfterDelay(delay) => {
+                            log(&format!("[{}] Rate limited, retrying in {}s...", log_prefix, delay.as_secs()));
+                            tokio::time::sleep(delay).await;
+                            continue; // Retry with same key
+                        }
+                        RateLimitAction::Rotated { new_key_index } => {
+                            let (_, total) = state.client.key_info();
+                            log(&format!("[{}] Rate limited, switching to key {}/{}", log_prefix, new_key_index, total));
+                            continue; // Retry with new key
+                        }
+                        RateLimitAction::Exhausted { retry_after } => {
+                            log(&format!("[{}] All API keys exhausted, retry in {}m", log_prefix, retry_after.as_secs() / 60));
+                            event_sender.send(SseEvent::Error {
+                                message: format!("All API keys exhausted, retry in {}m", retry_after.as_secs() / 60),
+                            }).await;
+                            break;
+                        }
+                        RateLimitAction::CooldownReset => {
+                            log(&format!("[{}] Cooldown elapsed, retrying with first key...", log_prefix));
+                            continue; // Retry with first key
+                        }
+                    }
+                }
 
                 // Try compaction if context exhausted
                 if is_context_exhausted_error(&error_msg) && !compaction_attempted {

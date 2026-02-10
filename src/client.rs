@@ -1,4 +1,5 @@
 use crate::compact::{extract_retry_delay, is_rate_limit_error};
+use crate::key_rotation::{is_bad_key_error, is_quota_error, BadKeyAction, KeyPool, RateLimitAction};
 use crate::models::{
     ChatCompletionRequest, ChatCompletionResponse, GeminiContent, GeminiPart, GeminiRequest, GeminiTool,
     GeminiResponse, Message, Provider, ProviderInfo, Tool,
@@ -6,6 +7,7 @@ use crate::models::{
 use anyhow::{anyhow, Context, Result};
 use rand::Rng;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Retry configuration for API requests
@@ -29,7 +31,7 @@ impl Default for RetryConfig {
 pub struct Client {
     http: reqwest::Client,
     base_url: String,
-    api_key: String,
+    key_pool: Arc<KeyPool>,
     provider: Provider,
     use_native_gemini_api: bool,
     retry_config: RetryConfig,
@@ -38,6 +40,23 @@ pub struct Client {
 impl Client {
     /// Create a new client for the given provider
     pub fn new(provider_info: &ProviderInfo) -> Result<Self> {
+        // Load key pool based on provider
+        let key_pool = match provider_info.provider {
+            Provider::Gemini => {
+                // Try to load from key file, fall back to single key from ProviderInfo
+                match KeyPool::load_gemini() {
+                    Ok(pool) => Arc::new(pool),
+                    Err(_) => Arc::new(KeyPool::single(provider_info.api_key.clone())),
+                }
+            }
+            _ => Arc::new(KeyPool::single(provider_info.api_key.clone())),
+        };
+
+        Self::with_key_pool(provider_info, key_pool)
+    }
+
+    /// Create a new client with a specific key pool
+    pub fn with_key_pool(provider_info: &ProviderInfo, key_pool: Arc<KeyPool>) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -58,19 +77,50 @@ impl Client {
         Ok(Self {
             http,
             base_url: provider_info.base_url.clone(),
-            api_key: provider_info.api_key.clone(),
+            key_pool,
             provider: provider_info.provider.clone(),
             use_native_gemini_api: provider_info.use_native_gemini_api,
             retry_config: RetryConfig::default(),
         })
     }
 
+    /// Get the current API key
+    fn current_api_key(&self) -> &str {
+        self.key_pool.current_key()
+    }
+
+    /// Handle a rate limit error, returns action to take
+    pub fn handle_rate_limit(&self) -> RateLimitAction {
+        self.key_pool.handle_rate_limit()
+    }
+
+    /// Handle a bad key error, returns action to take
+    pub fn handle_bad_key(&self) -> BadKeyAction {
+        self.key_pool.handle_bad_key()
+    }
+
+    /// Check if an error is a rate limit error
+    pub fn is_quota_error(error_msg: &str) -> bool {
+        is_quota_error(error_msg)
+    }
+
+    /// Check if an error is a bad key error
+    pub fn is_bad_key_error(error_msg: &str) -> bool {
+        is_bad_key_error(error_msg)
+    }
+
+    /// Get key pool info for display
+    pub fn key_info(&self) -> (usize, usize) {
+        (self.key_pool.current_index_display(), self.key_pool.key_count())
+    }
+
     /// Add auth header to a request based on provider
     fn add_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let api_key = self.current_api_key();
         match self.provider {
-            Provider::Anthropic => req.header("x-api-key", &self.api_key),
+            Provider::Anthropic => req.header("x-api-key", api_key),
             Provider::Ollama => req, // No auth needed
-            _ => req.header(AUTHORIZATION, format!("Bearer {}", self.api_key)),
+            _ => req.header(AUTHORIZATION, format!("Bearer {}", api_key)),
         }
     }
 
@@ -219,7 +269,7 @@ impl Client {
             let response = self
                 .http
                 .post(&url)
-                .header("x-goog-api-key", &self.api_key)
+                .header("x-goog-api-key", self.current_api_key())
                 .header(CONTENT_TYPE, "application/json")
                 .json(&gemini_request)
                 .send()
@@ -340,7 +390,7 @@ impl Client {
         let response = self
             .http
             .post(&url)
-            .header("x-goog-api-key", &self.api_key)
+            .header("x-goog-api-key", self.current_api_key())
             .header(CONTENT_TYPE, "application/json")
             .json(&gemini_request)
             .send()
@@ -522,7 +572,7 @@ impl Client {
             let response = self
                 .http
                 .post(&url)
-                .header("x-goog-api-key", &self.api_key)
+                .header("x-goog-api-key", self.current_api_key())
                 .json(&gemini_request)
                 .send()
                 .await
