@@ -1,6 +1,6 @@
 # Image Understanding Example
 
-This example demonstrates using Eunice's built-in `interpret_image` tool for multimodal image analysis.
+This example demonstrates using Eunice's image_analysis skill for multimodal image analysis.
 
 ## Files
 
@@ -10,40 +10,27 @@ This example demonstrates using Eunice's built-in `interpret_image` tool for mul
 
 ## Usage
 
-### With DMN Mode (includes all MCP tools)
-
 ```bash
 cd examples/image_understanding
-eunice --dmn --prompt instructions.md
-```
-
-### With --images Flag (standalone, no MCP)
-
-```bash
-cd examples/image_understanding
-eunice --images --no-mcp "Describe the image at sample.jpg"
-```
-
-### Using run.sh
-
-```bash
 ./run.sh
+```
+
+Or directly:
+
+```bash
+eunice --prompt instructions.md "Analyze the image"
 ```
 
 ## How It Works
 
-1. The model receives the prompt asking to analyze an image
-2. It calls the `interpret_image` tool with:
-   - `file_path`: Path to the image file
-   - `prompt`: Analysis instructions
-3. Eunice reads and base64-encodes the image
-4. A multimodal API request is made to the configured provider
-5. The analysis is returned as the tool result
+1. The agent receives the prompt asking to analyze an image
+2. It uses the Skill tool to find the image_analysis skill
+3. It runs the analyze.py script via Bash to analyze the image
+4. The analysis is returned
 
 ## Requirements
 
-- Eunice installed (`cargo install eunice`)
-- A configured API key for a multimodal-capable provider:
-  - `GEMINI_API_KEY` (recommended)
-  - `OPENAI_API_KEY`
-  - `ANTHROPIC_API_KEY`
+- Eunice installed
+- `uv` (Python package manager)
+- For AI description: `GEMINI_API_KEY` environment variable
+- For OCR: Tesseract (`apt install tesseract-ocr` or `brew install tesseract`)

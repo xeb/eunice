@@ -1,6 +1,6 @@
 # Shell Inspection Example
 
-This example demonstrates using Eunice with a single MCP server to perform comprehensive system reconnaissance. The agent executes shell commands to gather detailed information about the host system and compiles the findings into a structured markdown report.
+This example demonstrates using Eunice's built-in Bash tool to perform comprehensive system reconnaissance. The agent executes shell commands to gather detailed information about the host system and compiles the findings into a structured markdown report.
 
 ## What It Does
 
@@ -21,57 +21,24 @@ Categories of information collected:
 - Security posture (firewall, SELinux/AppArmor)
 - Potential vulnerabilities
 
-## Prerequisites
-
-1. Install Eunice:
-   ```bash
-   cargo install eunice
-   ```
-
-2. Install the mcpz shell server:
-   ```bash
-   cargo install mcpz
-   ```
-
-3. Set up an API key for your preferred AI provider (e.g., `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`)
-
 ## Usage
 
-From this directory, simply run:
+From this directory:
 
 ```bash
-eunice
+eunice --prompt instruction.md "Perform the system inspection"
 ```
 
-Eunice will automatically:
-- Load the `eunice.json` configuration (MCP shell server)
+Or create the run script:
+
+```bash
+./run.sh
+```
+
+Eunice will:
 - Read the `instruction.md` file as the system prompt
-- Begin executing shell commands and gathering system information
+- Use the built-in Bash tool to execute commands
 - Create `workspace/inspection.md` with the compiled report
-
-## Configuration
-
-### eunice.json
-
-```json
-{
-  "mcpServers": {
-    "shell": {
-      "command": "mcpz",
-      "args": ["server", "shell"]
-    }
-  }
-}
-```
-
-This configures a single MCP server providing shell execution capabilities via [mcpz](https://github.com/xelamonster/mcpz).
-
-### instruction.md
-
-Contains detailed instructions for the agent specifying:
-- Which shell commands to execute
-- How to handle command failures
-- The expected output format for the report
 
 ## Output
 

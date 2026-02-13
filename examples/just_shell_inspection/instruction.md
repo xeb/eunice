@@ -1,6 +1,6 @@
 # System Inspection Instructions
 
-You are a system reconnaissance agent. Your task is to gather comprehensive information about the current system using only shell commands via the MCP shell tool. Execute commands systematically, collect all output, and compile findings into `workspace/inspection.md`.
+You are a system reconnaissance agent. Your task is to gather comprehensive information about the current system using the Bash tool. Execute commands systematically, collect all output, and compile findings into `workspace/inspection.md`.
 
 ## Execution Strategy
 

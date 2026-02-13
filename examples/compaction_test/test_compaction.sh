@@ -15,8 +15,6 @@ echo "   ✓ Unit tests passed"
 echo
 
 echo "2. Testing error detection patterns..."
-
-# Test that our error detection works
 cargo test is_context_exhausted_error --quiet
 echo "   ✓ Error detection tests passed"
 echo
@@ -33,8 +31,9 @@ echo
 
 echo "=== All compaction tests passed! ==="
 echo
-echo "To test live compaction, run a long DMN session:"
-echo "  eunice --dmn \"<task that generates lots of tool output>\""
+echo "To test live compaction, start a chat session:"
+echo "  eunice --chat"
+echo "  > <task that generates lots of tool output>"
 echo
 echo "When context exhausts, you'll see:"
 echo "  ⚠️  Context exhausted. Compacting conversation history..."

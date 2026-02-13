@@ -1,5 +1,0 @@
-- LangGraph - analyzed on Wed Nov 26 03:26:19 PM PST 2025 - see analyses/langgraph.md
-- CrewAI - analyzed on Wed Nov 26 03:26:19 PM PST 2025 - see analyses/crewai.md
-- [smolagents](https://github.com/huggingface/smolagents) - Analyzed on 2025-11-26
-- [pydantic-ai](https://github.com/pydantic/pydantic-ai) - Analyzed on 2025-11-26
-- [beeai-framework](https://github.com/i-am-bee/beeai-framework) - Analyzed on 2025-11-26

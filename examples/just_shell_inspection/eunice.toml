@@ -1,3 +1,0 @@
-[mcpServers.shell]
-command = "mcpz"
-args = ["server", "shell"]

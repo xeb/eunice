@@ -1,24 +1,13 @@
 #!/bin/bash
 
 # Codebase Archaeologist - Autonomous codebase exploration agent
-# Usage: ./run.sh [--n=<iterations>] [--model=<model>] [--target=<path>]
+# Usage: ./run.sh [--target=<path>]
 
-# Defaults
-n=1
-model="gemini-3-pro-preview"
 target=""
 
 # Parse arguments
 for arg in "$@"; do
     case $arg in
-        --n=*)
-            n="${arg#*=}"
-            shift
-            ;;
-        --model=*)
-            model="${arg#*=}"
-            shift
-            ;;
         --target=*)
             target="${arg#*=}"
             shift
@@ -33,9 +22,5 @@ if [ -n "$target" ]; then
     echo "Target set to: $target"
 fi
 
-# Run the agent n times (each run explores one component)
-for ((i=1; i<=n; i++)); do
-    echo "=== Exploration Run $i of $n ==="
-    eunice --dmn --model="$model" instructions.md
-    echo ""
-done
+# Run the exploration
+eunice --prompt instructions.md "Explore the codebase and document your findings."

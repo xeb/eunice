@@ -20,8 +20,9 @@ To test context compaction, you need to exhaust the context window. This typical
 - Extensive code analysis
 
 ```bash
-# Run eunice in DMN mode with a task that will exhaust context
-eunice --dmn "Read every file in this large project and analyze them all"
+# Start an interactive session with a task that will exhaust context
+eunice --chat
+> Read every file in this large project and analyze them all
 ```
 
 When context is exhausted, you'll see:
@@ -30,7 +31,7 @@ When context is exhausted, you'll see:
 ✓ Compacted to 45% of original size using lightweight compaction
 ```
 
-### Programmatic Test
+### Unit Tests
 
 Run the test script to verify the compaction logic:
 
@@ -39,19 +40,6 @@ Run the test script to verify the compaction logic:
 ```
 
 This script tests the `is_context_exhausted_error` detection and runs `cargo test` for compaction unit tests.
-
-## Compaction Configuration
-
-The `CompactionConfig` struct controls behavior:
-
-```rust
-CompactionConfig {
-    preserve_recent_messages: 10,    // Keep last N messages with full content
-    tool_output_max_chars: 200,      // Max chars for old tool outputs
-    try_lightweight_first: true,     // Try lightweight before full summarization
-    enabled: true,                   // Can be disabled via config
-}
-```
 
 ## Error Detection
 
