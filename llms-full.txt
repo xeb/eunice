@@ -1,6 +1,6 @@
-# Eunice v1.0.0
+# Eunice v1.0.1
 
-An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
+An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
 
 ## Overview
 
@@ -35,6 +35,11 @@ eunice "List all files in the current directory"
 
 # Interactive chat mode
 eunice --chat
+
+# Use a specific model
+eunice --model flash "Hello"
+eunice --model sonnet "Explain this code"
+eunice --model azure:gpt-4o-mini "Hello from Azure"
 ```
 
 ## Built-in Tools
@@ -83,15 +88,22 @@ EOF
 
 ### Google Gemini (Default)
 Set `GEMINI_API_KEY`. Default model: `gemini-3-flash-preview`
+Aliases: `flash` -> gemini-3-flash-preview, `pro` -> gemini-3-pro-preview
 
 ### OpenAI
 Set `OPENAI_API_KEY`. Models: gpt-4o, gpt-4o-mini, o1, o3, etc.
 
 ### Anthropic Claude
 Set `ANTHROPIC_API_KEY`. Models: claude-sonnet-4, claude-opus-4, etc.
+Aliases: `sonnet`, `opus`, `haiku`
+
+### Azure OpenAI
+Set `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`.
+Optional: `AZURE_OPENAI_API_VERSION` (default: 2024-02-01)
+Usage: `--model azure:<deployment-name>`
 
 ### Ollama (Local)
-Runs against localhost:11434. Supports tool-capable models like llama3.1, qwen2.5, etc.
+Runs against localhost:11434. Tool-capable models: llama3.1, llama3.2, qwen2.5, qwen3, glm, deepseek, mistral-nemo, etc.
 
 ## CLI Reference
 
@@ -110,8 +122,7 @@ Options:
       --list-tools      List the 4 built-in tools
       --llms-txt        Output full LLM context documentation
       --update          Update eunice to the latest version
-      --verbose         Enable verbose debug output
-      --silent          Suppress non-essential output
+      --debug           Enable debug output for API calls
   -h, --help            Print help
   -V, --version         Print version
 ```
@@ -122,9 +133,11 @@ Start a web server interface:
 
 ```bash
 eunice --webapp
+# or with custom host/port
+eunice --webapp --host 0.0.0.0 --port 8811
 ```
 
-Opens at http://localhost:8080 by default.
+Opens at http://localhost:8811 by default.
 
 ## Configuration
 
@@ -135,7 +148,11 @@ No configuration files required. Eunice uses environment variables for API keys 
 - `GEMINI_API_KEY` - Google AI Studio API key
 - `OPENAI_API_KEY` - OpenAI API key
 - `ANTHROPIC_API_KEY` - Anthropic API key
+- `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL
+- `AZURE_OPENAI_API_KEY` - Azure OpenAI API key
+- `AZURE_OPENAI_API_VERSION` - Azure API version (optional)
 - `OLLAMA_HOST` - Ollama server address (default: localhost:11434)
+- `EUNICE_DEBUG` - Enable debug output (alternative to --debug flag)
 
 ### Prompt Files
 
@@ -144,9 +161,13 @@ Eunice auto-discovers prompt files in the current directory:
 - instruction.txt, instruction.md
 - instructions.txt, instructions.md
 
+### API Key Rotation (Gemini)
+
+For high-volume usage, place multiple Gemini API keys in `~/.eunice/gemini-api-keys.txt` (one per line). Eunice will rotate through them on rate limit errors.
+
 ## Version
 
-v1.0.0
+v1.0.1
 
 ## License
 
