@@ -30,6 +30,7 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
                 "granite",
                 "hermes",
                 "deepseek",
+                "glm",
             ];
 
             tool_families.iter().any(|f| model_lower.contains(f))

@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
 
-**7,648 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
+**7,787 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -109,7 +109,7 @@ The Skill tool searches these directories to find relevant skills for a task.
 | OpenAI | `OPENAI_API_KEY` | gpt-4o |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4 |
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` | (deployment-specific) |
-| Ollama | (no key needed) | llama3.1 |
+| Ollama | (no key needed) | llama3.1, glm-4, qwen3, deepseek-r1 |
 
 ### Model Aliases
 
@@ -154,8 +154,7 @@ Options:
       --list-tools      List the 4 built-in tools
       --llms-txt        Output full LLM context documentation
       --update          Update to the latest version
-      --verbose         Enable verbose debug output
-      --silent          Suppress non-essential output
+      --debug           Enable debug output for API calls
   -h, --help            Print help
   -V, --version         Print version
 ```
@@ -203,5 +202,6 @@ MIT License
 
 ## Version History
 
+- **v1.0.1**: Azure OpenAI support, GLM model support, --debug flag
 - **v1.0.0**: Major simplification - 4 built-in tools, skills system, no MCP/orchestrator
 - **v0.3.x**: Full-featured with MCP servers, multi-agent, DMN mode, research mode
