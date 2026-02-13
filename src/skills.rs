@@ -58,6 +58,21 @@ const DEFAULT_SKILLS: &[Skill] = &[
             },
         ],
     },
+    Skill {
+        name: "pdf_analysis",
+        files: &[
+            SkillFile {
+                filename: "SKILL.md",
+                content: include_str!("../skills/pdf_analysis/SKILL.md"),
+                executable: false,
+            },
+            SkillFile {
+                filename: "analyze.py",
+                content: include_str!("../skills/pdf_analysis/analyze.py"),
+                executable: true,
+            },
+        ],
+    },
 ];
 
 /// Get the skills directory path

@@ -1,18 +1,5 @@
 # PDF Analysis Task
 
-Analyze the PDF at `sample.pdf` in this directory.
+Use the Skill tool to find the pdf_analysis skill, then use the provided analyze.py script to analyze `sample.pdf` in this directory.
 
-Use these command-line tools (install with `apt install poppler-utils` if needed):
-
-```bash
-# Get PDF metadata
-pdfinfo sample.pdf
-
-# Extract text from PDF
-pdftotext sample.pdf -
-
-# Get page count
-pdfinfo sample.pdf | grep Pages
-```
-
-Describe what you find in the PDF, including any text content and metadata.
+Describe what you find in the PDF, including any text content, metadata, and images.

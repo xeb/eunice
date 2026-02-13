@@ -1,6 +1,6 @@
 #!/bin/bash
 
 # PDF Understanding Example
-# Uses external tools (pdftotext, pdfinfo) via Bash to analyze PDFs
+# Uses the pdf_analysis skill to analyze PDFs
 
-eunice --prompt instructions.md "Analyze the PDF"
+eunice --prompt instructions.md "Analyze the PDF using the pdf_analysis skill"
