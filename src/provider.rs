@@ -14,6 +14,9 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
         // All Claude models support tools
         Provider::Anthropic => true,
 
+        // Azure OpenAI models support tools (same as OpenAI)
+        Provider::AzureOpenAI => true,
+
         // Ollama: check by model family
         Provider::Ollama => {
             let model_lower = model.to_lowercase();
@@ -80,8 +83,8 @@ fn resolve_anthropic_alias(model: &str) -> &str {
 /// Resolve Gemini model aliases to full model names
 fn resolve_gemini_alias(model: &str) -> &str {
     match model {
-        "gemini-3-flash" => "gemini-3-flash-preview",
-        "gemini-3-pro" => "gemini-3-pro-preview",
+        "flash" | "gemini-3-flash" => "gemini-3-flash-preview",
+        "pro" | "gemini-3-pro" => "gemini-3-pro-preview",
         _ => model,
     }
 }
@@ -91,7 +94,12 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
 
     // 1. Check for Gemini models (explicit prefix or aliases)
-    if model.starts_with("gemini") || model == "gemini-3-flash" || model == "gemini-3-pro" {
+    if model.starts_with("gemini")
+        || model == "gemini-3-flash"
+        || model == "gemini-3-pro"
+        || model == "flash"
+        || model == "pro"
+    {
         let api_key = env::var("GEMINI_API_KEY")
             .map_err(|_| anyhow!("GEMINI_API_KEY required for model '{}'", model))?;
 
@@ -113,6 +121,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             api_key,
             resolved_model,
             use_native_gemini_api: use_native_api,
+            azure_api_version: None,
         });
     }
 
@@ -137,10 +146,33 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             api_key,
             resolved_model,
             use_native_gemini_api: false,
+            azure_api_version: None,
         });
     }
 
-    // 3. Check if the model exists in Ollama (even if it matches OpenAI patterns)
+    // 3. Check for Azure OpenAI models (azure:<deployment-name>)
+    if let Some(deployment) = model.strip_prefix("azure:") {
+        let endpoint = env::var("AZURE_OPENAI_ENDPOINT")
+            .map_err(|_| anyhow!("AZURE_OPENAI_ENDPOINT required for Azure OpenAI models"))?;
+        let api_key = env::var("AZURE_OPENAI_API_KEY")
+            .map_err(|_| anyhow!("AZURE_OPENAI_API_KEY required for Azure OpenAI models"))?;
+        let api_version = env::var("AZURE_OPENAI_API_VERSION")
+            .unwrap_or_else(|_| "2024-02-01".to_string());
+
+        // Normalize endpoint (remove trailing slash if present)
+        let endpoint = endpoint.trim_end_matches('/');
+
+        return Ok(ProviderInfo {
+            provider: Provider::AzureOpenAI,
+            base_url: format!("{}/openai/deployments/", endpoint),
+            api_key,
+            resolved_model: deployment.to_string(),
+            use_native_gemini_api: false,
+            azure_api_version: Some(api_version),
+        });
+    }
+
+    // 4. Check if the model exists in Ollama (even if it matches OpenAI patterns)
     // This allows local models like gpt-oss to be routed to Ollama
     if check_ollama_available(Some(model)).is_ok() {
         return Ok(ProviderInfo {
@@ -149,10 +181,11 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             api_key: "ollama".to_string(),
             resolved_model: model.to_string(),
             use_native_gemini_api: false,
+            azure_api_version: None,
         });
     }
 
-    // 4. Check for explicit OpenAI patterns
+    // 5. Check for explicit OpenAI patterns
     let is_openai_pattern = model.starts_with("gpt-")
         || model.starts_with("gpt4")
         || model.starts_with("gpt5")
@@ -173,10 +206,11 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             api_key,
             resolved_model: model.to_string(),
             use_native_gemini_api: false,
+            azure_api_version: None,
         });
     }
 
-    // 5. Fallback: assume Ollama but warn if not available
+    // 6. Fallback: assume Ollama but warn if not available
     if check_ollama_available(None).is_ok() {
         Ok(ProviderInfo {
             provider: Provider::Ollama,
@@ -184,6 +218,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             api_key: "ollama".to_string(),
             resolved_model: model.to_string(),
             use_native_gemini_api: false,
+            azure_api_version: None,
         })
     } else {
         Err(anyhow!(
@@ -281,6 +316,15 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
     let anthropic_available = env::var("ANTHROPIC_API_KEY").is_ok();
     result.push((Provider::Anthropic, anthropic_models, anthropic_available));
 
+    // Azure OpenAI
+    let azure_available = env::var("AZURE_OPENAI_ENDPOINT").is_ok() && env::var("AZURE_OPENAI_API_KEY").is_ok();
+    let azure_models = if azure_available {
+        vec!["azure:<deployment-name> (use your Azure deployment name)".to_string()]
+    } else {
+        vec![]
+    };
+    result.push((Provider::AzureOpenAI, azure_models, azure_available));
+
     // Ollama
     let ollama_models = check_ollama_available(None).unwrap_or_default();
     let ollama_available = !ollama_models.is_empty();
@@ -344,6 +388,9 @@ mod tests {
     fn test_gemini_alias_resolution() {
         assert_eq!(resolve_gemini_alias("gemini-3-flash"), "gemini-3-flash-preview");
         assert_eq!(resolve_gemini_alias("gemini-3-pro"), "gemini-3-pro-preview");
+        // Short aliases
+        assert_eq!(resolve_gemini_alias("flash"), "gemini-3-flash-preview");
+        assert_eq!(resolve_gemini_alias("pro"), "gemini-3-pro-preview");
         // Pass through if not an alias
         assert_eq!(resolve_gemini_alias("gemini-2.5-flash"), "gemini-2.5-flash");
     }
@@ -419,5 +466,52 @@ mod tests {
         }
 
         std::env::remove_var("OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn test_azure_openai_detection() {
+        std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
+        std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
+
+        let result = detect_provider("azure:gpt-4o-mini");
+        assert!(result.is_ok());
+
+        let provider_info = result.unwrap();
+        assert_eq!(provider_info.provider, Provider::AzureOpenAI);
+        assert_eq!(provider_info.resolved_model, "gpt-4o-mini");
+        assert_eq!(provider_info.base_url, "https://test.openai.azure.com/openai/deployments/");
+        assert!(provider_info.azure_api_version.is_some());
+        assert!(!provider_info.use_native_gemini_api);
+
+        std::env::remove_var("AZURE_OPENAI_ENDPOINT");
+        std::env::remove_var("AZURE_OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn test_azure_openai_requires_env_vars() {
+        // Clear any existing env vars
+        std::env::remove_var("AZURE_OPENAI_ENDPOINT");
+        std::env::remove_var("AZURE_OPENAI_API_KEY");
+
+        let result = detect_provider("azure:gpt-4o-mini");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("AZURE_OPENAI_ENDPOINT"));
+    }
+
+    #[test]
+    fn test_azure_openai_custom_api_version() {
+        std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
+        std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
+        std::env::set_var("AZURE_OPENAI_API_VERSION", "2024-08-01");
+
+        let result = detect_provider("azure:my-deployment");
+        assert!(result.is_ok());
+
+        let provider_info = result.unwrap();
+        assert_eq!(provider_info.azure_api_version, Some("2024-08-01".to_string()));
+
+        std::env::remove_var("AZURE_OPENAI_ENDPOINT");
+        std::env::remove_var("AZURE_OPENAI_API_KEY");
+        std::env::remove_var("AZURE_OPENAI_API_VERSION");
     }
 }

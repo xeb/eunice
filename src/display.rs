@@ -36,7 +36,7 @@ pub fn print_model_list() {
         let key_status = get_key_status(&provider, available);
 
         // Check if all models in this provider support tools
-        let all_support_tools = matches!(provider, Provider::OpenAI | Provider::Gemini | Provider::Anthropic);
+        let all_support_tools = matches!(provider, Provider::OpenAI | Provider::Gemini | Provider::Anthropic | Provider::AzureOpenAI);
         let tools_note = if all_support_tools { " ✓" } else { "" };
 
         println!(
@@ -79,6 +79,18 @@ fn get_key_status(provider: &Provider, available: bool) -> String {
                 "running".to_string()
             } else {
                 "not running".to_string()
+            }
+        }
+        Provider::AzureOpenAI => {
+            // Azure uses AZURE_OPENAI_API_KEY
+            if let Ok(key) = env::var("AZURE_OPENAI_API_KEY") {
+                if key.len() >= 4 {
+                    format!("...{}", &key[key.len() - 4..])
+                } else {
+                    "set".to_string()
+                }
+            } else {
+                "not set".to_string()
             }
         }
         _ => {

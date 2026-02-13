@@ -117,6 +117,20 @@ fn get_pricing(model: &str, provider: &Provider) -> (f64, f64) {
             // Ollama is free (local)
             (0.0, 0.0)
         }
+        Provider::AzureOpenAI => {
+            // Azure OpenAI pricing varies by deployment, use similar to OpenAI
+            if model.contains("gpt-4o-mini") {
+                (0.15, 0.60)
+            } else if model.contains("gpt-4o") {
+                (2.50, 10.00)
+            } else if model.contains("gpt-4") {
+                (10.00, 30.00)
+            } else if model.contains("gpt-35") || model.contains("gpt-3.5") {
+                (0.50, 1.50)
+            } else {
+                (2.50, 10.00)  // Default to gpt-4o pricing
+            }
+        }
     }
 }
 

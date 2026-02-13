@@ -84,6 +84,10 @@ struct Args {
     /// Uninstall eunice
     #[arg(long)]
     uninstall: bool,
+
+    /// Enable debug output for API calls
+    #[arg(long)]
+    debug: bool,
 }
 
 /// Auto-discover prompt files in priority order
@@ -250,7 +254,10 @@ async fn main() -> Result<()> {
 
     // Handle --list-models
     if args.list_models {
-        display::print_model_list();
+        // Use block_in_place to allow blocking HTTP calls for Ollama check
+        tokio::task::block_in_place(|| {
+            display::print_model_list();
+        });
         return Ok(());
     }
 
@@ -326,7 +333,13 @@ async fn main() -> Result<()> {
     }
 
     // Create client
-    let client = Client::new(&provider_info)?;
+    let mut client = Client::new(&provider_info)?;
+    if args.debug {
+        client.set_debug(true);
+        eprintln!("[DEBUG] Debug mode enabled");
+        eprintln!("[DEBUG] Model: {}, Provider: {}", model, provider_info.provider);
+        eprintln!("[DEBUG] Base URL: {}", provider_info.base_url);
+    }
 
     // Webapp mode
     if args.webapp {

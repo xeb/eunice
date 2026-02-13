@@ -108,6 +108,7 @@ The Skill tool searches these directories to find relevant skills for a task.
 | Google Gemini | `GEMINI_API_KEY` | gemini-3-flash-preview |
 | OpenAI | `OPENAI_API_KEY` | gpt-4o |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4 |
+| Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` | (deployment-specific) |
 | Ollama | (no key needed) | llama3.1 |
 
 ### Model Aliases
@@ -119,6 +120,21 @@ eunice --model sonnet "..."    # claude-sonnet-4-...
 eunice --model opus "..."      # claude-opus-4-...
 eunice --model flash "..."     # gemini-3-flash-preview
 eunice --model pro "..."       # gemini-3-pro-preview
+```
+
+### Azure OpenAI
+
+Azure OpenAI uses the `azure:<deployment-name>` format:
+
+```bash
+# Set up Azure OpenAI environment
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
+export AZURE_OPENAI_API_KEY="your-api-key"
+export AZURE_OPENAI_API_VERSION="2024-02-01"  # optional, defaults to 2024-02-01
+
+# Use your deployment name after azure:
+eunice --model azure:gpt-4o-mini "Hello"
+eunice --model azure:my-custom-deployment "Explain this code"
 ```
 
 ## CLI Reference

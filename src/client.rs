@@ -35,6 +35,10 @@ pub struct Client {
     provider: Provider,
     use_native_gemini_api: bool,
     retry_config: RetryConfig,
+    /// Azure OpenAI API version (e.g., "2024-02-01")
+    azure_api_version: Option<String>,
+    /// Enable debug output
+    debug: bool,
 }
 
 impl Client {
@@ -81,7 +85,14 @@ impl Client {
             provider: provider_info.provider.clone(),
             use_native_gemini_api: provider_info.use_native_gemini_api,
             retry_config: RetryConfig::default(),
+            azure_api_version: provider_info.azure_api_version.clone(),
+            debug: std::env::var("EUNICE_DEBUG").is_ok(),
         })
+    }
+
+    /// Enable or disable debug mode
+    pub fn set_debug(&mut self, debug: bool) {
+        self.debug = debug;
     }
 
     /// Get the current API key
@@ -120,6 +131,7 @@ impl Client {
         match self.provider {
             Provider::Anthropic => req.header("x-api-key", api_key),
             Provider::Ollama => req, // No auth needed
+            Provider::AzureOpenAI => req.header("api-key", api_key),
             _ => req.header(AUTHORIZATION, format!("Bearer {}", api_key)),
         }
     }
@@ -153,7 +165,13 @@ impl Client {
         }
 
         // Standard OpenAI-compatible API
-        let url = format!("{}chat/completions", self.base_url);
+        let url = if let Provider::AzureOpenAI = self.provider {
+            // Azure OpenAI: {base_url}{deployment}/chat/completions?api-version={version}
+            let api_version = self.azure_api_version.as_deref().unwrap_or("2024-02-01");
+            format!("{}{}/chat/completions?api-version={}", self.base_url, model, api_version)
+        } else {
+            format!("{}chat/completions", self.base_url)
+        };
 
         let request = ChatCompletionRequest {
             model: model.to_string(),
@@ -164,6 +182,12 @@ impl Client {
 
         let mut attempt = 0u32;
         loop {
+            if self.debug {
+                eprintln!("[DEBUG] POST {} (attempt {})", url, attempt + 1);
+                eprintln!("[DEBUG] Provider: {:?}, Model: {}", self.provider, model);
+            }
+
+            let start = std::time::Instant::now();
             let response = self
                 .add_auth(self.http.post(&url))
                 .json(&request)
@@ -171,7 +195,12 @@ impl Client {
                 .await
                 .context("Failed to send request")?;
 
+            let elapsed = start.elapsed();
             let status = response.status().as_u16();
+
+            if self.debug {
+                eprintln!("[DEBUG] Response: {} in {:.2}s", status, elapsed.as_secs_f64());
+            }
 
             if Self::is_retryable_status(status) {
                 let error_text = response.text().await.unwrap_or_default();
@@ -266,6 +295,11 @@ impl Client {
 
         let mut attempt = 0u32;
         loop {
+            if self.debug {
+                eprintln!("[DEBUG] POST {} (Gemini native, attempt {})", url, attempt + 1);
+            }
+
+            let start = std::time::Instant::now();
             let response = self
                 .http
                 .post(&url)
@@ -276,7 +310,12 @@ impl Client {
                 .await
                 .context("Failed to send Gemini request")?;
 
+            let elapsed = start.elapsed();
             let status = response.status().as_u16();
+
+            if self.debug {
+                eprintln!("[DEBUG] Response: {} in {:.2}s", status, elapsed.as_secs_f64());
+            }
 
             if Self::is_retryable_status(status) {
                 let error_text = response.text().await.unwrap_or_default();
@@ -387,6 +426,12 @@ impl Client {
         // Use streamGenerateContent endpoint
         let url = format!("{}{}:streamGenerateContent?alt=sse", self.base_url, model);
 
+        if self.debug {
+            eprintln!("[DEBUG] POST {} (streaming)", url);
+            eprintln!("[DEBUG] Provider: {:?}, Model: {}", self.provider, model);
+        }
+
+        let start = std::time::Instant::now();
         let response = self
             .http
             .post(&url)
@@ -396,6 +441,11 @@ impl Client {
             .send()
             .await
             .context("Failed to send Gemini streaming request")?;
+
+        if self.debug {
+            let elapsed = start.elapsed();
+            eprintln!("[DEBUG] Streaming response started: {} in {:.2}s", response.status(), elapsed.as_secs_f64());
+        }
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -1001,6 +1051,7 @@ mod tests {
             api_key: "test-key".to_string(),
             resolved_model: "gemini-3-pro-preview".to_string(),
             use_native_gemini_api: true,
+            azure_api_version: None,
         };
         Client::new(&provider_info).unwrap()
     }

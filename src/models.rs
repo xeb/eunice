@@ -7,6 +7,7 @@ pub enum Provider {
     Gemini,
     Anthropic,
     Ollama,
+    AzureOpenAI,
 }
 
 impl std::fmt::Display for Provider {
@@ -16,6 +17,7 @@ impl std::fmt::Display for Provider {
             Provider::Gemini => write!(f, "Gemini"),
             Provider::Anthropic => write!(f, "Anthropic"),
             Provider::Ollama => write!(f, "Ollama"),
+            Provider::AzureOpenAI => write!(f, "Azure OpenAI"),
         }
     }
 }
@@ -27,6 +29,7 @@ impl Provider {
             Provider::Gemini => "💎",
             Provider::Anthropic => "🧠",
             Provider::Ollama => "🦙",
+            Provider::AzureOpenAI => "☁️",
         }
     }
 }
@@ -39,6 +42,8 @@ pub struct ProviderInfo {
     pub api_key: String,
     pub resolved_model: String,
     pub use_native_gemini_api: bool,
+    /// Azure OpenAI API version (e.g., "2024-02-01")
+    pub azure_api_version: Option<String>,
 }
 
 /// Message types for conversation history
