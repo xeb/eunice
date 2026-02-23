@@ -85,7 +85,8 @@ fn resolve_anthropic_alias(model: &str) -> &str {
 fn resolve_gemini_alias(model: &str) -> &str {
     match model {
         "flash" | "gemini-3-flash" => "gemini-3-flash-preview",
-        "pro" | "gemini-3-pro" => "gemini-3-pro-preview",
+        "pro" | "gemini-3.1-pro" => "gemini-3.1-pro-preview",
+        "gemini-3-pro" => "gemini-3-pro-preview",
         _ => model,
     }
 }
@@ -98,6 +99,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     if model.starts_with("gemini")
         || model == "gemini-3-flash"
         || model == "gemini-3-pro"
+        || model == "gemini-3.1-pro"
         || model == "flash"
         || model == "pro"
     {
@@ -107,9 +109,10 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         // Resolve aliases (gemini-3-flash -> gemini-3-flash-preview, etc.)
         let resolved_model = resolve_gemini_alias(model).to_string();
 
-        // Check if this is a Gemini 3 model which uses native API
+        // Check if this is a Gemini 3/3.1 model which uses native API
         let use_native_api = resolved_model == "gemini-3-pro-preview"
-            || resolved_model == "gemini-3-flash-preview";
+            || resolved_model == "gemini-3-flash-preview"
+            || resolved_model == "gemini-3.1-pro-preview";
         let base_url = if use_native_api {
             "https://generativelanguage.googleapis.com/v1beta/models/".to_string()
         } else {
@@ -232,9 +235,9 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
 
 /// Get the smart default model based on available providers
 pub fn get_smart_default_model() -> Result<String> {
-    // 1. Try Gemini first (preferred default) - use gemini-3-flash-preview for speed
+    // 1. Try Gemini first (preferred default) - use gemini-3.1-pro-preview
     if env::var("GEMINI_API_KEY").is_ok() {
-        return Ok("gemini-3-flash-preview".to_string());
+        return Ok("gemini-3.1-pro-preview".to_string());
     }
 
     // 2. Try Anthropic
@@ -295,7 +298,8 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 
     // Gemini
     let gemini_models = vec![
-        "gemini-3-flash, gemini-3-flash-preview (default)".to_string(),
+        "gemini-3.1-pro, gemini-3.1-pro-preview (default)".to_string(),
+        "gemini-3-flash, gemini-3-flash-preview".to_string(),
         "gemini-3-pro, gemini-3-pro-preview".to_string(),
         "gemini-2.5-flash".to_string(),
         "gemini-2.5-flash-lite".to_string(),
@@ -386,12 +390,29 @@ mod tests {
     }
 
     #[test]
+    fn test_gemini_3_1_pro_preview_uses_native_api() {
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+
+        let result = detect_provider("gemini-3.1-pro-preview");
+        assert!(result.is_ok());
+
+        let provider_info = result.unwrap();
+        assert_eq!(provider_info.provider, Provider::Gemini);
+        assert!(provider_info.use_native_gemini_api);
+        assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
+        assert_eq!(provider_info.resolved_model, "gemini-3.1-pro-preview");
+
+        std::env::remove_var("GEMINI_API_KEY");
+    }
+
+    #[test]
     fn test_gemini_alias_resolution() {
         assert_eq!(resolve_gemini_alias("gemini-3-flash"), "gemini-3-flash-preview");
         assert_eq!(resolve_gemini_alias("gemini-3-pro"), "gemini-3-pro-preview");
+        assert_eq!(resolve_gemini_alias("gemini-3.1-pro"), "gemini-3.1-pro-preview");
         // Short aliases
         assert_eq!(resolve_gemini_alias("flash"), "gemini-3-flash-preview");
-        assert_eq!(resolve_gemini_alias("pro"), "gemini-3-pro-preview");
+        assert_eq!(resolve_gemini_alias("pro"), "gemini-3.1-pro-preview");
         // Pass through if not an alias
         assert_eq!(resolve_gemini_alias("gemini-2.5-flash"), "gemini-2.5-flash");
     }
@@ -413,6 +434,13 @@ mod tests {
         let provider_info = result.unwrap();
         assert!(provider_info.use_native_gemini_api);
         assert_eq!(provider_info.resolved_model, "gemini-3-pro-preview");
+
+        // Test gemini-3.1-pro alias
+        let result = detect_provider("gemini-3.1-pro");
+        assert!(result.is_ok());
+        let provider_info = result.unwrap();
+        assert!(provider_info.use_native_gemini_api);
+        assert_eq!(provider_info.resolved_model, "gemini-3.1-pro-preview");
 
         std::env::remove_var("GEMINI_API_KEY");
     }
