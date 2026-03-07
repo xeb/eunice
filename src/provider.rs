@@ -341,6 +341,9 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{LazyLock, Mutex};
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn test_anthropic_alias_resolution() {
@@ -357,6 +360,7 @@ mod tests {
 
     #[test]
     fn test_gemini_3_pro_preview_uses_native_api() {
+        let _guard = ENV_LOCK.lock().unwrap();
         // Set a dummy API key for testing
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
@@ -375,6 +379,7 @@ mod tests {
 
     #[test]
     fn test_gemini_3_flash_preview_uses_native_api() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
         let result = detect_provider("gemini-3-flash-preview");
@@ -391,6 +396,7 @@ mod tests {
 
     #[test]
     fn test_gemini_3_1_pro_preview_uses_native_api() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
         let result = detect_provider("gemini-3.1-pro-preview");
@@ -419,6 +425,7 @@ mod tests {
 
     #[test]
     fn test_gemini_alias_uses_native_api() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
         // Test gemini-3-flash alias
@@ -447,6 +454,7 @@ mod tests {
 
     #[test]
     fn test_other_gemini_models_use_openai_compatible() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
         let models = vec!["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
@@ -466,6 +474,7 @@ mod tests {
 
     #[test]
     fn test_anthropic_detection() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("ANTHROPIC_API_KEY", "test-key");
 
         let result = detect_provider("sonnet");
@@ -481,6 +490,7 @@ mod tests {
 
     #[test]
     fn test_openai_detection() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("OPENAI_API_KEY", "test-key");
 
         let models = vec!["gpt-4o", "gpt-4", "o1", "o1-mini"];
@@ -499,6 +509,7 @@ mod tests {
 
     #[test]
     fn test_azure_openai_detection() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
         std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
 
@@ -518,6 +529,7 @@ mod tests {
 
     #[test]
     fn test_azure_openai_requires_env_vars() {
+        let _guard = ENV_LOCK.lock().unwrap();
         // Clear any existing env vars
         std::env::remove_var("AZURE_OPENAI_ENDPOINT");
         std::env::remove_var("AZURE_OPENAI_API_KEY");
@@ -529,6 +541,7 @@ mod tests {
 
     #[test]
     fn test_azure_openai_custom_api_version() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
         std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
         std::env::set_var("AZURE_OPENAI_API_VERSION", "2024-08-01");
