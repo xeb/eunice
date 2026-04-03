@@ -17,6 +17,9 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
         // Azure OpenAI models support tools (same as OpenAI)
         Provider::AzureOpenAI => true,
 
+        // Local Gemma 4 models support tools via llama-server
+        Provider::Local => true,
+
         // Ollama: check by model family
         Provider::Ollama => {
             let model_lower = model.to_lowercase();
@@ -177,7 +180,20 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         });
     }
 
-    // 4. Check if the model exists in Ollama (even if it matches OpenAI patterns)
+    // 4. Check for HuggingFace local models (hf:gemma4:*)
+    if let Some(hf_model) = model.strip_prefix("hf:") {
+        let resolved = crate::local::resolve_hf_alias(hf_model);
+        return Ok(ProviderInfo {
+            provider: Provider::Local,
+            base_url: format!("http://127.0.0.1:{}/v1/", crate::local::DEFAULT_PORT),
+            api_key: "local".to_string(),
+            resolved_model: resolved.display_name,
+            use_native_gemini_api: false,
+            azure_api_version: None,
+        });
+    }
+
+    // 5. Check if the model exists in Ollama (even if it matches OpenAI patterns)
     // This allows local models like gpt-oss to be routed to Ollama
     if check_ollama_available(Some(model)).is_ok() {
         return Ok(ProviderInfo {
@@ -190,7 +206,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         });
     }
 
-    // 5. Check for explicit OpenAI patterns
+    // 6. Check for explicit OpenAI patterns
     let is_openai_pattern = model.starts_with("gpt-")
         || model.starts_with("gpt4")
         || model.starts_with("gpt5")
@@ -215,7 +231,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         });
     }
 
-    // 6. Fallback: assume Ollama but warn if not available
+    // 7. Fallback: assume Ollama but warn if not available
     if check_ollama_available(None).is_ok() {
         Ok(ProviderInfo {
             provider: Provider::Ollama,
@@ -335,6 +351,17 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
     let ollama_models = check_ollama_available(None).unwrap_or_default();
     let ollama_available = !ollama_models.is_empty();
     result.push((Provider::Ollama, ollama_models, ollama_available));
+
+    // Local (HuggingFace / gemma4-server)
+    let local_models = vec![
+        "hf:gemma4:e4b (Gemma 4 E4B Q4_K_M, ~4.5 GB)".to_string(),
+        "hf:gemma4:e4b-q8 (Gemma 4 E4B Q8_0, ~8 GB)".to_string(),
+        "hf:gemma4:e4b-q5 (Gemma 4 E4B Q5_K_M, ~5.5 GB)".to_string(),
+        "hf:gemma4:26b (Gemma 4 26B Q4_K_M, ~16 GB)".to_string(),
+        "hf:gemma4:26b-q8 (Gemma 4 26B Q8_0, ~28 GB)".to_string(),
+    ];
+    let local_available = crate::local::find_server_binary().is_some();
+    result.push((Provider::Local, local_models, local_available));
 
     result
 }

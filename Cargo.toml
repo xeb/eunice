@@ -64,6 +64,9 @@ rand = "0.8"
 dirs = "5"
 tempfile = "3"
 
+# HuggingFace model downloads
+hf-hub = { version = "0.4", features = ["tokio"] }
+
 [dev-dependencies]
 tempfile = "3"
 

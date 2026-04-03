@@ -131,6 +131,10 @@ fn get_pricing(model: &str, provider: &Provider) -> (f64, f64) {
                 (2.50, 10.00)  // Default to gpt-4o pricing
             }
         }
+        Provider::Local => {
+            // Local inference is free
+            (0.0, 0.0)
+        }
     }
 }
 

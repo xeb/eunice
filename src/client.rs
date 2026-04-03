@@ -130,7 +130,7 @@ impl Client {
         let api_key = self.current_api_key();
         match self.provider {
             Provider::Anthropic => req.header("x-api-key", api_key),
-            Provider::Ollama => req, // No auth needed
+            Provider::Ollama | Provider::Local => req, // No auth needed
             Provider::AzureOpenAI => req.header("api-key", api_key),
             _ => req.header(AUTHORIZATION, format!("Bearer {}", api_key)),
         }

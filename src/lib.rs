@@ -5,6 +5,7 @@ pub mod display;
 pub mod display_sink;
 pub mod interactive;
 pub mod key_rotation;
+pub mod local;
 pub mod models;
 pub mod output_store;
 pub mod provider;

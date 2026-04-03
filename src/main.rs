@@ -5,6 +5,7 @@ mod display;
 mod display_sink;
 mod interactive;
 mod key_rotation;
+mod local;
 mod models;
 mod output_store;
 mod provider;
@@ -88,6 +89,22 @@ struct Args {
     /// Enable debug output for API calls
     #[arg(long)]
     debug: bool,
+
+    /// Download a local model (e.g., hf:gemma4:e4b)
+    #[arg(long)]
+    download: Option<String>,
+
+    /// List downloaded local models
+    #[arg(long)]
+    local_models: bool,
+
+    /// Remove a downloaded local model (e.g., gemma4:e4b)
+    #[arg(long)]
+    remove_model: Option<String>,
+
+    /// Start gemma4-server for a local model (e.g., hf:gemma4:e4b)
+    #[arg(long)]
+    serve: Option<String>,
 }
 
 /// Auto-discover prompt files in priority order
@@ -298,6 +315,41 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Handle --download hf:gemma4:*
+    if let Some(ref dl_model) = args.download {
+        let alias = dl_model.strip_prefix("hf:").unwrap_or(dl_model);
+        local::download_model(alias).await?;
+        return Ok(());
+    }
+
+    // Handle --local-models
+    if args.local_models {
+        local::print_local_models()?;
+        return Ok(());
+    }
+
+    // Handle --remove-model
+    if let Some(ref rm_model) = args.remove_model {
+        local::remove_model(rm_model)?;
+        return Ok(());
+    }
+
+    // Handle --serve hf:gemma4:*
+    if let Some(ref serve_model) = args.serve {
+        let alias = serve_model.strip_prefix("hf:").unwrap_or(serve_model);
+        let model_path = local::download_model(alias).await?;
+        let port = args.port;
+        let actual_port = if port == 8811 { local::DEFAULT_PORT } else { port };
+        eprintln!("Starting gemma4-server on port {}...", actual_port);
+        let mut child = local::start_server(&model_path, actual_port)?;
+        local::wait_for_ready(actual_port).await?;
+        eprintln!("gemma4-server ready at http://127.0.0.1:{}/v1/", actual_port);
+        eprintln!("Press Ctrl+C to stop.");
+        // Wait for the server to exit (blocks until Ctrl+C)
+        let _ = child.wait();
+        return Ok(());
+    }
+
     // Validate conflicting arguments
     if args.webapp && args.chat {
         return Err(anyhow!("--webapp and --chat cannot be used together"));
@@ -326,6 +378,15 @@ async fn main() -> Result<()> {
     // Detect provider and check tool support
     let provider_info = detect_provider(&model)?;
 
+    // If local provider, start gemma4-server
+    let mut _local_server: Option<std::process::Child> = if provider_info.provider == models::Provider::Local {
+        let alias = model.strip_prefix("hf:").unwrap_or(&model);
+        let (child, _path) = local::setup_local_model(alias).await?;
+        Some(child)
+    } else {
+        None
+    };
+
     if !supports_tools(&provider_info.provider, &model) {
         eprintln!("Warning: Model '{}' may not support function calling.", model);
         eprintln!("Running in text-only mode (no Bash/Read/Write/Skill tools available).");
@@ -347,20 +408,30 @@ async fn main() -> Result<()> {
             host: args.host.clone(),
             port: args.port,
         };
-        return webapp::run_server(
+        let result = webapp::run_server(
             webapp_config,
             client,
             provider_info,
         ).await;
+        if let Some(ref mut child) = _local_server {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return result;
     }
 
     // TUI mode
     if use_tui {
-        return tui::run_tui_mode(
+        let result = tui::run_tui_mode(
             &client,
             &provider_info,
             prompt.as_deref(),
         ).await;
+        if let Some(ref mut child) = _local_server {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        return result;
     }
 
     // Single-shot mode
@@ -394,6 +465,12 @@ async fn main() -> Result<()> {
         Some(&mut output_store),
     )
     .await?;
+
+    // Kill local server if running
+    if let Some(ref mut child) = _local_server {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     Ok(())
 }

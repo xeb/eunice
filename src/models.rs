@@ -8,6 +8,7 @@ pub enum Provider {
     Anthropic,
     Ollama,
     AzureOpenAI,
+    Local,
 }
 
 impl std::fmt::Display for Provider {
@@ -18,6 +19,7 @@ impl std::fmt::Display for Provider {
             Provider::Anthropic => write!(f, "Anthropic"),
             Provider::Ollama => write!(f, "Ollama"),
             Provider::AzureOpenAI => write!(f, "Azure OpenAI"),
+            Provider::Local => write!(f, "Local"),
         }
     }
 }
@@ -30,6 +32,7 @@ impl Provider {
             Provider::Anthropic => "🧠",
             Provider::Ollama => "🦙",
             Provider::AzureOpenAI => "☁️",
+            Provider::Local => "💻",
         }
     }
 }
