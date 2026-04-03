@@ -342,6 +342,10 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Azure tests manipulate shared env vars and must not run in parallel
+    static AZURE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_anthropic_alias_resolution() {
@@ -500,6 +504,7 @@ mod tests {
 
     #[test]
     fn test_azure_openai_detection() {
+        let _lock = AZURE_ENV_LOCK.lock().unwrap();
         std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
         std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
 
@@ -519,6 +524,7 @@ mod tests {
 
     #[test]
     fn test_azure_openai_requires_env_vars() {
+        let _lock = AZURE_ENV_LOCK.lock().unwrap();
         // Clear any existing env vars
         std::env::remove_var("AZURE_OPENAI_ENDPOINT");
         std::env::remove_var("AZURE_OPENAI_API_KEY");
@@ -530,6 +536,7 @@ mod tests {
 
     #[test]
     fn test_azure_openai_custom_api_version() {
+        let _lock = AZURE_ENV_LOCK.lock().unwrap();
         std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
         std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
         std::env::set_var("AZURE_OPENAI_API_VERSION", "2024-08-01");
