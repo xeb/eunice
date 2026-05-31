@@ -10,5 +10,6 @@ pub mod models;
 pub mod output_store;
 pub mod provider;
 pub mod skills;
+pub mod theme;
 pub mod tools;
 pub mod usage;

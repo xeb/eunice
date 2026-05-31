@@ -3,6 +3,7 @@
 //! This module provides a trait-based abstraction for display output, allowing
 //! the TUI mode to use SharedWriter while normal mode uses println!().
 
+use crate::theme;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::io::Write;
@@ -53,11 +54,11 @@ impl StdDisplaySink {
         let spinner = ProgressBar::new_spinner();
         spinner.set_style(
             ProgressStyle::default_spinner()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-                .template("  {spinner:.magenta} {msg:.magenta}")
+                .tick_strings(&["✻", "✶", "✺", "✹", "✷"])
+                .template("  {spinner:.red} {msg:.red} {elapsed:.dim}")
                 .unwrap(),
         );
-        spinner.set_message("Thinking...");
+        spinner.set_message("Thinking…");
         spinner.enable_steady_tick(std::time::Duration::from_millis(80));
         *self.spinner.lock().unwrap() = Some(spinner);
     }
@@ -105,8 +106,8 @@ impl DisplaySink for StdDisplaySink {
                     let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
                     let remaining = lines.len() - limit;
                     format!(
-                        "{}\\n    ...{} more lines",
-                        truncated.join("\\n    "),
+                        "{}\n    ...{} more lines",
+                        truncated.join("\n    "),
                         remaining
                     )
                 } else {
@@ -114,7 +115,7 @@ impl DisplaySink for StdDisplaySink {
                         .lines()
                         .map(|l| format!("    {}", l))
                         .collect::<Vec<_>>()
-                        .join("\\n")
+                        .join("\n")
                 };
 
                 if !output.trim().is_empty() {
@@ -162,7 +163,6 @@ impl DisplaySink for TuiDisplaySink {
         let mut writer = self.writer.lock().unwrap();
 
         // ANSI codes
-        const YELLOW: &str = "\x1b[33m";
         const BLUE: &str = "\x1b[34m";
         const BRIGHT_BLUE: &str = "\x1b[94m";
         const CYAN: &str = "\x1b[36m";
@@ -172,7 +172,11 @@ impl DisplaySink for TuiDisplaySink {
 
         match event {
             DisplayEvent::ThinkingStart => {
-                let _ = writeln!(writer, "  {YELLOW}⋯{RESET} Thinking...");
+                let _ = writeln!(
+                    writer,
+                    "  {}",
+                    theme::thinking_line(theme::SPINNER[0], "Thinking", None, None)
+                );
             }
             DisplayEvent::ThinkingStop => {
                 // No-op
@@ -198,8 +202,8 @@ impl DisplaySink for TuiDisplaySink {
                     let truncated: Vec<&str> = lines.iter().take(limit).copied().collect();
                     let remaining = lines.len() - limit;
                     format!(
-                        "{}\\n    ...{} more lines",
-                        truncated.join("\\n    "),
+                        "{}\n    ...{} more lines",
+                        truncated.join("\n    "),
                         remaining
                     )
                 } else {
@@ -207,7 +211,7 @@ impl DisplaySink for TuiDisplaySink {
                         .lines()
                         .map(|l| format!("    {}", l))
                         .collect::<Vec<_>>()
-                        .join("\\n")
+                        .join("\n")
                 };
 
                 if !output.trim().is_empty() {

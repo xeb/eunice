@@ -9,5 +9,6 @@
 //! all terminal writes through the shared writer.
 
 mod app;
+mod frame_editor;
 
 pub use app::run_tui_mode;

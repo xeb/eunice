@@ -193,6 +193,21 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         });
     }
 
+    // 4b. Bare "gemma4:31b" (no hf: prefix) — routes to the local auto-built MTP server.
+    // NOTE: bare gemma4:e4b / gemma4:26b intentionally still fall through to Ollama (step 5),
+    // since the 31B is the only Gemma 4 size with no working Ollama route.
+    if model == "gemma4:31b" || model == "gemma4:31b-mtp" {
+        let resolved = crate::local::resolve_hf_alias(model);
+        return Ok(ProviderInfo {
+            provider: Provider::Local,
+            base_url: format!("http://127.0.0.1:{}/v1/", crate::local::DEFAULT_PORT),
+            api_key: "local".to_string(),
+            resolved_model: resolved.display_name,
+            use_native_gemini_api: false,
+            azure_api_version: None,
+        });
+    }
+
     // 5. Check if the model exists in Ollama (even if it matches OpenAI patterns)
     // This allows local models like gpt-oss to be routed to Ollama
     if check_ollama_available(Some(model)).is_ok() {
@@ -359,8 +374,10 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
         "hf:gemma4:e4b-q5 (Gemma 4 E4B Q5_K_M, ~5.5 GB)".to_string(),
         "hf:gemma4:26b (Gemma 4 26B Q4_K_M, ~16 GB)".to_string(),
         "hf:gemma4:26b-q8 (Gemma 4 26B Q8_0, ~28 GB)".to_string(),
+        "gemma4:31b (Gemma 4 31B Q4_K_M + MTP, ~19.5 GB, auto-built, NVIDIA ≥24 GB)".to_string(),
     ];
-    let local_available = crate::local::find_server_binary().is_some();
+    let local_available =
+        crate::local::find_server_binary().is_some() || crate::local::mtp_server_installed();
     result.push((Provider::Local, local_models, local_available));
 
     result
@@ -373,6 +390,28 @@ mod tests {
 
     // Azure tests manipulate shared env vars and must not run in parallel
     static AZURE_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_gemma4_31b_routes_local() {
+        // Bare and hf:-prefixed 31b both route to the local MTP server.
+        for m in ["gemma4:31b", "gemma4:31b-mtp", "hf:gemma4:31b"] {
+            let info = detect_provider(m).expect("31b should resolve");
+            assert_eq!(info.provider, Provider::Local, "{} should be Local", m);
+            assert_eq!(info.base_url, "http://127.0.0.1:18921/v1/");
+            assert_eq!(info.api_key, "local");
+        }
+    }
+
+    #[test]
+    fn test_bare_e4b_26b_do_not_route_local() {
+        // Bare gemma4:e4b / gemma4:26b must NOT be hijacked into Local (they target Ollama).
+        // detect_provider may Err if Ollama is down, but it must never return Provider::Local.
+        for m in ["gemma4:e4b", "gemma4:26b"] {
+            if let Ok(info) = detect_provider(m) {
+                assert_ne!(info.provider, Provider::Local, "{} must not route Local", m);
+            }
+        }
+    }
 
     #[test]
     fn test_anthropic_alias_resolution() {

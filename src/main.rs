@@ -10,6 +10,7 @@ mod models;
 mod output_store;
 mod provider;
 mod skills;
+mod theme;
 mod tools;
 mod tui;
 mod usage;
@@ -34,6 +35,10 @@ struct Args {
     /// AI model to use
     #[arg(long)]
     model: Option<String>,
+
+    /// Shorthand for --model=gemma4:31b (local Gemma 4 31B + MTP)
+    #[arg(long)]
+    gemma: bool,
 
     /// System prompt (inline text or file path)
     #[arg(long)]
@@ -105,6 +110,10 @@ struct Args {
     /// Start gemma4-server for a local model (e.g., hf:gemma4:e4b)
     #[arg(long)]
     serve: Option<String>,
+
+    /// Force a clean rebuild of the gemma4-mtp server binary (for --model gemma4:31b)
+    #[arg(long)]
+    rebuild_gemma4_mtp: bool,
 }
 
 /// Auto-discover prompt files in priority order
@@ -315,10 +324,32 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Handle --download hf:gemma4:*
+    // Handle --rebuild-gemma4-mtp
+    if args.rebuild_gemma4_mtp {
+        let path = local::rebuild_mtp_server().await?;
+        eprintln!("Rebuilt MTP server: {}", path.display());
+        return Ok(());
+    }
+
+    // Handle --download hf:gemma4:*  (also gemma4:31b without prefix)
     if let Some(ref dl_model) = args.download {
         let alias = dl_model.strip_prefix("hf:").unwrap_or(dl_model);
-        local::download_model(alias).await?;
+        let info = local::resolve_hf_alias(alias);
+        if info.mtp {
+            // Validate first, then fetch both GGUFs and pre-warm the build.
+            let pf = local::preflight_gemma4_mtp(&info);
+            local::print_preflight(&pf);
+            if !pf.ok() {
+                return Err(anyhow!(
+                    "gemma4:31b prerequisites not met — fix the ✗ items above and retry."
+                ));
+            }
+            local::download_model_full(alias).await?;
+            let arch = pf.cuda_arch.clone().unwrap_or_else(|| "89".to_string());
+            local::ensure_mtp_server(&arch, false).await?;
+        } else {
+            local::download_model(alias).await?;
+        }
         return Ok(());
     }
 
@@ -334,16 +365,13 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Handle --serve hf:gemma4:*
+    // Handle --serve hf:gemma4:*  (and gemma4:31b — auto-downloads/builds + MTP flags as needed)
     if let Some(ref serve_model) = args.serve {
         let alias = serve_model.strip_prefix("hf:").unwrap_or(serve_model);
-        let model_path = local::download_model(alias).await?;
         let port = args.port;
         let actual_port = if port == 8811 { local::DEFAULT_PORT } else { port };
-        eprintln!("Starting gemma4-server on port {}...", actual_port);
-        let mut child = local::start_server(&model_path, actual_port)?;
-        local::wait_for_ready(actual_port).await?;
-        eprintln!("gemma4-server ready at http://127.0.0.1:{}/v1/", actual_port);
+        let (mut child, _path) = local::setup_local_model_on_port(alias, actual_port).await?;
+        eprintln!("server ready at http://127.0.0.1:{}/v1/", actual_port);
         eprintln!("Press Ctrl+C to stop.");
         // Wait for the server to exit (blocks until Ctrl+C)
         let _ = child.wait();
@@ -369,10 +397,22 @@ async fn main() -> Result<()> {
     // Determine if we need TUI mode
     let use_tui = args.chat || (prompt.is_none() && atty::is(atty::Stream::Stdin));
 
-    // Select model
-    let model = match &args.model {
-        Some(m) => m.clone(),
-        None => get_smart_default_model()?,
+    // Select model (--gemma is shorthand for --model=gemma4:31b)
+    let model = if args.gemma {
+        if let Some(m) = &args.model {
+            if m != "gemma4:31b" {
+                return Err(anyhow!(
+                    "--gemma is shorthand for --model=gemma4:31b and cannot be combined with --model={}",
+                    m
+                ));
+            }
+        }
+        "gemma4:31b".to_string()
+    } else {
+        match &args.model {
+            Some(m) => m.clone(),
+            None => get_smart_default_model()?,
+        }
     };
 
     // Detect provider and check tool support
@@ -514,5 +554,19 @@ mod tests {
     fn test_args_positional_prompt() {
         let args = Args::try_parse_from(["eunice", "hello world"]).unwrap();
         assert_eq!(args.prompt_positional, Some("hello world".to_string()));
+    }
+
+    #[test]
+    fn test_args_gemma_flag() {
+        let args = Args::try_parse_from(["eunice", "--gemma", "hi"]).unwrap();
+        assert!(args.gemma);
+        assert_eq!(args.model, None);
+        assert_eq!(args.prompt_positional, Some("hi".to_string()));
+    }
+
+    #[test]
+    fn test_args_gemma_default_false() {
+        let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
+        assert!(!args.gemma);
     }
 }
