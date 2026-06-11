@@ -64,7 +64,8 @@ User Input -> Provider Detection -> Client -> API Request -> Response
 
 9. **Webapp Mode** (`src/webapp/`)
    - Axum web server with SSE streaming
-   - Session persistence (in-memory)
+   - Session persistence: SQLite `sessions.db` in cwd by default; `--no-persist` for in-memory
+   - System prompt via `--prompt <file>` (or auto-discovered `prompt.md`), prepended to each new session
    - Multi-turn conversations
 
 ## Testing

@@ -1,7 +1,7 @@
 //! Session persistence layer for the webapp.
 //!
-//! Provides SQLite-based session storage when mcpz is installed,
-//! with fallback to in-memory storage otherwise.
+//! Provides SQLite-based session storage (sessions.db) with an
+//! in-memory fallback.
 
 use anyhow::Result;
 use rand::seq::SliceRandom;
@@ -112,13 +112,18 @@ impl RuntimeState {
 }
 
 impl SessionStorage {
-    /// Initialize storage based on mcpz availability
-    pub fn new(mcpz_available: bool) -> Result<Self> {
-        if mcpz_available {
+    /// Initialize storage: SQLite (sessions.db in cwd) or in-memory
+    pub fn new(persist: bool) -> Result<Self> {
+        if persist {
             Self::new_sqlite("sessions.db")
         } else {
-            Ok(SessionStorage::Memory(Arc::new(RwLock::new(HashMap::new()))))
+            Ok(Self::new_memory())
         }
+    }
+
+    /// In-memory storage (no persistence across restarts)
+    pub fn new_memory() -> Self {
+        SessionStorage::Memory(Arc::new(RwLock::new(HashMap::new())))
     }
 
     /// Initialize SQLite storage with a custom path (for testing)

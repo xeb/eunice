@@ -156,6 +156,9 @@ pub struct WebappConfig {
     /// Port to bind to (default: 8811)
     #[serde(default = "default_webapp_port")]
     pub port: u16,
+    /// Persist sessions to sessions.db in the working directory (default: true)
+    #[serde(default = "default_webapp_persist")]
+    pub persist: bool,
 }
 
 fn default_webapp_host() -> String {
@@ -166,11 +169,16 @@ fn default_webapp_port() -> u16 {
     8811
 }
 
+fn default_webapp_persist() -> bool {
+    true
+}
+
 impl Default for WebappConfig {
     fn default() -> Self {
         Self {
             host: default_webapp_host(),
             port: default_webapp_port(),
+            persist: default_webapp_persist(),
         }
     }
 }

@@ -114,6 +114,10 @@ struct Args {
     /// Force a clean rebuild of the gemma4-mtp server binary (for --model gemma4:31b)
     #[arg(long)]
     rebuild_gemma4_mtp: bool,
+
+    /// Disable webapp session persistence (sessions.db); sessions live in memory only
+    #[arg(long)]
+    no_persist: bool,
 }
 
 /// Auto-discover prompt files in priority order
@@ -447,6 +451,7 @@ async fn main() -> Result<()> {
         let webapp_config = models::WebappConfig {
             host: args.host.clone(),
             port: args.port,
+            persist: !args.no_persist,
         };
         let result = webapp::run_server(
             webapp_config,

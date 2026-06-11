@@ -34,10 +34,23 @@ pub async fn run_server(
     provider_info: ProviderInfo,
     system_prompt: Option<String>,
 ) -> Result<()> {
-    // Initialize storage (always use in-memory for v1.0.0)
-    let storage = SessionStorage::new(false)?;
-
-    println!("Session persistence: in-memory");
+    // Initialize storage: persistent sessions.db by default, in-memory
+    // when --no-persist is set or the database cannot be opened
+    let storage = if webapp_config.persist {
+        match SessionStorage::new_sqlite("sessions.db") {
+            Ok(s) => {
+                println!("Session persistence: sessions.db");
+                s
+            }
+            Err(e) => {
+                eprintln!("Warning: could not open sessions.db ({}); sessions are in-memory only", e);
+                SessionStorage::new_memory()
+            }
+        }
+    } else {
+        println!("Session persistence: in-memory");
+        SessionStorage::new_memory()
+    };
 
     // Create tool registry
     let tool_registry = ToolRegistry::new();
