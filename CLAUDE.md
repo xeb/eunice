@@ -219,8 +219,8 @@ When releasing:
 3. Bump version in Cargo.toml
 4. Git commit with descriptive message
 5. Git push
-6. Update `site/version.txt` to the new version and deploy the site:
-   `wrangler pages deploy site --project-name=longrunningagents --commit-dirty=true --branch=master`
-   (longrunningagents.com is a Cloudflare Pages project; the old `~/gal` server is dead.
-   `eunice --update` checks https://longrunningagents.com/version.txt)
+6. Update `~/p/longrunningagents.com/version.txt` to the new version and deploy:
+   `wrangler pages deploy ~/p/longrunningagents.com --project-name=longrunningagents --commit-dirty=true --branch=master`
+   (longrunningagents.com is a Cloudflare Pages project — see its CLAUDE.md; the old
+   `~/gal` server is dead. `eunice --update` checks https://longrunningagents.com/version.txt)
 7. Run `eunice --update` to verify
