@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! API Key rotation for handling rate limits and invalid keys
 //!
 //! Supports two types of rotation:

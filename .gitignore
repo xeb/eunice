@@ -28,3 +28,8 @@ test_underscore_server.json
 
 # Example logs
 examples/**/*_log.txt
+
+# Editor/scratch snapshots & wrangler cache
+*.rs.bak
+*.rs.new
+.wrangler/
