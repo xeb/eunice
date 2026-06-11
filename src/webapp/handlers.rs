@@ -764,6 +764,16 @@ pub async fn cancel(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
     }
 }
 
+/// Prepend the system prompt to the first message of a new session.
+/// There is no System message variant, so the prompt rides in the first
+/// user message and persists with the session history.
+fn compose_first_message(system_prompt: Option<&str>, first_turn: bool, prompt: &str) -> String {
+    match (system_prompt, first_turn) {
+        (Some(sys), true) => format!("{}\n\n---\n\n{}", sys, prompt),
+        _ => prompt.to_string(),
+    }
+}
+
 /// Run the agent loop and emit events
 async fn run_agent_with_events(
     state: Arc<AppState>,
@@ -792,8 +802,13 @@ async fn run_agent_with_events(
 
     // Build conversation history
     let mut conversation_history: Vec<Message> = incoming_history;
+    let user_content = compose_first_message(
+        state.system_prompt.as_deref(),
+        conversation_history.is_empty(),
+        &prompt,
+    );
     conversation_history.push(Message::User {
-        content: prompt.clone(),
+        content: user_content,
     });
 
     // Get tools
@@ -1075,4 +1090,27 @@ async fn run_agent_with_events(
 
     // Send done event
     event_sender.send(SseEvent::Done).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compose_first_message;
+
+    #[test]
+    fn test_system_prompt_prepended_on_first_turn_only() {
+        // New session: system prompt rides in the first user message
+        let composed = compose_first_message(Some("You are an ERP investigator."), true, "list tables");
+        assert!(composed.starts_with("You are an ERP investigator."));
+        assert!(composed.ends_with("list tables"));
+        assert!(composed.contains("\n\n---\n\n"));
+
+        // Existing session: prompt passes through untouched
+        assert_eq!(
+            compose_first_message(Some("You are an ERP investigator."), false, "next question"),
+            "next question"
+        );
+
+        // No system prompt configured: passthrough on first turn too
+        assert_eq!(compose_first_message(None, true, "hello"), "hello");
+    }
 }

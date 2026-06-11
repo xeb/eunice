@@ -23,6 +23,8 @@ pub struct AppState {
     pub cancel_tx: Arc<Mutex<Option<watch::Sender<bool>>>>,
     /// Session storage (SQLite or in-memory)
     pub storage: SessionStorage,
+    /// System prompt prepended to the first message of each new session
+    pub system_prompt: Option<String>,
 }
 
 /// Run the webapp server
@@ -30,6 +32,7 @@ pub async fn run_server(
     webapp_config: WebappConfig,
     client: Client,
     provider_info: ProviderInfo,
+    system_prompt: Option<String>,
 ) -> Result<()> {
     // Initialize storage (always use in-memory for v1.0.0)
     let storage = SessionStorage::new(false)?;
@@ -42,6 +45,10 @@ pub async fn run_server(
 
     println!("Tools available: {}", tool_count);
 
+    if let Some(ref sp) = system_prompt {
+        println!("System prompt: {} chars", sp.len());
+    }
+
     let state = Arc::new(AppState {
         client: Arc::new(client),
         provider_info,
@@ -49,6 +56,7 @@ pub async fn run_server(
         tool_output_limit: 50,
         cancel_tx: Arc::new(Mutex::new(None)),
         storage,
+        system_prompt,
     });
 
     let app = Router::new()

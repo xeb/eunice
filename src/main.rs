@@ -452,6 +452,7 @@ async fn main() -> Result<()> {
             webapp_config,
             client,
             provider_info,
+            prompt.clone(),
         ).await;
         if let Some(ref mut child) = _local_server {
             let _ = child.kill();
