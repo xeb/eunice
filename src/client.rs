@@ -690,6 +690,13 @@ impl Client {
             .context("Failed to parse OpenAI multimodal response")
     }
 
+    /// Gemini 3.x strictly validates that every functionCall part in history
+    /// carries a thoughtSignature, but the API only attaches a signature to the
+    /// first functionCall of a parallel batch. Unsigned calls are backfilled
+    /// with this documented skip-validation sentinel.
+    /// See https://ai.google.dev/gemini-api/docs/thought-signatures
+    const SKIP_THOUGHT_SIGNATURE: &'static str = "skip_thought_signature_validator";
+
     /// Convert OpenAI-style messages to Gemini contents format
     /// Groups consecutive Tool messages into a single content block for parallel function calling
     fn convert_messages_to_gemini(&self, messages: &[Message]) -> Result<Vec<GeminiContent>> {
@@ -751,12 +758,16 @@ impl Client {
                             let args: serde_json::Value =
                                 serde_json::from_str(&call.function.arguments).unwrap_or_default();
 
-                            // Extract thought_signature from ID if present
-                            let thought_signature = if call.id.contains("::") {
-                                call.id.split("::").nth(1).map(|s| s.to_string())
-                            } else {
-                                None
-                            };
+                            // Extract thought_signature from ID if present;
+                            // backfill unsigned calls (parallel calls after the
+                            // first, or compacted/migrated history) with the
+                            // skip-validation sentinel so Gemini 3.x doesn't 400.
+                            let thought_signature = call
+                                .id
+                                .split_once("::")
+                                .map(|(_, sig)| sig.to_string())
+                                .filter(|sig| !sig.is_empty())
+                                .unwrap_or_else(|| Self::SKIP_THOUGHT_SIGNATURE.to_string());
 
                             parts.push(GeminiPart {
                                 text: None,
@@ -766,7 +777,7 @@ impl Client {
                                     args,
                                 }),
                                 function_response: None,
-                                thought_signature,
+                                thought_signature: Some(thought_signature),
                             });
                         }
                     }
@@ -1298,6 +1309,56 @@ mod tests {
 
         // Verify thought_signature is extracted
         assert_eq!(part.thought_signature, Some("abc123sig".to_string()));
+    }
+
+    #[test]
+    fn test_unsigned_function_calls_get_skip_signature_sentinel() {
+        // Regression test for Gemini 3.5 400 INVALID_ARGUMENT:
+        // "Function call is missing a thought_signature in functionCall parts"
+        // Parallel calls only carry a signature on the first call; the rest
+        // must be backfilled with the skip-validation sentinel.
+        let client = create_test_client();
+        let messages = vec![
+            Message::Assistant {
+                content: None,
+                tool_calls: Some(vec![
+                    crate::models::ToolCall {
+                        id: "sql_list_tables::sig1".to_string(),
+                        call_type: "function".to_string(),
+                        function: crate::models::FunctionCall {
+                            name: "sql_list_tables".to_string(),
+                            arguments: "{}".to_string(),
+                        },
+                    },
+                    crate::models::ToolCall {
+                        id: "sql_query".to_string(), // no "::signature" suffix
+                        call_type: "function".to_string(),
+                        function: crate::models::FunctionCall {
+                            name: "sql_query".to_string(),
+                            arguments: "{\"q\":\"select 1\"}".to_string(),
+                        },
+                    },
+                ]),
+            },
+        ];
+
+        let contents = client.convert_messages_to_gemini(&messages).unwrap();
+        assert_eq!(contents.len(), 1);
+        assert_eq!(contents[0].role, Some("model".to_string()));
+
+        let parts = &contents[0].parts;
+        assert_eq!(parts.len(), 2);
+
+        // First call: real signature preserved
+        assert_eq!(parts[0].function_call.as_ref().unwrap().name, "sql_list_tables");
+        assert_eq!(parts[0].thought_signature, Some("sig1".to_string()));
+
+        // Second call: unsigned, backfilled with the sentinel instead of omitted
+        assert_eq!(parts[1].function_call.as_ref().unwrap().name, "sql_query");
+        assert_eq!(
+            parts[1].thought_signature,
+            Some(Client::SKIP_THOUGHT_SIGNATURE.to_string())
+        );
     }
 
     #[test]

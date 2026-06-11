@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
 
-**7,787 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
+**9,538 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -105,7 +105,7 @@ The Skill tool searches these directories to find relevant skills for a task.
 
 | Provider | API Key Variable | Default Model |
 |----------|------------------|---------------|
-| Google Gemini | `GEMINI_API_KEY` | gemini-3-flash-preview |
+| Google Gemini | `GEMINI_API_KEY` | gemini-3.1-pro-preview |
 | OpenAI | `OPENAI_API_KEY` | gpt-4o |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4 |
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` | (deployment-specific) |
@@ -118,8 +118,8 @@ For convenience, these aliases work:
 ```bash
 eunice --model sonnet "..."    # claude-sonnet-4-...
 eunice --model opus "..."      # claude-opus-4-...
-eunice --model flash "..."     # gemini-3-flash-preview
-eunice --model pro "..."       # gemini-3-pro-preview
+eunice --model flash "..."     # gemini-3.5-flash
+eunice --model pro "..."       # gemini-3.1-pro-preview
 ```
 
 ### Azure OpenAI

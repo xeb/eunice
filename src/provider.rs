@@ -88,7 +88,8 @@ fn resolve_anthropic_alias(model: &str) -> &str {
 /// Resolve Gemini model aliases to full model names
 fn resolve_gemini_alias(model: &str) -> &str {
     match model {
-        "flash" | "gemini-3-flash" => "gemini-3-flash-preview",
+        "flash" => "gemini-3.5-flash",
+        "gemini-3-flash" => "gemini-3-flash-preview",
         "pro" | "gemini-3.1-pro" => "gemini-3.1-pro-preview",
         "gemini-3-pro" => "gemini-3-pro-preview",
         _ => model,
@@ -113,10 +114,10 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         // Resolve aliases (gemini-3-flash -> gemini-3-flash-preview, etc.)
         let resolved_model = resolve_gemini_alias(model).to_string();
 
-        // Check if this is a Gemini 3/3.1 model which uses native API
-        let use_native_api = resolved_model == "gemini-3-pro-preview"
-            || resolved_model == "gemini-3-flash-preview"
-            || resolved_model == "gemini-3.1-pro-preview";
+        // All Gemini 3.x models (3, 3.1, 3.5, ...) use the native API: they
+        // require thought signatures on function calls, which the
+        // OpenAI-compatible endpoint cannot round-trip.
+        let use_native_api = resolved_model.starts_with("gemini-3");
         let base_url = if use_native_api {
             "https://generativelanguage.googleapis.com/v1beta/models/".to_string()
         } else {
@@ -331,6 +332,7 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
     // Gemini
     let gemini_models = vec![
         "gemini-3.1-pro, gemini-3.1-pro-preview (default)".to_string(),
+        "gemini-3.5-flash, flash".to_string(),
         "gemini-3-flash, gemini-3-flash-preview".to_string(),
         "gemini-3-pro, gemini-3-pro-preview".to_string(),
         "gemini-2.5-flash".to_string(),
@@ -477,15 +479,33 @@ mod tests {
     }
 
     #[test]
+    fn test_gemini_3_5_flash_uses_native_api() {
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+
+        // gemini-3.5-flash is GA (no -preview suffix) and must use the native
+        // API so thought signatures round-trip on function calls.
+        for model in ["gemini-3.5-flash", "flash"] {
+            let provider_info = detect_provider(model).unwrap();
+            assert_eq!(provider_info.provider, Provider::Gemini);
+            assert!(provider_info.use_native_gemini_api, "{} should use native API", model);
+            assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
+            assert_eq!(provider_info.resolved_model, "gemini-3.5-flash");
+        }
+
+        std::env::remove_var("GEMINI_API_KEY");
+    }
+
+    #[test]
     fn test_gemini_alias_resolution() {
         assert_eq!(resolve_gemini_alias("gemini-3-flash"), "gemini-3-flash-preview");
         assert_eq!(resolve_gemini_alias("gemini-3-pro"), "gemini-3-pro-preview");
         assert_eq!(resolve_gemini_alias("gemini-3.1-pro"), "gemini-3.1-pro-preview");
         // Short aliases
-        assert_eq!(resolve_gemini_alias("flash"), "gemini-3-flash-preview");
+        assert_eq!(resolve_gemini_alias("flash"), "gemini-3.5-flash");
         assert_eq!(resolve_gemini_alias("pro"), "gemini-3.1-pro-preview");
         // Pass through if not an alias
         assert_eq!(resolve_gemini_alias("gemini-2.5-flash"), "gemini-2.5-flash");
+        assert_eq!(resolve_gemini_alias("gemini-3.5-flash"), "gemini-3.5-flash");
     }
 
     #[test]
