@@ -33,3 +33,4 @@ examples/**/*_log.txt
 *.rs.bak
 *.rs.new
 .wrangler/
+config.toml
