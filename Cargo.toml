@@ -20,8 +20,10 @@ path = "src/main.rs"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
-# HTTP client
-reqwest = { version = "0.12", features = ["json", "blocking", "stream"] }
+# HTTP client — rustls instead of native-tls so builds don't depend on the
+# system OpenSSL (old hosts like Amazon Linux ship OpenSSL 1.0.x, which
+# openssl-sys rejects). webpki-roots bundles the CA store for the same reason.
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "stream", "rustls-tls", "charset", "http2", "system-proxy"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -64,8 +66,8 @@ rand = "0.8"
 dirs = "5"
 tempfile = "3"
 
-# HuggingFace model downloads
-hf-hub = { version = "0.4", features = ["tokio"] }
+# HuggingFace model downloads (rustls for the same no-system-OpenSSL reason)
+hf-hub = { version = "0.4", default-features = false, features = ["tokio", "rustls-tls"] }
 
 [dev-dependencies]
 tempfile = "3"
