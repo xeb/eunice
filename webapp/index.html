@@ -1114,8 +1114,10 @@
                 statusDot.className = 'status-dot';
                 statusText.textContent = 'ready';
 
-                // Header info
-                modeDisplay.textContent = data.mode.toUpperCase();
+                // Header info (mode/agent/mcp_servers only existed pre-1.0;
+                // guard everything so a missing field can't trip the catch
+                // and falsely mark the connection as "error")
+                modeDisplay.textContent = (data.mode || data.provider || '').toUpperCase();
 
                 // Show agent name if present
                 if (data.agent) {
@@ -1127,9 +1129,9 @@
                 toolsDisplay.textContent = `${data.tools_count} tools`;
 
                 // Footer info
-                serversDisplay.textContent = data.mcp_servers.length > 0
+                serversDisplay.textContent = Array.isArray(data.mcp_servers) && data.mcp_servers.length > 0
                     ? data.mcp_servers.join(', ')
-                    : 'no servers';
+                    : (data.persistence_enabled ? 'sessions: persistent' : 'sessions: in-memory');
                 document.getElementById('version-display').textContent = `v${data.version}`;
 
                 // Handle authenticated user (from proxy headers)
