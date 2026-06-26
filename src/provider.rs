@@ -20,6 +20,11 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
         // Local Gemma 4 models support tools via llama-server
         Provider::Local => true,
 
+        // gemmad (local gemma-4-12b) speaks OpenAI chat but does NOT emit
+        // OpenAI tool_calls — it inlines Gemma tool-call tokens into content.
+        // Treat as text-only so the warning fires and Client withholds tools.
+        Provider::Gemmad => false,
+
         // Ollama: check by model family
         Provider::Ollama => {
             let model_lower = model.to_lowercase();
@@ -99,6 +104,19 @@ fn resolve_gemini_alias(model: &str) -> &str {
 /// Detect the provider based on model name
 pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
+
+    // 0. gemmad daemon — the local OpenAI-compatible server (gemma-4-12b on :18082).
+    // Bearer-auth; no local server is started (the running daemon handles it).
+    if model == crate::gemmad::model_id() {
+        return Ok(ProviderInfo {
+            provider: Provider::Gemmad,
+            base_url: crate::gemmad::base_url(),
+            api_key: crate::gemmad::resolve_token()?,
+            resolved_model: format!("{} (local gemmad)", crate::gemmad::model_id()),
+            use_native_gemini_api: false,
+            azure_api_version: None,
+        });
+    }
 
     // 1. Check for Gemini models (explicit prefix or aliases)
     if model.starts_with("gemini")
@@ -414,6 +432,26 @@ mod tests {
                 assert_ne!(info.provider, Provider::Local, "{} must not route Local", m);
             }
         }
+    }
+
+    #[test]
+    fn test_gemmad_is_text_only() {
+        assert!(!supports_tools(&Provider::Gemmad, "gemma-4-12b"));
+    }
+
+    #[test]
+    fn test_gemmad_model_routes_to_gemmad_provider() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        std::env::set_var("GEMMAD_API_KEY", "sk-test-token");
+
+        let info = detect_provider("gemma-4-12b").expect("gemmad model resolves");
+        assert_eq!(info.provider, Provider::Gemmad);
+        assert_eq!(info.base_url, "http://127.0.0.1:18082/v1/");
+        assert_eq!(info.api_key, "sk-test-token");
+        assert!(info.resolved_model.contains("gemma-4-12b"));
+        assert!(!info.use_native_gemini_api);
+
+        std::env::remove_var("GEMMAD_API_KEY");
     }
 
     #[test]

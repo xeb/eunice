@@ -39,6 +39,9 @@ pub struct Client {
     azure_api_version: Option<String>,
     /// Enable debug output
     debug: bool,
+    /// Whether to forward tool definitions to the provider. gemmad does not
+    /// emit OpenAI tool_calls, so tools are withheld for it.
+    send_tools: bool,
 }
 
 impl Client {
@@ -87,6 +90,7 @@ impl Client {
             retry_config: RetryConfig::default(),
             azure_api_version: provider_info.azure_api_version.clone(),
             debug: std::env::var("EUNICE_DEBUG").is_ok(),
+            send_tools: !matches!(provider_info.provider, Provider::Gemmad),
         })
     }
 
@@ -132,6 +136,7 @@ impl Client {
             Provider::Anthropic => req.header("x-api-key", api_key),
             Provider::Ollama | Provider::Local => req, // No auth needed
             Provider::AzureOpenAI => req.header("api-key", api_key),
+            Provider::Gemmad => req.header(AUTHORIZATION, format!("Bearer {}", api_key)),
             _ => req.header(AUTHORIZATION, format!("Bearer {}", api_key)),
         }
     }
@@ -172,6 +177,9 @@ impl Client {
         } else {
             format!("{}chat/completions", self.base_url)
         };
+
+        // gemmad (and any text-only provider) gets no tool definitions.
+        let tools = if self.send_tools { tools } else { None };
 
         let request = ChatCompletionRequest {
             model: model.to_string(),
@@ -1463,5 +1471,44 @@ mod tests {
         assert!(content.contains("OUTCOME_OK"));
         assert!(content.contains("Hello from Agentic Vision"));
         assert!(content.contains("The analysis is complete."));
+    }
+}
+
+#[cfg(test)]
+mod gemmad_client_tests {
+    use super::*;
+    use crate::models::{Provider, ProviderInfo};
+
+    fn gemmad_info() -> ProviderInfo {
+        ProviderInfo {
+            provider: Provider::Gemmad,
+            base_url: "http://127.0.0.1:18082/v1/".to_string(),
+            api_key: "sk-test".to_string(),
+            resolved_model: "gemma-4-12b".to_string(),
+            use_native_gemini_api: false,
+            azure_api_version: None,
+        }
+    }
+
+    #[test]
+    fn test_gemmad_client_withholds_tools() {
+        let client = Client::new(&gemmad_info()).unwrap();
+        assert!(!client.send_tools);
+    }
+
+    #[test]
+    fn test_gemmad_client_sends_bearer() {
+        let client = Client::new(&gemmad_info()).unwrap();
+        let req = client
+            .add_auth(client.http.post("http://127.0.0.1:18082/v1/chat/completions"))
+            .build()
+            .unwrap();
+        let auth = req
+            .headers()
+            .get(AUTHORIZATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(auth, "Bearer sk-test");
     }
 }

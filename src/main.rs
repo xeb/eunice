@@ -3,6 +3,7 @@ mod client;
 mod compact;
 mod display;
 mod display_sink;
+mod gemmad;
 mod interactive;
 mod key_rotation;
 mod local;
@@ -39,6 +40,14 @@ struct Args {
     /// Shorthand for --model=gemma4:31b (local Gemma 4 31B + MTP)
     #[arg(long)]
     gemma: bool,
+
+    /// Use the already-running gemmad daemon (local gemma-4-12b); error if unreachable
+    #[arg(long)]
+    gemmad: bool,
+
+    /// Do not auto-use a running gemmad daemon; fall back to the cloud smart-default
+    #[arg(long)]
+    no_gemmad: bool,
 
     /// System prompt (inline text or file path)
     #[arg(long)]
@@ -401,23 +410,33 @@ async fn main() -> Result<()> {
     // Determine if we need TUI mode
     let use_tui = args.chat || (prompt.is_none() && atty::is(atty::Stream::Stdin));
 
-    // Select model (--gemma is shorthand for --model=gemma4:31b)
-    let model = if args.gemma {
-        if let Some(m) = &args.model {
-            if m != "gemma4:31b" {
-                return Err(anyhow!(
-                    "--gemma is shorthand for --model=gemma4:31b and cannot be combined with --model={}",
-                    m
-                ));
-            }
-        }
-        "gemma4:31b".to_string()
-    } else {
-        match &args.model {
-            Some(m) => m.clone(),
-            None => get_smart_default_model()?,
-        }
+    // Select model. A running gemmad daemon is the global default; --gemmad
+    // forces it, --no-gemmad opts out, --gemma still builds the 31B MTP server.
+    let need_probe =
+        args.gemmad || (!args.gemma && args.model.is_none() && !args.no_gemmad);
+    let gemmad_up = if need_probe { gemmad::is_available().await } else { false };
+    let choice = gemmad::decide_model(
+        args.gemma,
+        args.gemmad,
+        args.no_gemmad,
+        args.model.as_deref(),
+        gemmad_up,
+    )?;
+    let used_gemmad = matches!(choice, gemmad::ModelChoice::Gemmad);
+    let model = match choice {
+        gemmad::ModelChoice::Explicit(m) => m,
+        gemmad::ModelChoice::Gemmad => gemmad::model_id(),
+        gemmad::ModelChoice::Gemma31b => "gemma4:31b".to_string(),
+        gemmad::ModelChoice::SmartDefault => get_smart_default_model()?,
     };
+    if used_gemmad {
+        eprintln!(
+            "Using local gemmad ({}) at {}:{}",
+            gemmad::model_id(),
+            gemmad::host(),
+            gemmad::port()
+        );
+    }
 
     // Detect provider and check tool support
     let provider_info = detect_provider(&model)?;
@@ -574,5 +593,26 @@ mod tests {
     fn test_args_gemma_default_false() {
         let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
         assert!(!args.gemma);
+    }
+
+    #[test]
+    fn test_args_gemmad_flag() {
+        let args = Args::try_parse_from(["eunice", "--gemmad", "hi"]).unwrap();
+        assert!(args.gemmad);
+        assert!(!args.no_gemmad);
+    }
+
+    #[test]
+    fn test_args_no_gemmad_flag() {
+        let args = Args::try_parse_from(["eunice", "--no-gemmad", "hi"]).unwrap();
+        assert!(args.no_gemmad);
+        assert!(!args.gemmad);
+    }
+
+    #[test]
+    fn test_args_gemmad_default_false() {
+        let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
+        assert!(!args.gemmad);
+        assert!(!args.no_gemmad);
     }
 }

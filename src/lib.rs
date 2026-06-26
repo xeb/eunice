@@ -3,6 +3,7 @@ pub mod client;
 pub mod compact;
 pub mod display;
 pub mod display_sink;
+pub mod gemmad;
 pub mod interactive;
 pub mod key_rotation;
 pub mod local;

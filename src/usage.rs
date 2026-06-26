@@ -135,6 +135,10 @@ fn get_pricing(model: &str, provider: &Provider) -> (f64, f64) {
             // Local inference is free
             (0.0, 0.0)
         }
+        Provider::Gemmad => {
+            // Local daemon inference is free
+            (0.0, 0.0)
+        }
     }
 }
 
