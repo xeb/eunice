@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
 
-**9,538 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
+**9,838 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -147,6 +147,9 @@ Arguments:
 
 Options:
       --model <MODEL>   AI model to use
+      --gemma           Shorthand for --model=gemma4:31b (auto-built local 31B + MTP)
+      --gemmad          Use the already-running gemmad daemon (local gemma-4-12b)
+      --no-gemmad       Ignore a running gemmad daemon; use the cloud smart-default
       --prompt <TEXT>   System prompt (inline text or file path)
       --chat            Interactive chat mode
       --webapp          Start web server interface
@@ -158,6 +161,30 @@ Options:
   -h, --help            Print help
   -V, --version         Print version
 ```
+
+### Local Gemma via the gemmad daemon
+
+If a [`gemmad`](https://github.com/xeb/gemma) daemon is running locally (an
+OpenAI-compatible server for gemma-4-12b on `127.0.0.1:18082`), eunice uses it
+as the **default** model when no model is specified — no flag required:
+
+```bash
+eunice "Summarize this file"     # auto-routes to gemmad when it is reachable
+eunice --gemmad "..."            # force the daemon; errors if it is not reachable
+eunice --no-gemmad "..."         # ignore the daemon; use the cloud smart-default
+```
+
+- Detection is a fast `/livez` probe; if the daemon is down, eunice falls back
+  to the normal smart-default (Gemini/Anthropic/OpenAI/Ollama).
+- The Bearer token comes from `$GEMMAD_API_KEY`, else
+  `~/.config/gemmad/keys.toml`.
+- Host/port/model id are overridable via `GEMMAD_HOST` / `GEMMAD_PORT` /
+  `GEMMAD_MODEL_ID`.
+- Tools are disabled in this mode: the daemon does not emit OpenAI `tool_calls`,
+  so eunice runs the model text-only.
+
+This is distinct from `--gemma`, which builds and starts a local **31B + MTP**
+server (and needs the GPU's VRAM free).
 
 ### Prompt Discovery
 
