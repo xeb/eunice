@@ -350,7 +350,7 @@ pub async fn run_agent_cancellable(
         }
 
         // Execute each tool call
-        for tool_call in tool_calls {
+        for (tool_idx, tool_call) in tool_calls.iter().enumerate() {
             let tool_name = &tool_call.function.name;
             let arguments = &tool_call.function.arguments;
 
@@ -373,9 +373,35 @@ pub async fn run_agent_cancellable(
                     "Error: Output store not available".to_string()
                 }
             } else if tool_registry.has_tool(tool_name) {
-                // Execute via ToolRegistry
-                let raw_result = tool_registry.execute(tool_name, args).await
-                    .unwrap_or_else(|e| format!("Error: {}", e));
+                // Execute via ToolRegistry, racing against cancellation so a
+                // long-running tool (e.g. Bash) can be stopped with Escape/Ctrl+C.
+                // Dropping the execute future kills the spawned subprocess.
+                let exec = tool_registry.execute(tool_name, args);
+                let raw_result = if let Some(mut rx) = cancel_rx.clone() {
+                    tokio::select! {
+                        r = exec => r.unwrap_or_else(|e| format!("Error: {}", e)),
+                        _ = rx.changed() => {
+                            display.write_event(DisplayEvent::ToolResult {
+                                result: "[Cancelled by user]".to_string(),
+                                limit: tool_output_limit,
+                            });
+                            // Keep history valid: every requested tool_call needs a
+                            // matching result. Backfill the current + any remaining.
+                            for tc in &tool_calls[tool_idx..] {
+                                conversation_history.push(Message::Tool {
+                                    tool_call_id: tc.id.clone(),
+                                    content: "[Cancelled by user]".to_string(),
+                                });
+                            }
+                            return Ok(AgentResult {
+                                status: AgentStatus::Cancelled,
+                                usage: session_usage,
+                            });
+                        }
+                    }
+                } else {
+                    exec.await.unwrap_or_else(|e| format!("Error: {}", e))
+                };
 
                 // Store output if store is enabled
                 if let Some(ref mut store) = output_store {
