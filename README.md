@@ -148,7 +148,7 @@ Arguments:
 Options:
       --model <MODEL>   AI model to use
       --gemma           Shorthand for --model=gemma4:31b (auto-built local 31B + MTP)
-      --gemmad          Use the already-running gemmad daemon (local gemma-4-12b)
+      --gemmad          Use the already-running gemmad daemon (local Gemma 4)
       --no-gemmad       Ignore a running gemmad daemon; use the cloud smart-default
       --prompt <TEXT>   System prompt (inline text or file path)
       --chat            Interactive chat mode
@@ -165,8 +165,9 @@ Options:
 ### Local Gemma via the gemmad daemon
 
 If a [`gemmad`](https://github.com/xeb/gemma) daemon is running locally (an
-OpenAI-compatible server for gemma-4-12b on `127.0.0.1:18082`), eunice uses it
-as the **default** model when no model is specified — no flag required:
+OpenAI-compatible server for Gemma 4 — `gemma-4-26b-a4b` by default — on
+`127.0.0.1:18082`), eunice uses it as the **default** model when no model is
+specified — no flag required:
 
 ```bash
 eunice "Summarize this file"     # auto-routes to gemmad when it is reachable
@@ -178,10 +179,10 @@ eunice --no-gemmad "..."         # ignore the daemon; use the cloud smart-defaul
   to the normal smart-default (Gemini/Anthropic/OpenAI/Ollama).
 - The Bearer token comes from `$GEMMAD_API_KEY`, else
   `~/.config/gemmad/keys.toml`.
-- Host/port/model id are overridable via `GEMMAD_HOST` / `GEMMAD_PORT` /
-  `GEMMAD_MODEL_ID`.
-- Tools are disabled in this mode: the daemon does not emit OpenAI `tool_calls`,
-  so eunice runs the model text-only.
+- Host/port are overridable via `GEMMAD_HOST` / `GEMMAD_PORT`. The live model id
+  is read from the daemon's `/v1/models` (overridable fallback: `GEMMAD_MODEL_ID`).
+- Tools work: the daemon returns standard OpenAI `tool_calls`, so the full
+  Bash/Read/Write/Skill tool set is available.
 
 This is distinct from `--gemma`, which builds and starts a local **31B + MTP**
 server (and needs the GPU's VRAM free).

@@ -425,14 +425,16 @@ async fn main() -> Result<()> {
     let used_gemmad = matches!(choice, gemmad::ModelChoice::Gemmad);
     let model = match choice {
         gemmad::ModelChoice::Explicit(m) => m,
-        gemmad::ModelChoice::Gemmad => gemmad::model_id(),
+        gemmad::ModelChoice::Gemmad => gemmad::live_model_id()
+            .await
+            .unwrap_or_else(gemmad::model_id),
         gemmad::ModelChoice::Gemma31b => "gemma4:31b".to_string(),
         gemmad::ModelChoice::SmartDefault => get_smart_default_model()?,
     };
     if used_gemmad {
         eprintln!(
             "Using local gemmad ({}) at {}:{}",
-            gemmad::model_id(),
+            model,
             gemmad::host(),
             gemmad::port()
         );

@@ -20,10 +20,9 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
         // Local Gemma 4 models support tools via llama-server
         Provider::Local => true,
 
-        // gemmad (local gemma-4-12b) speaks OpenAI chat but does NOT emit
-        // OpenAI tool_calls — it inlines Gemma tool-call tokens into content.
-        // Treat as text-only so the warning fires and Client withholds tools.
-        Provider::Gemmad => false,
+        // gemmad implements OpenAI-style function calling: it returns standard
+        // tool_calls with finish_reason "tool_calls".
+        Provider::Gemmad => true,
 
         // Ollama: check by model family
         Provider::Ollama => {
@@ -105,14 +104,16 @@ fn resolve_gemini_alias(model: &str) -> &str {
 pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
 
-    // 0. gemmad daemon — the local OpenAI-compatible server (gemma-4-12b on :18082).
+    // 0. gemmad daemon — the local OpenAI-compatible server (Gemma 4 on :18082).
     // Bearer-auth; no local server is started (the running daemon handles it).
-    if model == crate::gemmad::model_id() {
+    // Match the configured id or any hyphenated "gemma-4-*" id the daemon serves
+    // (distinct from the colon-form "gemma4:31b"/"gemma4:e4b" Local/Ollama routes).
+    if model == crate::gemmad::model_id() || model.starts_with("gemma-4-") {
         return Ok(ProviderInfo {
             provider: Provider::Gemmad,
             base_url: crate::gemmad::base_url(),
             api_key: crate::gemmad::resolve_token()?,
-            resolved_model: format!("{} (local gemmad)", crate::gemmad::model_id()),
+            resolved_model: format!("{} (local gemmad)", model),
             use_native_gemini_api: false,
             azure_api_version: None,
         });
@@ -435,8 +436,8 @@ mod tests {
     }
 
     #[test]
-    fn test_gemmad_is_text_only() {
-        assert!(!supports_tools(&Provider::Gemmad, "gemma-4-12b"));
+    fn test_gemmad_supports_tools() {
+        assert!(supports_tools(&Provider::Gemmad, "gemma-4-26b-a4b"));
     }
 
     #[test]

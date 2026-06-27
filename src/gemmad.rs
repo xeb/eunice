@@ -32,15 +32,42 @@ pub fn port() -> u16 {
         .unwrap_or(18082)
 }
 
+/// Fallback model id (env override, else the daemon's current default). The
+/// authoritative id comes from `live_model_id()`; this is only used when that
+/// query fails.
 pub fn model_id() -> String {
     std::env::var("GEMMAD_MODEL_ID")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "gemma-4-12b".to_string())
+        .unwrap_or_else(|| "gemma-4-26b-a4b".to_string())
 }
 
 pub fn base_url() -> String {
     format!("http://{}:{}/v1/", host(), port())
+}
+
+/// Query the daemon's `/v1/models` for the live model id. The `model` field a
+/// client sends is advisory — the server always uses whichever model is loaded
+/// — so this reports the real id for display and the request body. Returns
+/// `None` on any failure (caller falls back to `model_id()`).
+pub async fn live_model_id() -> Option<String> {
+    let token = resolve_token().ok()?;
+    let url = format!("http://{}:{}/v1/models", host(), port());
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(800))
+        .build()
+        .ok()?;
+    let resp = client.get(&url).bearer_auth(token).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body.get("data")?
+        .as_array()?
+        .first()?
+        .get("id")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 /// Probe the daemon's unauthenticated `/livez` endpoint with a short timeout.

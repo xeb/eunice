@@ -39,9 +39,6 @@ pub struct Client {
     azure_api_version: Option<String>,
     /// Enable debug output
     debug: bool,
-    /// Whether to forward tool definitions to the provider. gemmad does not
-    /// emit OpenAI tool_calls, so tools are withheld for it.
-    send_tools: bool,
 }
 
 impl Client {
@@ -90,7 +87,6 @@ impl Client {
             retry_config: RetryConfig::default(),
             azure_api_version: provider_info.azure_api_version.clone(),
             debug: std::env::var("EUNICE_DEBUG").is_ok(),
-            send_tools: !matches!(provider_info.provider, Provider::Gemmad),
         })
     }
 
@@ -177,9 +173,6 @@ impl Client {
         } else {
             format!("{}chat/completions", self.base_url)
         };
-
-        // gemmad (and any text-only provider) gets no tool definitions.
-        let tools = if self.send_tools { tools } else { None };
 
         let request = ChatCompletionRequest {
             model: model.to_string(),
@@ -1488,12 +1481,6 @@ mod gemmad_client_tests {
             use_native_gemini_api: false,
             azure_api_version: None,
         }
-    }
-
-    #[test]
-    fn test_gemmad_client_withholds_tools() {
-        let client = Client::new(&gemmad_info()).unwrap();
-        assert!(!client.send_tools);
     }
 
     #[test]
