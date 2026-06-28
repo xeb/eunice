@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
 
-**9,861 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
+**9,929 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
