@@ -393,15 +393,66 @@ After editing `agents.toml` or any `prompt_file`, restart the server. Under syst
 
 Scheduled agents only fire while the server is up, and missed occurrences are never replayed. For
 anything you actually depend on, install the webapp as a **systemd user service** — no `sudo`, no
-root:
+root.
+
+### Before you install: two decisions that are baked in
+
+**Which binary.** The unit's `ExecStart` is the *absolute path of the eunice you ran `--install`
+with* (`std::env::current_exe()`). Install with the eunice on your `PATH`, not a build artifact:
 
 ```bash
-eunice --install --port 8811 --agents /home/me/agents/agents.toml --model sonnet
+which eunice          # /home/me/.cargo/bin/eunice  <- you want this one
 ```
 
+If you run `--install` from `./target/release/eunice` inside a checkout, the service will point at
+that build directory forever, and `cargo clean` will break it.
+
+**Which directory.** `WorkingDirectory` is the directory you ran `--install` *from*, and that is
+where `sessions.db` is created. Pick a stable home for it and `cd` there first:
+
+```bash
+mkdir -p ~/eunice-agents && cd ~/eunice-agents
+```
+
+### Installing
+
+```bash
+cd ~/eunice-agents
+eunice --install --port 8811 --host 127.0.0.1 --agents ~/eunice-agents/agents.toml
+```
+
+```
+Installing eunice as a systemd user service...
+
+Validated agents file: /home/me/eunice-agents/agents.toml
+Captured 6 API key(s) into /home/me/.eunice/eunice.env
+Wrote unit file: /home/me/.config/systemd/user/eunice.service
+
+Created symlink /home/me/.config/systemd/user/default.target.wants/eunice.service → /home/me/.config/systemd/user/eunice.service.
+Started the service with the new configuration.
+
+Install complete!
+  Unit:   /home/me/.config/systemd/user/eunice.service
+  URL:    http://127.0.0.1:8811
+  Agents: /home/me/eunice-agents/agents.toml
+  Logs:   journalctl --user -u eunice -f
+```
+
+The last line changes to `Restarted the service with the new configuration.` when a service is
+already running, which is how you can tell a reinstall actually took effect.
+
 `--install` accepts `--port`, `--host`, `--model`, `--agents`, `--prompt`, and `--no-persist`, and
-bakes them into the unit's `ExecStart`. Note that `--agents` requires `--webapp` or `--install`;
-using it alone is an error.
+bakes them into `ExecStart`. Note `--agents` requires `--webapp` or `--install`; using it alone is an
+error. Prefer absolute paths for `--agents` — a relative one is resolved against `WorkingDirectory`,
+which works, but is easy to get wrong later.
+
+> **Bind to `127.0.0.1` unless you mean otherwise.** The default `--host` is `0.0.0.0`, which listens
+> on every interface, and the webapp has **no authentication of its own** — it reads identity from
+> proxy headers (`x-forwarded-email` and friends) and treats their absence as an anonymous user
+> rather than rejecting the request. Since agents run with the Bash tool, anyone who can reach the
+> port can run shell commands as you. On a laptop, a shared network, or a VPS, use
+> `--host 127.0.0.1` and reach it over an SSH tunnel, or put it behind an authenticating reverse
+> proxy. `--host 0.0.0.0` is only appropriate on a network you fully trust.
 
 ### What the installer does
 
@@ -436,6 +487,96 @@ using it alone is an error.
    at boot without a login session. Some distributions gate this behind polkit; if it fails you get a
    warning with the manual command rather than a failed install.
 
+### The unit it writes
+
+`~/.config/systemd/user/eunice.service`, for the install command above:
+
+```ini
+[Unit]
+Description=Eunice agentic webapp server
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/me/.cargo/bin/eunice --webapp --port 8811 --host 127.0.0.1 --agents /home/me/eunice-agents/agents.toml
+WorkingDirectory=/home/me/eunice-agents
+EnvironmentFile=-/home/me/.eunice/eunice.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+The leading `-` on `EnvironmentFile` means "start anyway if the file is missing". `Restart=on-failure`
+brings the server back if it crashes, but deliberately does **not** restart it after a clean exit.
+
+### Checking it worked
+
+```bash
+systemctl --user status eunice
+```
+
+Look for `Active: active (running)`. Then confirm the scheduler actually picked up your agents —
+this is the part worth checking, because a server with zero agents starts perfectly happily:
+
+```bash
+journalctl --user -u eunice --since "5 minutes ago" | grep scheduler
+```
+
+You want lines like:
+
+```
+[09:14:02.118] [scheduler] watching 2 enabled agent(s)
+[09:14:02.118] [scheduler]   daily-digest — "0 9 * * *" (as "0 0 9 * * *")
+[09:14:02.118] [scheduler]   repo-watch — "*/30 * * * *" (as "0 */30 * * * *")
+```
+
+`watching 0 enabled agent(s)` or `no enabled agents, scheduler idle` means every agent is
+`enabled = false`, and no `[scheduler]` lines at all means the service was installed without
+`--agents`. Either way, re-run `--install` with the right arguments.
+
+You can also ask the running server directly:
+
+```bash
+curl -s http://127.0.0.1:8811/api/agents | python3 -m json.tool
+```
+
+`"agents_file": null` confirms it is running without a config.
+
+### Changing the configuration
+
+Editing `agents.toml` is not enough on its own — the file is read once at startup.
+
+| Change | What to do |
+|---|---|
+| Edited `agents.toml` | `systemctl --user restart eunice` |
+| Changed port, host, model, or the agents path | Re-run `eunice --install` with the new flags |
+| Rotated an API key | Re-run `eunice --install` (see below) |
+| Upgraded eunice (`eunice --update`) | `systemctl --user restart eunice` |
+
+Re-running `--install` overwrites the unit and restarts the service, so it is safe to repeat and is
+the normal way to change anything baked into `ExecStart`.
+
+That last row matters: `eunice --update` replaces the binary on disk, but a running service keeps
+executing the old one until it is restarted. After updating, restart the service — otherwise
+`eunice --version` and the daemon disagree.
+
+### After a reboot
+
+With lingering enabled the service starts at boot, before any login. Confirm with:
+
+```bash
+loginctl show-user "$USER" --property=Linger    # want Linger=yes
+systemctl --user is-enabled eunice              # want enabled
+```
+
+If `Linger=no`, the installer's `enable-linger` call was refused; run
+`loginctl enable-linger "$USER"` yourself (this one may prompt for authentication).
+
+Missed schedules are not backfilled, so agents due during the downtime simply do not run — the next
+occurrence after boot is the next one that fires.
+
 ### Managing it
 
 ```bash
@@ -458,9 +599,28 @@ and **re-run `eunice --install`** — that rewrites `~/.eunice/eunice.env` and r
 eunice --uninstall-service
 ```
 
-This stops and disables the unit and deletes the unit file. It deliberately leaves
-`~/.eunice/eunice.env`, `sessions.db`, and user lingering alone; disable lingering yourself with
-`loginctl disable-linger $USER` if you want it gone.
+```
+Removing the eunice systemd user service...
+
+Removed /home/me/.config/systemd/user/default.target.wants/eunice.service.
+Removed unit file: /home/me/.config/systemd/user/eunice.service
+
+Uninstall complete!
+
+Note: the following were left untouched:
+  ~/.eunice/eunice.env  (snapshotted API keys)
+  sessions.db           (webapp session history)
+  user lingering        (disable with: loginctl disable-linger $USER)
+```
+
+It stops and disables the unit and deletes the unit file, and is safe to run when nothing is
+installed. The three things it leaves behind are deliberate — your API keys and your session history
+are not the installer's to throw away. Remove them yourself if you want a clean slate:
+
+```bash
+rm ~/.eunice/eunice.env          # only if you are done with the service entirely
+loginctl disable-linger "$USER"  # only if nothing else of yours relies on lingering
+```
 
 `--install` and `--uninstall-service` require Linux with systemd, and cannot be combined with each
 other or with `--uninstall`.
@@ -509,6 +669,11 @@ loader (`src/agents.rs`) and from argument parsing (`src/main.rs`):
 | A run is marked failed with `timed out after Ns` | The work exceeded `timeout_secs` | Raise `timeout_secs`, or narrow the prompt. The partial transcript is in the session |
 | A run is marked `timed out after Ns and did not stop cleanly` | It was stuck in a long tool call or API request and could not be interrupted within the 30-second grace window | Add a timeout to the command the prompt runs; the transcript for that run is gone, only the failure note remains |
 | The AGENTS tab shows "never run" after a restart | Run state is in-memory and rebuilt on restart | The runs themselves are still in SESSIONS; the tab repopulates on the next fire |
+| `systemctl --user start eunice` fails immediately, or the service restarts every 5 seconds | Usually the port is already taken, or the binary named in `ExecStart` no longer exists | `journalctl --user -u eunice -n 50` shows the real error. `ss -tlnp \| grep <port>` finds a port conflict; `systemctl --user cat eunice` shows the path it is trying to run |
+| `Failed to start eunice.service: Unit eunice.service not found` | Never installed, or installed for a different user | `eunice --install` as the user who will run it — user units are per-user, and `sudo systemctl --user` is not the same thing |
+| The service does not come back after a reboot | Lingering was not enabled — the installer warns but does not fail when the system refuses | `loginctl enable-linger "$USER"`, then confirm with `loginctl show-user "$USER" --property=Linger` |
+| It works from your shell but the unit runs an old build | `ExecStart` points at the binary you ran `--install` with, and a running service keeps the old binary until restarted | `systemctl --user cat eunice` to see the path; re-run `--install` using `which eunice`, and restart after any `eunice --update` |
+| `sessions.db` is not where you expected | It is created in `WorkingDirectory`, which is whatever directory you ran `--install` from | `systemctl --user show eunice --property=WorkingDirectory`; `cd` to the directory you want and re-run `--install` |
 
 ### Reading the logs
 
