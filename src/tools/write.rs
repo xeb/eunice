@@ -1,14 +1,29 @@
 use crate::models::Tool;
 use crate::tools::make_tool;
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Write tool for writing content to files
-pub struct WriteTool;
+pub struct WriteTool {
+    cwd: Option<PathBuf>,
+}
 
 impl WriteTool {
     pub fn new() -> Self {
-        Self
+        Self::with_cwd(None)
+    }
+
+    /// Resolve relative paths against `cwd` instead of the process working
+    /// directory. Per-tool so concurrent runs cannot race each other.
+    pub fn with_cwd(cwd: Option<PathBuf>) -> Self {
+        Self { cwd }
+    }
+
+    fn resolve(&self, path: &str) -> PathBuf {
+        match &self.cwd {
+            Some(dir) if Path::new(path).is_relative() => dir.join(path),
+            _ => PathBuf::from(path),
+        }
     }
 
     pub fn get_spec(&self) -> Tool {
@@ -41,7 +56,7 @@ impl WriteTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'content' parameter"))?;
 
-        let path = Path::new(path_str);
+        let path = self.resolve(path_str);
 
         // Create parent directories if needed
         if let Some(parent) = path.parent() {
@@ -57,7 +72,7 @@ impl WriteTool {
         }
 
         // Write the file
-        std::fs::write(path, content)
+        std::fs::write(&path, content)
             .with_context(|| format!("Failed to write file: {}", path_str))?;
 
         let bytes = content.len();

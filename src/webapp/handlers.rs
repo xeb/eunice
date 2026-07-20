@@ -1,9 +1,11 @@
 use super::persistence::SessionMetadata;
+use super::scheduler;
 use super::server::AppState;
 use crate::client::Client;
 use crate::compact::{compact_context, is_context_exhausted_error, CompactionConfig};
 use crate::key_rotation::{BadKeyAction, RateLimitAction};
-use crate::models::Message;
+use crate::models::{Message, ProviderInfo};
+use crate::tools::ToolRegistry;
 use crate::usage::SessionUsage;
 use axum::{
     extract::State,
@@ -377,6 +379,24 @@ pub async fn clear_session(
     })
 }
 
+/// Scheduled agents endpoint - config plus live run state
+pub async fn agents(State(state): State<Arc<AppState>>) -> Json<scheduler::AgentsResponse> {
+    let server_model = state.provider_info.resolved_model.clone();
+
+    match &state.agents {
+        Some(registry) => Json(scheduler::AgentsResponse {
+            agents_file: Some(registry.config.source_path.display().to_string()),
+            agents: registry.snapshot(&state.storage).await,
+            server_model,
+        }),
+        None => Json(scheduler::AgentsResponse {
+            agents_file: None,
+            agents: Vec::new(),
+            server_model,
+        }),
+    }
+}
+
 /// Request for session events (reconnection)
 #[derive(Deserialize)]
 pub struct SessionEventsRequest {
@@ -512,14 +532,31 @@ pub async fn session_events(
 }
 
 /// Helper to send events to multiple destinations
-struct EventSender {
-    tx: mpsc::Sender<SseEvent>,
-    state: Arc<AppState>,
-    session_id: String,
-    broadcast_tx: broadcast::Sender<SseEvent>,
+pub(super) struct EventSender {
+    pub(super) tx: mpsc::Sender<SseEvent>,
+    pub(super) state: Arc<AppState>,
+    pub(super) session_id: String,
+    pub(super) broadcast_tx: broadcast::Sender<SseEvent>,
+}
+
+/// Per-run overrides so a scheduled agent can use its own model and its own
+/// tool registry (for `working_dir`) without disturbing the interactive defaults.
+pub(super) struct RunContext {
+    pub client: Arc<Client>,
+    pub provider_info: Arc<ProviderInfo>,
+    pub tool_registry: Arc<ToolRegistry>,
 }
 
 impl EventSender {
+    pub(super) fn new(
+        tx: mpsc::Sender<SseEvent>,
+        state: Arc<AppState>,
+        session_id: String,
+        broadcast_tx: broadcast::Sender<SseEvent>,
+    ) -> Self {
+        Self { tx, state, session_id, broadcast_tx }
+    }
+
     async fn send(&self, event: SseEvent) {
         // Store in session for replay
         self.state.storage.push_runtime_event(&self.session_id, event.clone()).await;
@@ -723,7 +760,8 @@ pub async fn query(
 
     // Spawn agent task
     tokio::spawn(async move {
-        run_agent_with_events(state_clone, prompt, session_id, session_name, event_sender, cancel_rx).await;
+        // The client already received the failure as an SSE Error event.
+        let _ = run_agent_with_events(state_clone, prompt, session_id, session_name, event_sender, cancel_rx, None, true).await;
     });
 
     // Convert channel to SSE stream
@@ -774,15 +812,28 @@ fn compose_first_message(system_prompt: Option<&str>, first_turn: bool, prompt: 
     }
 }
 
-/// Run the agent loop and emit events
-async fn run_agent_with_events(
+/// Run the agent loop and emit events.
+///
+/// `Err` carries the message of whatever ended the loop early. Interactive
+/// callers ignore it (the client already saw the `Error` event); the scheduler
+/// uses it to distinguish a failed run from a successful one.
+pub(super) async fn run_agent_with_events(
     state: Arc<AppState>,
     prompt: String,
     session_id: String,
     session_name: String,
     event_sender: EventSender,
     cancel_rx: watch::Receiver<bool>,
-) {
+    run_ctx: Option<RunContext>,
+    manage_cancel_slot: bool,
+) -> Result<(), String> {
+    let mut run_error: Option<String> = None;
+    let client: &Client = run_ctx.as_ref().map_or(state.client.as_ref(), |c| c.client.as_ref());
+    let provider_info: &ProviderInfo =
+        run_ctx.as_ref().map_or(&state.provider_info, |c| c.provider_info.as_ref());
+    let tool_registry: &ToolRegistry =
+        run_ctx.as_ref().map_or(state.tool_registry.as_ref(), |c| c.tool_registry.as_ref());
+
     let session_short = &session_id[..8];
     let log_prefix = format!("{} ({})", session_short, session_name);
     log(&format!("[{}] Agent loop starting", log_prefix));
@@ -812,7 +863,7 @@ async fn run_agent_with_events(
     });
 
     // Get tools
-    let tools = state.tool_registry.get_tools();
+    let tools = tool_registry.get_tools();
     let tools_option = if tools.is_empty() { None } else { Some(tools) };
 
     // Token usage tracking
@@ -857,20 +908,20 @@ async fn run_agent_with_events(
             event_sender.send(SseEvent::Error {
                 message: "Query cancelled".to_string(),
             }).await;
+            run_error = Some("Query cancelled".to_string());
             break;
         }
 
         // Call LLM
         log(&format!("[{}] Calling LLM ({}) with {} messages",
             log_prefix,
-            state.provider_info.resolved_model,
+            provider_info.resolved_model,
             conversation_history.len()
         ));
 
-        let response = state
-            .client
+        let response = client
             .chat_completion(
-                &state.provider_info.resolved_model,
+                &provider_info.resolved_model,
                 serde_json::to_value(&conversation_history).unwrap(),
                 tools_option.as_deref(),
             )
@@ -888,9 +939,9 @@ async fn run_agent_with_events(
 
                 // Check for bad API key (403, invalid key) - blacklist and rotate
                 if Client::is_bad_key_error(&error_msg) {
-                    match state.client.handle_bad_key() {
+                    match client.handle_bad_key() {
                         BadKeyAction::Rotated { new_key_index } => {
-                            let (_, total) = state.client.key_info();
+                            let (_, total) = client.key_info();
                             log(&format!("[{}] Invalid API key, switching to key {}/{}", log_prefix, new_key_index, total));
                             continue; // Retry with new key
                         }
@@ -899,6 +950,7 @@ async fn run_agent_with_events(
                             event_sender.send(SseEvent::Error {
                                 message: "All API keys are invalid".to_string(),
                             }).await;
+                            run_error = Some("All API keys are invalid".to_string());
                             break;
                         }
                     }
@@ -906,22 +958,27 @@ async fn run_agent_with_events(
 
                 // Check for rate limit / quota error (429, 503, quota exceeded)
                 if Client::is_quota_error(&error_msg) {
-                    match state.client.handle_rate_limit() {
+                    match client.handle_rate_limit() {
                         RateLimitAction::RetryAfterDelay(delay) => {
                             log(&format!("[{}] Rate limited, retrying in {}s...", log_prefix, delay.as_secs()));
                             tokio::time::sleep(delay).await;
                             continue; // Retry with same key
                         }
                         RateLimitAction::Rotated { new_key_index } => {
-                            let (_, total) = state.client.key_info();
+                            let (_, total) = client.key_info();
                             log(&format!("[{}] Rate limited, switching to key {}/{}", log_prefix, new_key_index, total));
                             continue; // Retry with new key
                         }
                         RateLimitAction::Exhausted { retry_after } => {
                             log(&format!("[{}] All API keys exhausted, retry in {}m", log_prefix, retry_after.as_secs() / 60));
+                            let message = format!(
+                                "All API keys exhausted, retry in {}m",
+                                retry_after.as_secs() / 60
+                            );
                             event_sender.send(SseEvent::Error {
-                                message: format!("All API keys exhausted, retry in {}m", retry_after.as_secs() / 60),
+                                message: message.clone(),
                             }).await;
+                            run_error = Some(message);
                             break;
                         }
                         RateLimitAction::CooldownReset => {
@@ -934,7 +991,7 @@ async fn run_agent_with_events(
                 // Try compaction if context exhausted
                 if is_context_exhausted_error(&error_msg) && !compaction_attempted {
                     log(&format!("[{}] Context exhausted, attempting compaction...", log_prefix));
-                    match compact_context(&state.client, &state.provider_info.resolved_model, &conversation_history, &compaction_config).await {
+                    match compact_context(client, &provider_info.resolved_model, &conversation_history, &compaction_config).await {
                         Ok(compacted) => {
                             log(&format!("[{}] Compaction successful (ratio: {:.2})", log_prefix, compacted.compaction_ratio));
                             conversation_history = compacted.messages;
@@ -947,9 +1004,11 @@ async fn run_agent_with_events(
                     }
                 }
 
+                let message = format!("API error: {:#}", e);
                 event_sender.send(SseEvent::Error {
-                    message: format!("API error: {:#}", e),
+                    message: message.clone(),
                 }).await;
+                run_error = Some(message);
                 break;
             }
         };
@@ -1012,8 +1071,8 @@ async fn run_agent_with_events(
             }).await;
 
             // Execute tool
-            let tool_result = if state.tool_registry.has_tool(tool_name) {
-                state.tool_registry.execute(tool_name, args).await
+            let tool_result = if tool_registry.has_tool(tool_name) {
+                tool_registry.execute(tool_name, args).await
                     .unwrap_or_else(|e| format!("Error: {}", e))
             } else {
                 format!("Error: Unknown tool '{}'", tool_name)
@@ -1068,8 +1127,9 @@ async fn run_agent_with_events(
 
     log(&format!("[{}] Query complete, saved {} messages to session", log_prefix, conversation_history.len()));
 
-    // Clear cancel sender
-    {
+    // Clear cancel sender. `state.cancel_tx` is a single global slot, so a scheduled
+    // run must leave it alone or it would detach a concurrent interactive query.
+    if manage_cancel_slot {
         let mut cancel_guard = state.cancel_tx.lock().await;
         *cancel_guard = None;
     }
@@ -1077,8 +1137,8 @@ async fn run_agent_with_events(
     // Send usage event if we have any usage data
     if session_usage.has_usage() {
         let estimated_cost = session_usage.estimate_cost(
-            &state.provider_info.resolved_model,
-            &state.provider_info.provider
+            &provider_info.resolved_model,
+            &provider_info.provider
         );
         event_sender.send(SseEvent::Usage {
             input_tokens: session_usage.total_input_tokens,
@@ -1090,6 +1150,11 @@ async fn run_agent_with_events(
 
     // Send done event
     event_sender.send(SseEvent::Done).await;
+
+    match run_error {
+        Some(message) => Err(message),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]

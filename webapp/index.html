@@ -479,12 +479,6 @@
             align-items: center;
         }
 
-        .drawer-title {
-            font-weight: 700;
-            letter-spacing: 0.2em;
-            font-size: 12px;
-        }
-
         .btn-new-session {
             padding: 4px 10px;
             font-size: 11px;
@@ -577,6 +571,208 @@
             color: var(--text-muted);
             font-size: 12px;
             text-align: center;
+        }
+
+        /* Drawer Tabs */
+        .drawer-tabs {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        /* Without the AGENTS tab this must render identically to the plain
+           SESSIONS title it replaced, so the untabbed state carries no affordance. */
+        .drawer-tab {
+            font-family: inherit;
+            font-weight: 700;
+            letter-spacing: 0.2em;
+            font-size: 12px;
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--text);
+            cursor: default;
+        }
+
+        .drawer-tabs.tabbed .drawer-tab {
+            cursor: pointer;
+            color: var(--text-muted);
+            padding-bottom: 2px;
+            border-bottom: 2px solid transparent;
+        }
+
+        .drawer-tabs.tabbed .drawer-tab.active {
+            color: var(--text);
+            border-bottom-color: var(--neon-cyan);
+        }
+
+        .session-agent-badge {
+            font-size: 11px;
+            margin-right: 4px;
+        }
+
+        /* Agents Tab */
+        .agent-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+
+        .agent-card {
+            padding: 12px 16px;
+            border-left: 3px solid transparent;
+        }
+
+        .agent-card:hover {
+            background: var(--bg-input);
+        }
+
+        .agent-card.expanded {
+            border-left-color: var(--neon-cyan);
+            background: var(--bg-input);
+        }
+
+        .agent-card.disabled {
+            opacity: 0.45;
+        }
+
+        .agent-card-summary {
+            cursor: pointer;
+        }
+
+        .agent-card-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .agent-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .agent-dot.success {
+            background: var(--neon-mint);
+        }
+
+        .agent-dot.failed {
+            background: var(--neon-coral);
+        }
+
+        .agent-dot.skipped {
+            background: var(--neon-yellow);
+        }
+
+        .agent-dot.running {
+            background: var(--neon-cyan);
+            animation: pulse 1s infinite;
+        }
+
+        .agent-card-name {
+            flex: 1;
+            min-width: 0;
+            font-weight: 600;
+            font-size: 13px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .agent-disabled-label {
+            font-size: 9px;
+            letter-spacing: 0.1em;
+            font-weight: 600;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 1px 4px;
+        }
+
+        .agent-card-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            word-break: break-word;
+        }
+
+        .agent-cron {
+            color: var(--text);
+        }
+
+        .agent-detail {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+
+        .agent-detail-label {
+            font-size: 9px;
+            letter-spacing: 0.2em;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .agent-prompt {
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+
+        .agent-field {
+            font-size: 11px;
+            color: var(--text-muted);
+            word-break: break-all;
+            margin-bottom: 4px;
+        }
+
+        .agent-error {
+            font-size: 11px;
+            color: var(--neon-coral);
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-bottom: 10px;
+        }
+
+        .agent-session {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 6px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            border-left: 2px solid transparent;
+        }
+
+        .agent-session:hover {
+            background: var(--bg-card);
+            border-left-color: var(--neon-cyan);
+        }
+
+        .agent-session-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .agent-session-meta {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .agents-note {
+            line-height: 1.5;
+            word-break: break-all;
+        }
+
+        /* Declared after every rule it overrides so equal specificity still wins. */
+        .hidden {
+            display: none;
         }
 
         /* Modal */
@@ -771,8 +967,13 @@
                 padding: 12px;
             }
 
-            .drawer-title {
+            .drawer-tabs {
+                gap: 10px;
+            }
+
+            .drawer-tab {
                 font-size: 11px;
+                letter-spacing: 0.15em;
             }
 
             .session-item {
@@ -784,6 +985,22 @@
             }
 
             .session-meta {
+                font-size: 10px;
+            }
+
+            .agent-card {
+                padding: 10px 12px;
+            }
+
+            .agent-card-name {
+                font-size: 12px;
+            }
+
+            .agent-card-meta,
+            .agent-prompt,
+            .agent-field,
+            .agent-error,
+            .agent-session {
                 font-size: 10px;
             }
 
@@ -964,15 +1181,20 @@
     <!-- Session Drawer -->
     <div class="session-drawer" id="session-drawer">
         <div class="drawer-header">
-            <span class="drawer-title">SESSIONS</span>
+            <div class="drawer-tabs" id="drawer-tabs">
+                <button class="drawer-tab active" id="tab-sessions">SESSIONS</button>
+                <button class="drawer-tab hidden" id="tab-agents">AGENTS</button>
+            </div>
             <button class="btn-new-session" id="drawer-new-btn">+ NEW</button>
         </div>
         <div class="session-list" id="session-list">
             <div class="no-sessions">No sessions yet</div>
         </div>
+        <div class="agent-list hidden" id="agent-list"></div>
         <div class="drawer-footer" id="persistence-status">
             <span class="persistence-badge memory">MEMORY</span>
         </div>
+        <div class="drawer-footer agents-note hidden" id="agents-footer"></div>
     </div>
     <div class="drawer-overlay" id="drawer-overlay"></div>
 
@@ -1361,6 +1583,11 @@
             return div.innerHTML;
         }
 
+        // escapeHtml() leaves quotes intact, so it cannot be used inside an attribute value.
+        function escapeAttr(str) {
+            return escapeHtml(str === null || str === undefined ? '' : String(str)).replace(/"/g, '&quot;');
+        }
+
         // Initialize markdown-it
         const md = window.markdownit ? window.markdownit({
             html: true,
@@ -1535,8 +1762,32 @@
 
         // Reconnect to live events if there's an active query
         // This allows users to close the tab and reopen to see events that happened
+        let reconnectController = null;
+        let reconnectAttached = false;
+
+        // Must run synchronously before a session switch: an aborted stream's
+        // rejection lands a microtask later, too late to keep the send controls
+        // it disabled from staying stuck on the next session.
+        function stopReconnect() {
+            if (reconnectController) {
+                reconnectController.abort();
+                reconnectController = null;
+            }
+            if (reconnectAttached) {
+                reconnectAttached = false;
+                isRunning = false;
+                sendBtn.disabled = false;
+                cancelBtn.classList.remove('visible');
+            }
+        }
+
         async function reconnectToEvents() {
             if (!sessionId) return;
+
+            stopReconnect();
+            const controller = new AbortController();
+            const streamSessionId = sessionId;
+            reconnectController = controller;
 
             console.log('[webapp] Reconnecting to session events:', sessionId.substring(0, 8));
 
@@ -1544,7 +1795,8 @@
                 const response = await fetch('/api/session/events', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ session_id: sessionId })
+                    body: JSON.stringify({ session_id: streamSessionId }),
+                    signal: controller.signal
                 });
 
                 if (!response.ok) {
@@ -1564,6 +1816,10 @@
                     const { done, value } = await reader.read();
                     if (done) break;
 
+                    // A read that resolved just before teardown must not paint
+                    // the previous session's events into the new one.
+                    if (reconnectController !== controller || sessionId !== streamSessionId) return;
+
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
                     buffer = lines.pop() || '';
@@ -1580,6 +1836,7 @@
                                 // Show reconnecting message on first event (if not Done)
                                 if (!hasReceivedEvents && event.type !== 'done' && event.type !== 'session_id') {
                                     hasReceivedEvents = true;
+                                    reconnectAttached = true;
                                     reconnectingMsg = addMessage('system', 'Reconnected - replaying events from background query...');
                                     isRunning = true;
                                     sendBtn.disabled = true;
@@ -1591,6 +1848,7 @@
 
                                 // If we got a done event, clean up
                                 if (event.type === 'done') {
+                                    reconnectAttached = false;
                                     isRunning = false;
                                     sendBtn.disabled = false;
                                     cancelBtn.classList.remove('visible');
@@ -1607,7 +1865,12 @@
                     }
                 }
             } catch (err) {
+                if (err.name === 'AbortError') return;
                 console.error('[webapp] Error reconnecting to events:', err);
+            } finally {
+                if (reconnectController === controller) {
+                    reconnectController = null;
+                }
             }
         }
 
@@ -1618,6 +1881,11 @@
         const sessionList = document.getElementById('session-list');
         const drawerNewBtn = document.getElementById('drawer-new-btn');
         const persistenceStatus = document.getElementById('persistence-status');
+        const drawerTabs = document.getElementById('drawer-tabs');
+        const sessionsTabBtn = document.getElementById('tab-sessions');
+        const agentsTabBtn = document.getElementById('tab-agents');
+        const agentList = document.getElementById('agent-list');
+        const agentsFooter = document.getElementById('agents-footer');
 
         let currentSessionName = null;
         let persistenceEnabled = false;
@@ -1626,11 +1894,16 @@
             sessionDrawer.classList.add('open');
             drawerOverlay.classList.add('visible');
             loadSessions();
+            loadAgents();
+            if (activeDrawerTab === 'agents') {
+                startAgentsRefresh();
+            }
         }
 
         function closeDrawer() {
             sessionDrawer.classList.remove('open');
             drawerOverlay.classList.remove('visible');
+            stopAgentsRefresh();
         }
 
         menuBtn.addEventListener('click', openDrawer);
@@ -1657,24 +1930,28 @@
                 if (data.sessions.length === 0) {
                     sessionList.innerHTML = '<div class="no-sessions">No sessions yet</div>';
                 } else {
-                    sessionList.innerHTML = data.sessions.map(session => `
-                        <div class="session-item ${session.id === sessionId ? 'active' : ''}" data-id="${session.id}">
+                    sessionList.innerHTML = data.sessions.map(session => {
+                        const agentBadge = session.agent_name
+                            ? `<span class="session-agent-badge" title="${escapeAttr(session.agent_name)}">⏰</span>`
+                            : '';
+                        return `
+                        <div class="session-item ${session.id === sessionId ? 'active' : ''}" data-id="${escapeAttr(session.id)}" data-name="${escapeAttr(session.name)}">
                             <div class="session-info">
-                                <div class="session-name">${escapeHtml(session.name)}</div>
+                                <div class="session-name">${agentBadge}${escapeHtml(session.name)}</div>
                                 <div class="session-meta">
-                                    ${session.turn_count} turns | ${session.relative_time}
+                                    ${escapeHtml(String(session.turn_count))} turns | ${escapeHtml(session.relative_time || '')}
                                 </div>
                             </div>
-                            <button class="session-delete" data-id="${session.id}" title="Delete session">&times;</button>
+                            <button class="session-delete" data-id="${escapeAttr(session.id)}" title="Delete session">&times;</button>
                         </div>
-                    `).join('');
+                    `;
+                    }).join('');
 
                     // Add click handlers
                     sessionList.querySelectorAll('.session-info').forEach(el => {
                         el.addEventListener('click', () => {
                             const item = el.closest('.session-item');
-                            const name = item.querySelector('.session-name').textContent;
-                            selectSession(item.dataset.id, name);
+                            selectSession(item.dataset.id, item.dataset.name);
                         });
                     });
 
@@ -1692,6 +1969,7 @@
         }
 
         async function selectSession(id, name) {
+            stopReconnect();
             sessionId = id;
             currentSessionName = name;
             localStorage.setItem(SESSION_KEY, sessionId);
@@ -1699,9 +1977,11 @@
             updateSessionUrl(name);
             closeDrawer();
 
-            // Clear messages and restore history
+            // Clear messages, restore history, then attach to the live stream so a
+            // scheduled run picked from the AGENTS tab is watchable while in flight.
             messagesEl.innerHTML = '';
             await restoreSessionHistory();
+            reconnectToEvents();
         }
 
         async function deleteSession(id) {
@@ -1728,6 +2008,7 @@
         }
 
         async function createNewSession() {
+            stopReconnect();
             try {
                 const res = await fetch('/api/session/new', { method: 'POST' });
                 const data = await res.json();
@@ -1753,6 +2034,7 @@
 
         // Update NEW button to use new session creation
         newBtn.addEventListener('click', async () => {
+            stopReconnect();
             if (authenticatedUser) {
                 // Authenticated user - clear server-side and get new session
                 try {
@@ -1777,6 +2059,220 @@
             }
             queryInput.focus();
         });
+
+        // ---- AGENTS tab (read-only view of /api/agents) ----
+
+        const AGENTS_REFRESH_MS = 30000;
+
+        let activeDrawerTab = 'sessions';
+        let agentsFile = null;
+        let agentsRefreshTimer = null;
+        const expandedAgents = new Set();
+
+        function startAgentsRefresh() {
+            stopAgentsRefresh();
+            agentsRefreshTimer = setInterval(loadAgents, AGENTS_REFRESH_MS);
+        }
+
+        function stopAgentsRefresh() {
+            if (agentsRefreshTimer !== null) {
+                clearInterval(agentsRefreshTimer);
+                agentsRefreshTimer = null;
+            }
+        }
+
+        function switchDrawerTab(tab) {
+            if (tab === 'agents' && !agentsFile) return;
+
+            activeDrawerTab = tab;
+            const onAgents = tab === 'agents';
+
+            sessionsTabBtn.classList.toggle('active', !onAgents);
+            agentsTabBtn.classList.toggle('active', onAgents);
+            sessionList.classList.toggle('hidden', onAgents);
+            agentList.classList.toggle('hidden', !onAgents);
+            persistenceStatus.classList.toggle('hidden', onAgents);
+            agentsFooter.classList.toggle('hidden', !onAgents);
+            drawerNewBtn.classList.toggle('hidden', onAgents);
+
+            if (onAgents) {
+                loadAgents();
+                startAgentsRefresh();
+            } else {
+                stopAgentsRefresh();
+            }
+        }
+
+        sessionsTabBtn.addEventListener('click', () => switchDrawerTab('sessions'));
+        agentsTabBtn.addEventListener('click', () => switchDrawerTab('agents'));
+
+        function formatDuration(seconds) {
+            const total = Math.max(0, Math.round(seconds));
+            if (total < 60) return `${total}s`;
+
+            const minutes = Math.floor(total / 60);
+            if (minutes < 60) return `${minutes}m`;
+
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) {
+                const rem = minutes % 60;
+                return rem ? `${hours}h ${rem}m` : `${hours}h`;
+            }
+
+            const days = Math.floor(hours / 24);
+            const rem = hours % 24;
+            return rem ? `${days}d ${rem}h` : `${days}d`;
+        }
+
+        // next_run_at / last_run_at are unix seconds, or null when unknown.
+        function relativeFuture(unixSeconds) {
+            if (typeof unixSeconds !== 'number' || !isFinite(unixSeconds)) return null;
+            const delta = unixSeconds - Date.now() / 1000;
+            return delta <= 0 ? 'due now' : `in ${formatDuration(delta)}`;
+        }
+
+        function relativePast(unixSeconds) {
+            if (typeof unixSeconds !== 'number' || !isFinite(unixSeconds)) return null;
+            const delta = Date.now() / 1000 - unixSeconds;
+            return delta < 5 ? 'just now' : `${formatDuration(delta)} ago`;
+        }
+
+        function agentDotClass(agent) {
+            // `running` is a run in flight right now; last_status describes the previous run.
+            if (agent.running || agent.last_status === 'running') return 'agent-dot running';
+            if (!agent.enabled) return 'agent-dot';
+
+            switch (agent.last_status) {
+                case 'success': return 'agent-dot success';
+                case 'failed': return 'agent-dot failed';
+                case 'skipped': return 'agent-dot skipped';
+                default: return 'agent-dot';
+            }
+        }
+
+        function renderAgentCard(agent, serverModel) {
+            const expanded = expandedAgents.has(agent.name);
+            const model = agent.model
+                ? escapeHtml(agent.model)
+                : `${escapeHtml(serverModel)} (default)`;
+
+            const nextRun = agent.enabled ? relativeFuture(agent.next_run_at) : null;
+            const lastRun = relativePast(agent.last_run_at);
+
+            const details = agent.running ? ['<div class="agent-field">running now</div>'] : [];
+            details.push('<div class="agent-detail-label">PROMPT</div>');
+            details.push(`<div class="agent-prompt">${escapeHtml(agent.prompt_preview || '')}</div>`);
+            if (agent.working_dir) {
+                details.push(`<div class="agent-field">working_dir: ${escapeHtml(agent.working_dir)}</div>`);
+            }
+            if (agent.timeout_secs) {
+                details.push(`<div class="agent-field">timeout: ${escapeHtml(String(agent.timeout_secs))}s</div>`);
+            }
+            if (agent.last_error) {
+                details.push('<div class="agent-detail-label">LAST ERROR</div>');
+                details.push(`<div class="agent-error">${escapeHtml(agent.last_error)}</div>`);
+            }
+
+            const recent = Array.isArray(agent.recent_sessions) ? agent.recent_sessions : [];
+            details.push('<div class="agent-detail-label">RECENT RUNS</div>');
+            if (recent.length === 0) {
+                details.push('<div class="agent-field">no runs recorded</div>');
+            } else {
+                details.push(recent.map(session => `
+                    <div class="agent-session" data-id="${escapeAttr(session.id)}" data-name="${escapeAttr(session.name)}">
+                        <span class="agent-session-name">${escapeHtml(session.name)}</span>
+                        <span class="agent-session-meta">${escapeHtml(session.relative_time || '')}</span>
+                    </div>
+                `).join(''));
+            }
+
+            return `
+                <div class="agent-card${expanded ? ' expanded' : ''}${agent.enabled ? '' : ' disabled'}" data-name="${escapeAttr(agent.name)}">
+                    <div class="agent-card-summary">
+                        <div class="agent-card-head">
+                            <span class="${agentDotClass(agent)}"></span>
+                            <span class="agent-card-name">${escapeHtml(agent.name)}</span>
+                            ${agent.enabled ? '' : '<span class="agent-disabled-label">DISABLED</span>'}
+                        </div>
+                        <div class="agent-card-meta">
+                            <span class="agent-cron">${escapeHtml(agent.schedule)}</span> | ${model}
+                        </div>
+                        <div class="agent-card-meta">
+                            next run ${nextRun ? escapeHtml(nextRun) : '—'} | ${lastRun ? `last run ${escapeHtml(lastRun)}` : 'never run'}
+                        </div>
+                    </div>
+                    <div class="agent-detail${expanded ? '' : ' hidden'}">${details.join('')}</div>
+                </div>
+            `;
+        }
+
+        function renderAgents(agents, serverModel) {
+            // The 30s refresh rebuilds the list wholesale; keep the reader's place.
+            const scrollTop = agentList.scrollTop;
+
+            if (agents.length === 0) {
+                agentList.innerHTML = '<div class="no-sessions">No agents configured</div>';
+                return;
+            }
+
+            agentList.innerHTML = agents.map(agent => renderAgentCard(agent, serverModel)).join('');
+            agentList.scrollTop = scrollTop;
+
+            agentList.querySelectorAll('.agent-card-summary').forEach(el => {
+                el.addEventListener('click', () => {
+                    const card = el.closest('.agent-card');
+                    const name = card.dataset.name;
+                    const nowExpanded = !expandedAgents.has(name);
+
+                    if (nowExpanded) {
+                        expandedAgents.add(name);
+                    } else {
+                        expandedAgents.delete(name);
+                    }
+
+                    card.classList.toggle('expanded', nowExpanded);
+                    card.querySelector('.agent-detail').classList.toggle('hidden', !nowExpanded);
+                });
+            });
+
+            agentList.querySelectorAll('.agent-session').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    selectSession(el.dataset.id, el.dataset.name);
+                });
+            });
+        }
+
+        async function loadAgents() {
+            try {
+                const res = await fetch('/api/agents');
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                // A server started without --agents must look exactly as it did
+                // before this tab existed, so hide it rather than showing it empty.
+                if (!data.agents_file) {
+                    agentsFile = null;
+                    agentsTabBtn.classList.add('hidden');
+                    drawerTabs.classList.remove('tabbed');
+                    if (activeDrawerTab === 'agents') {
+                        switchDrawerTab('sessions');
+                    }
+                    return;
+                }
+
+                agentsFile = data.agents_file;
+                agentsTabBtn.classList.remove('hidden');
+                drawerTabs.classList.add('tabbed');
+                agentsFooter.textContent = `Agents are configured in ${agentsFile} — restart the service to apply changes.`;
+                renderAgents(Array.isArray(data.agents) ? data.agents : [], data.server_model || '');
+            } catch (err) {
+                console.error('[webapp] Failed to load agents:', err);
+                if (activeDrawerTab === 'agents') {
+                    agentList.innerHTML = '<div class="no-sessions">Failed to load agents</div>';
+                }
+            }
+        }
 
         // Find session by name from server
         async function findSessionByName(name) {

@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
 
-**9,929 lines of code** - **11MB binary** - Emphasizing "sophisticated simplicity".
+**11,496 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -146,20 +146,34 @@ Arguments:
   [PROMPT]  The prompt to send to the AI
 
 Options:
-      --model <MODEL>   AI model to use
-      --gemma           Shorthand for --model=gemma4:31b (auto-built local 31B + MTP)
-      --gemmad          Use the already-running gemmad daemon (local Gemma 4)
-      --no-gemmad       Ignore a running gemmad daemon; use the cloud smart-default
-      --prompt <TEXT>   System prompt (inline text or file path)
-      --chat            Interactive chat mode
-      --webapp          Start web server interface
-      --list-models     List available AI models
-      --list-tools      List the 4 built-in tools
-      --llms-txt        Output full LLM context documentation
-      --update          Update to the latest version
-      --debug           Enable debug output for API calls
-  -h, --help            Print help
-  -V, --version         Print version
+      --model <MODEL>          AI model to use
+      --gemma                  Shorthand for --model=gemma4:31b (auto-built local 31B + MTP)
+      --gemmad                 Use the already-running gemmad daemon (local Gemma 4)
+      --no-gemmad              Ignore a running gemmad daemon; use the cloud smart-default
+      --prompt <TEXT>          System prompt (inline text or file path)
+      --chat                   Interactive chat mode
+      --webapp                 Start web server interface
+      --port <PORT>            Port for webapp server [default: 8811]
+      --host <HOST>            Host for webapp server [default: 0.0.0.0]
+      --no-persist             Disable webapp session persistence (sessions.db)
+      --agents <FILE>          Path to an agents.toml of scheduled agents (webapp mode)
+      --install                Install eunice --webapp as a systemd user service
+      --uninstall-service      Remove the systemd user service installed by --install
+      --list-models            List available AI models
+      --list-tools             List the 4 built-in tools
+      --list-skills            List available skills from ~/.eunice/skills/
+      --llms-txt               Output full LLM context documentation
+      --update                 Update to the latest version
+  -f, --force                  Force reinstall even if already up to date (with --update)
+      --uninstall              Uninstall eunice
+      --debug                  Enable debug output for API calls
+      --download <MODEL>       Download a local model (e.g., hf:gemma4:e4b)
+      --local-models           List downloaded local models
+      --remove-model <MODEL>   Remove a downloaded local model
+      --serve <MODEL>          Start gemma4-server for a local model
+      --rebuild-gemma4-mtp     Force a clean rebuild of the gemma4-mtp server binary
+  -h, --help                   Print help
+  -V, --version                Print version
 ```
 
 ### Local Gemma via the gemmad daemon
@@ -200,7 +214,7 @@ Start a web server for browser-based interaction:
 
 ```bash
 eunice --webapp
-# Opens at http://localhost:8080
+# Opens at http://localhost:8811
 ```
 
 Features:
@@ -208,6 +222,71 @@ Features:
 - Session persistence
 - Multi-turn conversations
 - Tool execution display
+- Scheduled long-running agents (see below)
+
+## Long-Running Agents
+
+Agents are prompts that run on a cron schedule inside the webapp server. Define them in a
+plain-text `agents.toml` and pass it with `--agents`:
+
+```toml
+[[agent]]
+name = "daily-digest"                # required, lowercase kebab-case, unique
+schedule = "0 9 * * *"               # required, standard 5-field cron, server local time
+prompt = "Summarize yesterday's commits in ~/p/myrepo and write digest.md"
+
+[[agent]]
+name = "repo-watch"
+schedule = "*/30 * * * *"
+prompt_file = "prompts/repo-watch.md"   # alternative to prompt; relative to agents.toml
+model = "flash"                         # optional; defaults to the server's model
+working_dir = "/home/me/p/myrepo"       # optional; cwd for this agent's tools
+timeout_secs = 900                      # optional, default 600
+enabled = true                          # optional, default true
+```
+
+```bash
+eunice --webapp --agents agents.toml
+```
+
+Each run creates a normal session, so the full transcript — prompts, tool calls, output — is
+readable in the web UI, and you can watch a run live while it happens. The hamburger drawer gains
+an **AGENTS** tab showing each agent's schedule, next and last run, status, and recent runs. It is
+read-only: `agents.toml` is the single source of truth, and the server reloads it on restart.
+
+The config is validated at startup and the server refuses to start if anything is wrong, so a typo
+fails immediately rather than silently never firing.
+
+**Schedules use standard 5-field Unix cron** (`minute hour day-of-month month day-of-week`), with
+day-of-week `0`/`7` = Sunday, and names like `MON-FRI` accepted. Missed schedules are not backfilled:
+if the server was down at 09:00, that run is skipped rather than replayed. If a run is still going
+when its next tick arrives, that tick is skipped rather than queued.
+
+See **[HOWTO_SCHEDULED_AGENTS.md](HOWTO_SCHEDULED_AGENTS.md)** for the full guide: every field,
+schedule recipes, run semantics, service management, troubleshooting, and worked examples.
+
+### Running as a service
+
+`--install` installs the webapp as a **systemd user service** — no `sudo`, no root:
+
+```bash
+eunice --install --port 8811 --agents /home/me/agents/agents.toml
+```
+
+This validates the agents file, writes `~/.config/systemd/user/eunice.service` bound to the port you
+chose, enables and starts it, and turns on lingering so it survives logout and starts at boot.
+
+Because systemd user services do not inherit your shell environment, the installer snapshots your
+API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OLLAMA_HOST`)
+into `~/.eunice/eunice.env` with mode `0600`. Re-run `--install` after rotating a key.
+
+```bash
+systemctl --user status eunice      # check it
+journalctl --user -u eunice -f      # follow logs
+eunice --uninstall-service          # stop, disable, and remove the unit
+```
+
+`--uninstall-service` leaves `~/.eunice/eunice.env`, `sessions.db`, and lingering alone.
 
 ## Architecture
 

@@ -21,10 +21,16 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn new() -> Self {
+        Self::with_cwd(None)
+    }
+
+    /// Registry whose filesystem tools operate in `cwd`. Skills are global
+    /// (`~/.eunice/skills`), so SkillTool is unaffected.
+    pub fn with_cwd(cwd: Option<std::path::PathBuf>) -> Self {
         Self {
-            bash: BashTool::new(),
-            read: ReadTool::new(),
-            write: WriteTool::new(),
+            bash: BashTool::with_cwd(cwd.clone()),
+            read: ReadTool::with_cwd(cwd.clone()),
+            write: WriteTool::with_cwd(cwd),
             skill: SkillTool::new(),
         }
     }
@@ -99,5 +105,59 @@ mod tests {
         assert!(registry.has_tool("Write"));
         assert!(registry.has_tool("Skill"));
         assert!(!registry.has_tool("unknown"));
+    }
+
+    #[tokio::test]
+    async fn test_with_cwd_resolves_relative_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = ToolRegistry::with_cwd(Some(dir.path().to_path_buf()));
+
+        registry
+            .execute(
+                "Write",
+                serde_json::json!({"path": "note.txt", "content": "scoped"}),
+            )
+            .await
+            .unwrap();
+
+        registry
+            .execute(
+                "Write",
+                serde_json::json!({"path": "sub/nested.txt", "content": "nested"}),
+            )
+            .await
+            .unwrap();
+
+        let read = registry
+            .execute("Read", serde_json::json!({"path": "note.txt"}))
+            .await
+            .unwrap();
+        assert_eq!(read, "scoped");
+
+        assert!(dir.path().join("note.txt").exists());
+        assert!(dir.path().join("sub").join("nested.txt").exists());
+
+        // Nothing may land in the process working directory.
+        let process_cwd = std::env::current_dir().unwrap();
+        assert!(!process_cwd.join("note.txt").exists());
+        assert!(!process_cwd.join("sub").join("nested.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_new_resolves_relative_paths_against_process_cwd() {
+        let registry = ToolRegistry::new();
+        let read = registry
+            .execute("Read", serde_json::json!({"path": "Cargo.toml"}))
+            .await
+            .unwrap();
+        assert!(read.contains("name = \"eunice\""));
+
+        // The same relative path against a different cwd must not find it.
+        let dir = tempfile::tempdir().unwrap();
+        let scoped = ToolRegistry::with_cwd(Some(dir.path().to_path_buf()));
+        let result = scoped
+            .execute("Read", serde_json::json!({"path": "Cargo.toml"}))
+            .await;
+        assert!(result.is_err());
     }
 }

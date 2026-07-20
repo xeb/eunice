@@ -1,6 +1,8 @@
 mod agent;
+mod agents;
 mod client;
 mod compact;
+mod daemon;
 mod display;
 mod display_sink;
 mod gemmad;
@@ -127,6 +129,18 @@ struct Args {
     /// Disable webapp session persistence (sessions.db); sessions live in memory only
     #[arg(long)]
     no_persist: bool,
+
+    /// Path to an agents.toml defining scheduled long-running agents (webapp mode)
+    #[arg(long)]
+    agents: Option<String>,
+
+    /// Install eunice --webapp as a systemd user service
+    #[arg(long)]
+    install: bool,
+
+    /// Remove the systemd user service installed by --install
+    #[arg(long)]
+    uninstall_service: bool,
 }
 
 /// Auto-discover prompt files in priority order
@@ -290,6 +304,35 @@ fn run_uninstall() -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Validated before the early-return dispatch below, which would otherwise
+    // consume --install/--uninstall-service before these checks could fire.
+    if args.install && args.uninstall_service {
+        return Err(anyhow!("--install and --uninstall-service cannot be used together"));
+    }
+    if args.install && args.uninstall {
+        return Err(anyhow!("--install and --uninstall cannot be used together"));
+    }
+    if args.agents.is_some() && !args.webapp && !args.install {
+        return Err(anyhow!("--agents requires --webapp or --install"));
+    }
+
+    // Handle --uninstall-service
+    if args.uninstall_service {
+        return daemon::run_uninstall_service();
+    }
+
+    // Handle --install
+    if args.install {
+        return daemon::run_install(&daemon::InstallOptions {
+            port: args.port,
+            host: args.host.clone(),
+            agents_file: args.agents.clone(),
+            model: args.model.clone(),
+            prompt: args.prompt.clone(),
+            no_persist: args.no_persist,
+        });
+    }
 
     // Handle --list-models
     if args.list_models {
@@ -474,11 +517,16 @@ async fn main() -> Result<()> {
             port: args.port,
             persist: !args.no_persist,
         };
+        let agents_config = match args.agents {
+            Some(ref file) => Some(agents::load_agents(Path::new(file))?),
+            None => None,
+        };
         let result = webapp::run_server(
             webapp_config,
             client,
             provider_info,
             prompt.clone(),
+            agents_config,
         ).await;
         if let Some(ref mut child) = _local_server {
             let _ = child.kill();
@@ -616,5 +664,78 @@ mod tests {
         let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
         assert!(!args.gemmad);
         assert!(!args.no_gemmad);
+    }
+
+    #[test]
+    fn test_args_agents() {
+        let args =
+            Args::try_parse_from(["eunice", "--webapp", "--agents", "/tmp/agents.toml"]).unwrap();
+        assert_eq!(args.agents, Some("/tmp/agents.toml".to_string()));
+        assert!(args.webapp);
+    }
+
+    #[test]
+    fn test_args_agents_default_none() {
+        let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
+        assert_eq!(args.agents, None);
+    }
+
+    #[test]
+    fn test_args_install() {
+        let args = Args::try_parse_from(["eunice", "--install"]).unwrap();
+        assert!(args.install);
+        assert!(!args.uninstall_service);
+        assert!(!args.uninstall);
+    }
+
+    #[test]
+    fn test_args_install_default_false() {
+        let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
+        assert!(!args.install);
+    }
+
+    #[test]
+    fn test_args_uninstall_service() {
+        let args = Args::try_parse_from(["eunice", "--uninstall-service"]).unwrap();
+        assert!(args.uninstall_service);
+        assert!(!args.uninstall);
+        assert!(!args.install);
+    }
+
+    #[test]
+    fn test_args_uninstall_service_default_false() {
+        let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
+        assert!(!args.uninstall_service);
+    }
+
+    #[test]
+    fn test_args_uninstall_is_distinct_from_uninstall_service() {
+        let args = Args::try_parse_from(["eunice", "--uninstall"]).unwrap();
+        assert!(args.uninstall);
+        assert!(!args.uninstall_service);
+    }
+
+    #[test]
+    fn test_args_install_composition() {
+        let args = Args::try_parse_from([
+            "eunice",
+            "--install",
+            "--port",
+            "9000",
+            "--host",
+            "127.0.0.1",
+            "--model",
+            "sonnet",
+            "--agents",
+            "/tmp/agents.toml",
+            "--no-persist",
+        ])
+        .unwrap();
+        assert!(args.install);
+        assert_eq!(args.port, 9000);
+        assert_eq!(args.host, "127.0.0.1");
+        assert_eq!(args.model, Some("sonnet".to_string()));
+        assert_eq!(args.agents, Some("/tmp/agents.toml".to_string()));
+        assert!(args.no_persist);
     }
 }

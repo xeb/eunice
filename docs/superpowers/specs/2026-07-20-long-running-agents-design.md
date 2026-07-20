@@ -1,8 +1,11 @@
 # Long-Running Agents for Eunice Webapp Mode — Design Spec
 
 **Date:** 2026-07-20
-**Status:** Draft — pending review
+**Status:** Implemented
 **Target version:** 1.1.0
+
+> Revised after implementation. Changes from the original draft are marked
+> **[revised]** and explained where they appear.
 
 ## Overview
 
@@ -68,7 +71,16 @@ Field rules:
 
 - `name`: required, unique across the file, kebab-case (`^[a-z0-9][a-z0-9-]*$`), max 64 chars.
 - `schedule`: required, standard 5-field cron expression evaluated in the server's local
-  timezone. Parsed with the `cron` crate.
+  timezone.
+
+  **[revised] Cron translation.** The `cron` crate is not standard-cron compatible: it rejects
+  5-field expressions (it wants a leading seconds field) and it numbers day-of-week
+  1=Sunday…7=Saturday, whereas Unix cron uses 0=Sunday…6=Saturday. Taking the crate's dialect
+  directly would have made `0 9 * * 1` fire on Sunday instead of Monday. `agents.toml` therefore
+  accepts **standard 5-field Unix cron only**, and `agents::normalize_cron` rewrites it into the
+  crate's 6-field form, remapping bare day-of-week integers (including inside lists, ranges and
+  steps) and leaving `*` and names like `MON-FRI` alone. Both the original and translated
+  expressions are logged at startup so an unexpected firing day is diagnosable.
 - Exactly one of `prompt` / `prompt_file` is required. `prompt_file` paths resolve
   relative to the directory containing `agents.toml`; the file is read at startup.
 - `model`: optional. Validated at startup via `detect_provider()`; unknown model = startup error.
@@ -76,6 +88,12 @@ Field rules:
 - `timeout_secs`: optional u64, default 600.
 - `working_dir`: optional; must exist at startup. When set, the run's tool execution
   uses it as the working directory; otherwise the server's cwd is used.
+
+  **[revised] How this is implemented.** A process-wide `chdir` would race with concurrent
+  interactive queries, so instead the tools gained an optional cwd: `BashTool` passes it to
+  `Command::current_dir`, and `ReadTool`/`WriteTool` resolve relative paths against it. Each
+  agent with a `working_dir` gets its own `ToolRegistry` built once at startup; agents without
+  one share the server's registry and behave exactly as before.
 
 ### Validation (fail fast)
 
@@ -103,15 +121,23 @@ New module: `src/webapp/scheduler.rs`.
   its next tick arrives, that tick is recorded as `skipped` and the schedule moves on.
   Different agents may run concurrently.
 - **A run:**
-  1. Create a new session via `SessionStorage`, titled `⏰ <name> — <YYYY-MM-DD HH:MM>`,
-     tagged with the agent's name (see Persistence below).
-  2. Execute the existing agent loop (`agent::run_agent`) with the agent's prompt as the
-     user message, the webapp's system prompt (if any) prepended as usual, the agent's
-     model (or server default), and the shared `ToolRegistry`.
+  1. Create a new session via `SessionStorage::create_agent_session`, tagged with the agent's
+     name. **[revised]** The session keeps its normal generated name rather than a
+     `⏰ <name> — <date>` title: `sessions.name` is `NOT NULL UNIQUE`, so a date-derived title
+     would collide when two runs land in the same minute. The `agent_name` column carries the
+     association instead, and the UI renders the ⏰ badge from it.
+  2. **[revised]** Execute the *webapp's* agent loop, `handlers::run_agent_with_events`. The
+     webapp does not use `agent::run_agent` — it has its own loop that emits SSE events. Reusing
+     it means a scheduled run behaves identically to an interactive one, and (because the run
+     publishes a broadcast channel and marks the session running) a browser can attach to an
+     in-flight scheduled run through the existing `/api/session/events` endpoint.
   3. Persist every message to the session as it is produced (same path as interactive
      webapp queries).
   4. On completion, record `success`; on error or timeout, record `failed` with the error
-     string appended to the session as a final system-style message.
+     string appended to the session as a final assistant message.
+     **[revised]** `run_agent_with_events` returns `Result<(), String>` so the scheduler can tell
+     a failed run from a successful one; previously it returned `()` and swallowed errors into an
+     SSE event, which would have recorded every failure as a success.
 - Runs are independent of interactive traffic; they do not touch `cancel_tx` and cannot
   be cancelled from the UI in v1.
 - In-memory per-agent state (not persisted; rebuilt on restart):

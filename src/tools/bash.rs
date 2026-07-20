@@ -1,6 +1,7 @@
 use crate::models::Tool;
 use crate::tools::make_tool;
 use anyhow::{Context, Result};
+use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
@@ -30,12 +31,20 @@ impl Drop for ProcessGroupKiller {
 /// Bash tool for executing shell commands
 pub struct BashTool {
     default_timeout: u64,
+    cwd: Option<PathBuf>,
 }
 
 impl BashTool {
     pub fn new() -> Self {
+        Self::with_cwd(None)
+    }
+
+    /// Run commands in `cwd` instead of the process working directory. Per-command
+    /// so concurrent runs with different directories cannot race each other.
+    pub fn with_cwd(cwd: Option<PathBuf>) -> Self {
         Self {
             default_timeout: 600, // 10 minutes
+            cwd,
         }
     }
 
@@ -81,6 +90,9 @@ impl BashTool {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        if let Some(dir) = &self.cwd {
+            cmd.current_dir(dir);
+        }
         #[cfg(unix)]
         cmd.process_group(0);
 
@@ -182,6 +194,23 @@ mod tests {
         let args = serde_json::json!({"command": "exit 42"});
         let result = tool.execute(args).await.unwrap();
         assert!(result.contains("exit code: 42"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_runs_in_configured_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let expected = dir.path().canonicalize().unwrap();
+
+        let tool = BashTool::with_cwd(Some(expected.clone()));
+        let result = tool
+            .execute(serde_json::json!({"command": "pwd -P"}))
+            .await
+            .unwrap();
+
+        assert_eq!(result.trim(), expected.to_str().unwrap());
+
+        // The process working directory must be untouched.
+        assert_ne!(std::env::current_dir().unwrap(), expected);
     }
 
     // When the execute future is dropped (e.g. the user cancels with Escape),

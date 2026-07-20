@@ -1,14 +1,29 @@
 use crate::models::Tool;
 use crate::tools::make_tool;
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Read tool for reading file contents
-pub struct ReadTool;
+pub struct ReadTool {
+    cwd: Option<PathBuf>,
+}
 
 impl ReadTool {
     pub fn new() -> Self {
-        Self
+        Self::with_cwd(None)
+    }
+
+    /// Resolve relative paths against `cwd` instead of the process working
+    /// directory. Per-tool so concurrent runs cannot race each other.
+    pub fn with_cwd(cwd: Option<PathBuf>) -> Self {
+        Self { cwd }
+    }
+
+    fn resolve(&self, path: &str) -> PathBuf {
+        match &self.cwd {
+            Some(dir) if Path::new(path).is_relative() => dir.join(path),
+            _ => PathBuf::from(path),
+        }
     }
 
     pub fn get_spec(&self) -> Tool {
@@ -33,7 +48,7 @@ impl ReadTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing 'path' parameter"))?;
 
-        let path = Path::new(path_str);
+        let path = self.resolve(path_str);
 
         // Check if file exists
         if !path.exists() {
@@ -46,7 +61,7 @@ impl ReadTool {
         }
 
         // Read the file
-        let content = std::fs::read(path)
+        let content = std::fs::read(&path)
             .with_context(|| format!("Failed to read file: {}", path_str))?;
 
         // Check if it's valid UTF-8 (text file)

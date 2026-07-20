@@ -11,6 +11,7 @@ use tokio::sync::{watch, Mutex};
 
 use super::handlers;
 use super::persistence::SessionStorage;
+use super::scheduler::{self, AgentRegistry};
 
 /// Shared application state
 #[allow(dead_code)]
@@ -25,6 +26,8 @@ pub struct AppState {
     pub storage: SessionStorage,
     /// System prompt prepended to the first message of each new session
     pub system_prompt: Option<String>,
+    /// Scheduled agents, when an agents file was supplied
+    pub agents: Option<Arc<AgentRegistry>>,
 }
 
 /// Run the webapp server
@@ -33,6 +36,7 @@ pub async fn run_server(
     client: Client,
     provider_info: ProviderInfo,
     system_prompt: Option<String>,
+    agents: Option<crate::agents::AgentsConfig>,
 ) -> Result<()> {
     // Initialize storage: persistent sessions.db by default, in-memory
     // when --no-persist is set or the database cannot be opened
@@ -62,6 +66,17 @@ pub async fn run_server(
         println!("System prompt: {} chars", sp.len());
     }
 
+    let agents = match agents {
+        Some(config) => {
+            let count = config.agents.len();
+            let source = config.source_path.display().to_string();
+            let registry = AgentRegistry::new(config, &provider_info.resolved_model)?;
+            println!("Scheduled agents: {} (from {})", count, source);
+            Some(Arc::new(registry))
+        }
+        None => None,
+    };
+
     let state = Arc::new(AppState {
         client: Arc::new(client),
         provider_info,
@@ -70,7 +85,10 @@ pub async fn run_server(
         cancel_tx: Arc::new(Mutex::new(None)),
         storage,
         system_prompt,
+        agents,
     });
+
+    scheduler::spawn(state.clone());
 
     let app = Router::new()
         .route("/", get(handlers::index))
@@ -84,6 +102,7 @@ pub async fn run_server(
         .route("/api/session/history", post(handlers::get_session_history))
         .route("/api/session/clear", post(handlers::clear_session))
         .route("/api/session/events", post(handlers::session_events))
+        .route("/api/agents", get(handlers::agents))
         .with_state(state);
 
     let addr = format!("{}:{}", webapp_config.host, webapp_config.port);

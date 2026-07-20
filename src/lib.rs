@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agents;
 pub mod client;
 pub mod compact;
 pub mod display;

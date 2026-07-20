@@ -38,6 +38,7 @@ pub struct SessionRecord {
     pub id: String,
     pub name: String,
     pub user_id: Option<String>,
+    pub agent_name: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -50,6 +51,7 @@ pub struct SessionMetadata {
     pub turn_count: usize,
     pub updated_at: i64,
     pub relative_time: String,
+    pub agent_name: Option<String>,
 }
 
 /// In-memory session for runtime use
@@ -57,6 +59,7 @@ pub struct MemorySession {
     pub id: String,
     pub name: String,
     pub user_id: Option<String>,
+    pub agent_name: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub history: Vec<Message>,
@@ -72,6 +75,7 @@ impl MemorySession {
             id,
             name,
             user_id,
+            agent_name: None,
             created_at: now,
             updated_at: now,
             history: Vec::new(),
@@ -130,6 +134,7 @@ impl SessionStorage {
     pub fn new_sqlite(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
         Self::init_schema(&conn)?;
+        Self::migrate_schema(&conn)?;
         Ok(SessionStorage::Sqlite {
             conn: Arc::new(Mutex::new(conn)),
             runtime: Arc::new(RwLock::new(HashMap::new())),
@@ -143,6 +148,7 @@ impl SessionStorage {
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 user_id TEXT,
+                agent_name TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -167,6 +173,27 @@ impl SessionStorage {
             CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id, sequence_num);
             CREATE INDEX IF NOT EXISTS idx_compactions_session_id ON compactions(session_id);
             "#,
+        )?;
+        Ok(())
+    }
+
+    /// Add columns that post-date the original schema. `CREATE TABLE IF NOT EXISTS`
+    /// silently no-ops on an existing database, so new columns must be added here.
+    fn migrate_schema(conn: &Connection) -> Result<()> {
+        let mut stmt = conn.prepare("PRAGMA table_info(sessions)")?;
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        drop(stmt);
+
+        if !columns.iter().any(|c| c == "agent_name") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN agent_name TEXT", [])?;
+        }
+
+        // Indexed after the column is guaranteed to exist: an index on a missing
+        // column is an error, which would abort init_schema on an old database.
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_agent_name ON sessions(agent_name, updated_at DESC);",
         )?;
         Ok(())
     }
@@ -225,6 +252,7 @@ impl SessionStorage {
                     id,
                     name,
                     user_id: user_id.map(String::from),
+                    agent_name: None,
                     created_at: now,
                     updated_at: now,
                 })
@@ -241,6 +269,47 @@ impl SessionStorage {
                     id,
                     name,
                     user_id: user_id.map(String::from),
+                    agent_name: None,
+                    created_at: now,
+                    updated_at: now,
+                })
+            }
+        }
+    }
+
+    /// Create a session tagged as produced by a scheduled agent run.
+    pub async fn create_agent_session(&self, agent_name: &str) -> Result<SessionRecord> {
+        let now = chrono::Utc::now().timestamp();
+        let id = uuid::Uuid::new_v4().to_string();
+
+        match self {
+            SessionStorage::Memory(store) => {
+                let name = Self::generate_memory_name();
+                let mut session = MemorySession::new(id.clone(), name.clone(), None);
+                session.agent_name = Some(agent_name.to_string());
+                store.write().await.insert(id.clone(), session);
+                Ok(SessionRecord {
+                    id,
+                    name,
+                    user_id: None,
+                    agent_name: Some(agent_name.to_string()),
+                    created_at: now,
+                    updated_at: now,
+                })
+            }
+            SessionStorage::Sqlite { conn, runtime } => {
+                let conn = conn.lock().await;
+                let name = Self::generate_name(&conn)?;
+                conn.execute(
+                    "INSERT INTO sessions (id, name, user_id, agent_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    params![&id, &name, None::<String>, agent_name, now, now],
+                )?;
+                runtime.write().await.insert(id.clone(), RuntimeState::new());
+                Ok(SessionRecord {
+                    id,
+                    name,
+                    user_id: None,
+                    agent_name: Some(agent_name.to_string()),
                     created_at: now,
                     updated_at: now,
                 })
@@ -257,6 +326,7 @@ impl SessionStorage {
                     id: s.id.clone(),
                     name: s.name.clone(),
                     user_id: s.user_id.clone(),
+                    agent_name: s.agent_name.clone(),
                     created_at: s.created_at,
                     updated_at: s.updated_at,
                 }))
@@ -264,15 +334,16 @@ impl SessionStorage {
             SessionStorage::Sqlite { conn, .. } => {
                 let conn = conn.lock().await;
                 let mut stmt = conn.prepare(
-                    "SELECT id, name, user_id, created_at, updated_at FROM sessions WHERE id = ?",
+                    "SELECT id, name, user_id, agent_name, created_at, updated_at FROM sessions WHERE id = ?",
                 )?;
                 let result = stmt.query_row([session_id], |row| {
                     Ok(SessionRecord {
                         id: row.get(0)?,
                         name: row.get(1)?,
                         user_id: row.get(2)?,
-                        created_at: row.get(3)?,
-                        updated_at: row.get(4)?,
+                        agent_name: row.get(3)?,
+                        created_at: row.get(4)?,
+                        updated_at: row.get(5)?,
                     })
                 });
                 match result {
@@ -305,6 +376,7 @@ impl SessionStorage {
                             turn_count,
                             updated_at: s.updated_at,
                             relative_time: format_relative_time(s.updated_at, now),
+                            agent_name: s.agent_name.clone(),
                         }
                     })
                     .collect();
@@ -321,7 +393,8 @@ impl SessionStorage {
                     let mut stmt = conn.prepare(
                         "SELECT s.id, s.name, s.updated_at,
                                 (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id
-                                 AND e.event_type IN ('user_message', 'assistant_message')) as turn_count
+                                 AND e.event_type IN ('user_message', 'assistant_message')) as turn_count,
+                                s.agent_name
                          FROM sessions s WHERE s.user_id = ? ORDER BY s.updated_at DESC"
                     )?;
                     let rows = stmt.query_map([uid], |row| {
@@ -330,23 +403,26 @@ impl SessionStorage {
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
+                            row.get::<_, Option<String>>(4)?,
                         ))
                     })?;
                     for row in rows {
-                        let (id, name, updated_at, turn_count) = row?;
+                        let (id, name, updated_at, turn_count, agent_name) = row?;
                         sessions.push(SessionMetadata {
                             id,
                             name,
                             turn_count: turn_count as usize,
                             updated_at,
                             relative_time: format_relative_time(updated_at, now),
+                            agent_name,
                         });
                     }
                 } else {
                     let mut stmt = conn.prepare(
                         "SELECT s.id, s.name, s.updated_at,
                                 (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id
-                                 AND e.event_type IN ('user_message', 'assistant_message')) as turn_count
+                                 AND e.event_type IN ('user_message', 'assistant_message')) as turn_count,
+                                s.agent_name
                          FROM sessions s ORDER BY s.updated_at DESC"
                     )?;
                     let rows = stmt.query_map([], |row| {
@@ -355,20 +431,87 @@ impl SessionStorage {
                             row.get::<_, String>(1)?,
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
+                            row.get::<_, Option<String>>(4)?,
                         ))
                     })?;
                     for row in rows {
-                        let (id, name, updated_at, turn_count) = row?;
+                        let (id, name, updated_at, turn_count, agent_name) = row?;
                         sessions.push(SessionMetadata {
                             id,
                             name,
                             turn_count: turn_count as usize,
                             updated_at,
                             relative_time: format_relative_time(updated_at, now),
+                            agent_name,
                         });
                     }
                 }
 
+                Ok(sessions)
+            }
+        }
+    }
+
+    /// Most recent sessions produced by a given agent, newest first.
+    pub async fn list_agent_sessions(&self, agent_name: &str, limit: usize) -> Result<Vec<SessionMetadata>> {
+        match self {
+            SessionStorage::Memory(store) => {
+                let store = store.read().await;
+                let now = chrono::Utc::now().timestamp();
+                let mut sessions: Vec<SessionMetadata> = store
+                    .values()
+                    .filter(|s| s.agent_name.as_deref() == Some(agent_name))
+                    .map(|s| {
+                        let turn_count = s.history.iter().filter(|m| {
+                            matches!(m, Message::User { .. } | Message::Assistant { .. })
+                        }).count();
+                        SessionMetadata {
+                            id: s.id.clone(),
+                            name: s.name.clone(),
+                            turn_count,
+                            updated_at: s.updated_at,
+                            relative_time: format_relative_time(s.updated_at, now),
+                            agent_name: s.agent_name.clone(),
+                        }
+                    })
+                    .collect();
+                sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                sessions.truncate(limit);
+                Ok(sessions)
+            }
+            SessionStorage::Sqlite { conn, .. } => {
+                let conn = conn.lock().await;
+                let now = chrono::Utc::now().timestamp();
+
+                let mut stmt = conn.prepare(
+                    "SELECT s.id, s.name, s.updated_at,
+                            (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id
+                             AND e.event_type IN ('user_message', 'assistant_message')) as turn_count,
+                            s.agent_name
+                     FROM sessions s WHERE s.agent_name = ? ORDER BY s.updated_at DESC LIMIT ?"
+                )?;
+                let rows = stmt.query_map(params![agent_name, limit as i64], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                })?;
+
+                let mut sessions = Vec::new();
+                for row in rows {
+                    let (id, name, updated_at, turn_count, agent_name) = row?;
+                    sessions.push(SessionMetadata {
+                        id,
+                        name,
+                        turn_count: turn_count as usize,
+                        updated_at,
+                        relative_time: format_relative_time(updated_at, now),
+                        agent_name,
+                    });
+                }
                 Ok(sessions)
             }
         }
@@ -727,6 +870,7 @@ impl SessionStorage {
                     id: session_id.to_string(),
                     name,
                     user_id: user_id.map(String::from),
+                    agent_name: None,
                     created_at: now,
                     updated_at: now,
                 })
@@ -743,6 +887,7 @@ impl SessionStorage {
                     id: session_id.to_string(),
                     name,
                     user_id: user_id.map(String::from),
+                    agent_name: None,
                     created_at: now,
                     updated_at: now,
                 })
@@ -763,6 +908,7 @@ impl SessionStorage {
                                 id: session.id.clone(),
                                 name: session.name.clone(),
                                 user_id: session.user_id.clone(),
+                                agent_name: session.agent_name.clone(),
                                 created_at: session.created_at,
                                 updated_at: session.updated_at,
                             });
@@ -776,7 +922,7 @@ impl SessionStorage {
                 let conn_guard = conn.lock().await;
                 // Find most recent session for user
                 let result = conn_guard.query_row(
-                    "SELECT id, name, user_id, created_at, updated_at FROM sessions
+                    "SELECT id, name, user_id, agent_name, created_at, updated_at FROM sessions
                      WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
                     [user_id],
                     |row| {
@@ -784,8 +930,9 @@ impl SessionStorage {
                             id: row.get(0)?,
                             name: row.get(1)?,
                             user_id: row.get(2)?,
-                            created_at: row.get(3)?,
-                            updated_at: row.get(4)?,
+                            agent_name: row.get(3)?,
+                            created_at: row.get(4)?,
+                            updated_at: row.get(5)?,
                         })
                     },
                 );
@@ -1660,4 +1807,257 @@ mod tests {
         let retrieved = storage.get_session(&session.id).await.unwrap();
         assert!(retrieved.is_some());
     }
+
+    // =====================================================
+    // AGENT SESSION TESTS
+    // =====================================================
+
+    /// The sessions/events schema as it existed before the agent_name column,
+    /// so migrations can be tested against a realistic pre-upgrade database.
+    fn create_old_schema_db(path: &std::path::Path) {
+        let conn = Connection::open(path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                user_id TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                sequence_num INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(session_id, sequence_num)
+            );
+            "#,
+        )
+        .unwrap();
+    }
+
+    fn column_names(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table)).unwrap();
+        let cols = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .unwrap();
+        cols
+    }
+
+    #[test]
+    fn test_migrate_schema_adds_agent_name_to_old_database() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("old.db");
+        create_old_schema_db(&db_path);
+
+        let conn = Connection::open(&db_path).unwrap();
+        assert!(!column_names(&conn, "sessions").contains(&"agent_name".to_string()));
+
+        SessionStorage::migrate_schema(&conn).unwrap();
+        assert!(column_names(&conn, "sessions").contains(&"agent_name".to_string()));
+
+        conn.execute(
+            "INSERT INTO sessions (id, name, user_id, agent_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            params!["id-1", "chrome-molly", None::<String>, "daily-digest", 100, 100],
+        )
+        .unwrap();
+        let agent_name: Option<String> = conn
+            .query_row("SELECT agent_name FROM sessions WHERE id = ?", ["id-1"], |row| row.get(0))
+            .unwrap();
+        assert_eq!(agent_name, Some("daily-digest".to_string()));
+    }
+
+    #[test]
+    fn test_migrate_schema_is_idempotent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("old.db");
+        create_old_schema_db(&db_path);
+
+        let conn = Connection::open(&db_path).unwrap();
+        SessionStorage::migrate_schema(&conn).unwrap();
+        SessionStorage::migrate_schema(&conn).unwrap();
+
+        let count = column_names(&conn, "sessions")
+            .iter()
+            .filter(|c| *c == "agent_name")
+            .count();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_opens_old_database_and_tags_sessions() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("old.db");
+        create_old_schema_db(&db_path);
+
+        // Pre-existing untagged session written under the old schema.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute(
+                "INSERT INTO sessions (id, name, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                params!["legacy-id", "legacy-name", None::<String>, 100, 100],
+            )
+            .unwrap();
+        }
+
+        let storage = SessionStorage::new_sqlite(db_path.to_str().unwrap()).unwrap();
+
+        let legacy = storage.get_session("legacy-id").await.unwrap().unwrap();
+        assert_eq!(legacy.agent_name, None);
+
+        let tagged = storage.create_agent_session("daily-digest").await.unwrap();
+        assert_eq!(tagged.agent_name, Some("daily-digest".to_string()));
+
+        let sessions = storage.list_sessions(None).await.unwrap();
+        assert_eq!(sessions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_create_agent_session_round_trip() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+
+        let created = storage.create_agent_session("repo-watch").await.unwrap();
+        assert_eq!(created.agent_name, Some("repo-watch".to_string()));
+        assert!(created.user_id.is_none());
+
+        let retrieved = storage.get_session(&created.id).await.unwrap().unwrap();
+        assert_eq!(retrieved.agent_name, Some("repo-watch".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_list_agent_sessions() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+
+        let a1 = storage.create_agent_session("repo-watch").await.unwrap();
+        let a2 = storage.create_agent_session("repo-watch").await.unwrap();
+        let other = storage.create_agent_session("daily-digest").await.unwrap();
+        let _untagged = storage.create_session(None).await.unwrap();
+
+        let watch = storage.list_agent_sessions("repo-watch", 10).await.unwrap();
+        assert_eq!(watch.len(), 2);
+        let ids: Vec<&str> = watch.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&a1.id.as_str()));
+        assert!(ids.contains(&a2.id.as_str()));
+        assert!(!ids.contains(&other.id.as_str()));
+        assert!(watch.iter().all(|s| s.agent_name.as_deref() == Some("repo-watch")));
+
+        // Newest first
+        assert!(watch[0].updated_at >= watch[1].updated_at);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_list_agent_sessions_respects_limit() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+
+        for _ in 0..5 {
+            storage.create_agent_session("repo-watch").await.unwrap();
+        }
+
+        let limited = storage.list_agent_sessions("repo-watch", 2).await.unwrap();
+        assert_eq!(limited.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_list_sessions_reports_agent_name() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+
+        let tagged = storage.create_agent_session("daily-digest").await.unwrap();
+        let untagged = storage.create_session(None).await.unwrap();
+
+        let sessions = storage.list_sessions(None).await.unwrap();
+        let tagged_meta = sessions.iter().find(|s| s.id == tagged.id).unwrap();
+        let untagged_meta = sessions.iter().find(|s| s.id == untagged.id).unwrap();
+
+        assert_eq!(tagged_meta.agent_name, Some("daily-digest".to_string()));
+        assert_eq!(untagged_meta.agent_name, None);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_list_sessions_by_user_reports_agent_name() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+
+        let user_session = storage.create_session(Some("user@example.com")).await.unwrap();
+        storage.create_agent_session("daily-digest").await.unwrap();
+
+        let sessions = storage.list_sessions(Some("user@example.com")).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, user_session.id);
+        assert_eq!(sessions[0].agent_name, None);
+    }
+
+    #[tokio::test]
+    async fn test_memory_create_agent_session_round_trip() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        let created = storage.create_agent_session("repo-watch").await.unwrap();
+        assert_eq!(created.agent_name, Some("repo-watch".to_string()));
+        assert!(created.user_id.is_none());
+
+        let retrieved = storage.get_session(&created.id).await.unwrap().unwrap();
+        assert_eq!(retrieved.agent_name, Some("repo-watch".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_memory_list_agent_sessions() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        let a1 = storage.create_agent_session("repo-watch").await.unwrap();
+        let other = storage.create_agent_session("daily-digest").await.unwrap();
+        storage.create_session(None).await.unwrap();
+
+        let watch = storage.list_agent_sessions("repo-watch", 10).await.unwrap();
+        assert_eq!(watch.len(), 1);
+        assert_eq!(watch[0].id, a1.id);
+        assert_eq!(watch[0].agent_name, Some("repo-watch".to_string()));
+
+        let digest = storage.list_agent_sessions("daily-digest", 10).await.unwrap();
+        assert_eq!(digest.len(), 1);
+        assert_eq!(digest[0].id, other.id);
+    }
+
+    #[tokio::test]
+    async fn test_memory_list_agent_sessions_respects_limit() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        for _ in 0..5 {
+            storage.create_agent_session("repo-watch").await.unwrap();
+        }
+
+        let limited = storage.list_agent_sessions("repo-watch", 2).await.unwrap();
+        assert_eq!(limited.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_memory_list_sessions_reports_agent_name() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        let tagged = storage.create_agent_session("daily-digest").await.unwrap();
+        let untagged = storage.create_session(None).await.unwrap();
+
+        let sessions = storage.list_sessions(None).await.unwrap();
+        let tagged_meta = sessions.iter().find(|s| s.id == tagged.id).unwrap();
+        let untagged_meta = sessions.iter().find(|s| s.id == untagged.id).unwrap();
+
+        assert_eq!(tagged_meta.agent_name, Some("daily-digest".to_string()));
+        assert_eq!(untagged_meta.agent_name, None);
+    }
+
+    #[tokio::test]
+    async fn test_create_session_is_never_tagged() {
+        let storage = SessionStorage::new(false).unwrap();
+        let session = storage.create_session(Some("user@example.com")).await.unwrap();
+        assert_eq!(session.agent_name, None);
+
+        let (sqlite, _temp_dir) = create_temp_sqlite_storage();
+        let session = sqlite.create_session(Some("user@example.com")).await.unwrap();
+        assert_eq!(session.agent_name, None);
+        let ensured = sqlite.ensure_session("explicit-id", None).await.unwrap();
+        assert_eq!(ensured.agent_name, None);
+    }
+
 }

@@ -67,15 +67,40 @@ User Input -> Provider Detection -> Client -> API Request -> Response
    - Session persistence: SQLite `sessions.db` in cwd by default; `--no-persist` for in-memory
    - System prompt via `--prompt <file>` (or auto-discovered `prompt.md`), prepended to each new session
    - Multi-turn conversations
+   - The agent loop for webapp mode is `handlers::run_agent_with_events`, **not** `agent::run_agent`
+
+10. **Scheduled Agents** (`src/agents.rs`, `src/webapp/scheduler.rs`)
+   - `agents.toml` (via `--agents`) declares agents with a cron `schedule` and a prompt
+   - Config parsing/validation lives in `src/agents.rs` (lib tree, no webapp deps); the runtime
+     loop lives in `src/webapp/scheduler.rs`
+   - Validated at startup — the server refuses to start on a bad config
+   - Each run drives `run_agent_with_events` into a session tagged with `sessions.agent_name`,
+     so runs are viewable (and watchable live) in the normal web UI
+   - **Cron dialect:** `agents.toml` takes standard 5-field Unix cron. The `cron` crate needs
+     6 fields (seconds first) and numbers day-of-week 1=Sunday..7=Saturday, so
+     `agents::normalize_cron` translates. Do not pass a raw user expression to `cron::Schedule`.
+
+11. **Daemon Install** (`src/daemon.rs`)
+   - `--install` writes a systemd **user** unit (no sudo), enables lingering, and snapshots API
+     keys into `~/.eunice/eunice.env` (mode 0600) because user services do not inherit the
+     login shell environment
+   - Bin-only (`mod daemon;` in main.rs, absent from lib.rs)
+
+> **Dual-target trap:** `src/lib.rs` and `src/main.rs` declare *separate* module trees, and
+> `webapp`/`tui` exist only in main.rs's. A module added to lib.rs must not reference
+> `crate::webapp::*`.
 
 ## Testing
 
-The project includes **102 unit tests** covering:
+The project includes **248 unit tests** covering:
 - Provider detection logic
 - Message format conversions
 - Response parsing
 - Tool execution
-- Session persistence
+- Session persistence and schema migration
+- `agents.toml` parsing, validation, and cron translation
+- Scheduler run-state transitions and API serialization
+- systemd unit rendering
 
 Run tests with:
 ```bash
@@ -92,8 +117,10 @@ src/
 ├── client.rs            - HTTP client, format conversions
 ├── provider.rs          - Provider detection
 ├── agent.rs             - Agent loop with tool execution
+├── agents.rs            - agents.toml parsing, validation, cron translation
+├── daemon.rs            - systemd user-service install/uninstall (bin-only)
 ├── tools/
-│   ├── mod.rs           - ToolRegistry
+│   ├── mod.rs           - ToolRegistry (optional per-agent working dir)
 │   ├── bash.rs          - Bash tool
 │   ├── read.rs          - Read tool
 │   ├── write.rs         - Write tool
@@ -111,7 +138,8 @@ src/
 └── webapp/
     ├── mod.rs
     ├── server.rs        - Axum web server
-    ├── handlers.rs      - HTTP/SSE handlers
+    ├── handlers.rs      - HTTP/SSE handlers + the webapp agent loop
+    ├── scheduler.rs     - Cron loop, agent registry, /api/agents
     └── persistence.rs   - Session storage
 
 skills/
