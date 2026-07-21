@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
 
-**12,615 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
+**12,728 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -105,7 +105,7 @@ The Skill tool searches these directories to find relevant skills for a task.
 
 | Provider | API Key Variable | Default Model |
 |----------|------------------|---------------|
-| Google Gemini | `GEMINI_API_KEY` | gemini-3.1-pro-preview |
+| Google Gemini | `GEMINI_API_KEY` | gemini-3.6-flash |
 | OpenAI | `OPENAI_API_KEY` | gpt-4o |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4 |
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` | (deployment-specific) |
@@ -118,7 +118,7 @@ For convenience, these aliases work:
 ```bash
 eunice --model sonnet "..."    # claude-sonnet-4-...
 eunice --model opus "..."      # claude-opus-4-...
-eunice --model flash "..."     # gemini-3.5-flash
+eunice --model flash "..."     # gemini-3.6-flash (default)
 eunice --model pro "..."       # gemini-3.1-pro-preview
 ```
 
@@ -149,7 +149,7 @@ Options:
       --model <MODEL>          AI model to use
       --gemma                  Shorthand for --model=gemma4:31b (auto-built local 31B + MTP)
       --gemmad                 Use the already-running gemmad daemon (local Gemma 4)
-      --no-gemmad              Ignore a running gemmad daemon; use the cloud smart-default
+      --no-gemmad              No-op; kept for compatibility (gemmad is never implicit)
       --prompt <TEXT>          System prompt (inline text or file path)
       --chat                   Interactive chat mode
       --webapp                 Start web server interface
@@ -178,19 +178,19 @@ Options:
 
 ### Local Gemma via the gemmad daemon
 
-If a [`gemmad`](https://github.com/xeb/gemma) daemon is running locally (an
-OpenAI-compatible server for Gemma 4 — `gemma-4-26b-a4b` by default — on
-`127.0.0.1:18082`), eunice uses it as the **default** model when no model is
-specified — no flag required:
+A [`gemmad`](https://github.com/xeb/gemma) daemon (an OpenAI-compatible server for
+Gemma 4 — `gemma-4-26b-a4b` by default — on `127.0.0.1:18082`) is selected with
+`--gemmad`. A running daemon is **not** picked up automatically; the smart default
+(`gemini-3.6-flash`) stays the default even when it is reachable:
 
 ```bash
-eunice "Summarize this file"     # auto-routes to gemmad when it is reachable
-eunice --gemmad "..."            # force the daemon; errors if it is not reachable
-eunice --no-gemmad "..."         # ignore the daemon; use the cloud smart-default
+eunice "Summarize this file"     # smart-default (gemini-3.6-flash), daemon or not
+eunice --gemmad "..."            # use the daemon; errors if it is not reachable
+eunice --no-gemmad "..."         # accepted but now a no-op; gemmad is never implicit
 ```
 
-- Detection is a fast `/livez` probe; if the daemon is down, eunice falls back
-  to the normal smart-default (Gemini/Anthropic/OpenAI/Ollama).
+- Only `--gemmad` probes the daemon (a fast `/livez` check), so a bare invocation
+  never pays the round-trip.
 - The Bearer token comes from `$GEMMAD_API_KEY`, else
   `~/.config/gemmad/keys.toml`.
 - Host/port are overridable via `GEMMAD_HOST` / `GEMMAD_PORT`. The live model id

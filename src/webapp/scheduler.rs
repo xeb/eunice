@@ -1,5 +1,5 @@
 use super::handlers::{run_agent_with_events, EventSender, RunContext, SseEvent};
-use super::persistence::{SessionMetadata, SessionStorage};
+use super::persistence::{RunStatus, SessionMetadata, SessionStorage};
 use super::server::AppState;
 use crate::agents::{
     detect_provider_isolated, fingerprint, load_agents_file, prompt_preview,
@@ -41,15 +41,6 @@ fn log(message: &str) {
 
 fn now_unix() -> i64 {
     Local::now().timestamp()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunStatus {
-    Running,
-    Success,
-    Failed,
-    Skipped,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -828,12 +819,14 @@ async fn execute_run(
 
     match failure {
         None => {
+            record_run_status(&state, &session.id, &agent.name, RunStatus::Success).await;
             registry
                 .finish_run(&agent.name, RunStatus::Success, Some(session.id.clone()), None)
                 .await;
         }
         Some(message) => {
             append_failure_note(&state, &session.id, &agent.name, &message).await;
+            record_run_status(&state, &session.id, &agent.name, RunStatus::Failed).await;
             registry
                 .finish_run(
                     &agent.name,
@@ -843,6 +836,26 @@ async fn execute_run(
                 )
                 .await;
         }
+    }
+}
+
+/// Persist a run's outcome on its session, so the UI can mark it after a restart.
+/// The in-memory `RunState` only remembers the *latest* run per agent; this is
+/// per-session and survives the process. A failure here is logged, not propagated:
+/// the run itself already succeeded or failed on its own terms.
+async fn record_run_status(
+    state: &Arc<AppState>,
+    session_id: &str,
+    agent_name: &str,
+    status: RunStatus,
+) {
+    if let Err(e) = state.storage.set_run_status(session_id, status).await {
+        log(&format!(
+            "[{}] failed to record run status {}: {}",
+            agent_name,
+            status.as_str(),
+            e
+        ));
     }
 }
 
@@ -1359,6 +1372,7 @@ mod tests {
                     updated_at: 1784534460,
                     relative_time: "2h ago".to_string(),
                     agent_name: Some("daily-digest".to_string()),
+                    run_status: Some(RunStatus::Success),
                 }],
             }],
         };

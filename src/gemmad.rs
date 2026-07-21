@@ -210,9 +210,11 @@ pub fn decide_model(
     if let Some(m) = model {
         return Ok(ModelChoice::Explicit(m.to_string()));
     }
-    if !no_gemmad && gemmad_up {
-        return Ok(ModelChoice::Gemmad);
-    }
+    // A reachable daemon no longer wins on its own: the smart default is the global
+    // default, and gemmad must be asked for with --gemmad. Running the daemon should
+    // not silently redirect every bare invocation away from the configured default.
+    // This leaves --no-gemmad with nothing to opt out of; it stays accepted so existing
+    // scripts keep working, and is now a no-op.
     Ok(ModelChoice::SmartDefault)
 }
 
@@ -265,20 +267,26 @@ mod tests {
 
     #[test]
     fn test_decide_global_default() {
-        // nothing specified, daemon up -> gemmad
+        // nothing specified, daemon up -> smart default. A running daemon must not
+        // capture a bare invocation; only --gemmad selects it.
         assert_eq!(
             decide_model(false, false, false, None, true).unwrap(),
-            ModelChoice::Gemmad
+            ModelChoice::SmartDefault
         );
         // nothing specified, daemon down -> smart default
         assert_eq!(
             decide_model(false, false, false, None, false).unwrap(),
             ModelChoice::SmartDefault
         );
-        // opt out even when up -> smart default
+        // --no-gemmad is a no-op now that gemmad is never implicit
         assert_eq!(
             decide_model(false, false, true, None, true).unwrap(),
             ModelChoice::SmartDefault
+        );
+        // --gemmad still selects the daemon explicitly
+        assert_eq!(
+            decide_model(false, true, false, None, true).unwrap(),
+            ModelChoice::Gemmad
         );
         // explicit model wins over daemon
         assert_eq!(

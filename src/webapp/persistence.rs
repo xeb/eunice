@@ -32,6 +32,48 @@ const NOUNS: &[&str] = &[
     "voodoo", "hoodoo", "mojo", "chrome", "mirrorshades", "sendai",
 ];
 
+/// Outcome of a scheduled agent run.
+///
+/// Lives here rather than in `scheduler` because it is persisted: `sessions.run_status`
+/// stores `as_str()` and reads it back through `from_str()`. `Skipped` is the one variant
+/// that is never stored — a skipped tick never creates a session — so it exists only for
+/// the scheduler's in-memory per-agent state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatus {
+    Running,
+    Success,
+    Failed,
+    Skipped,
+    /// The process died while the run was in flight; detected by the startup sweep.
+    Interrupted,
+}
+
+impl RunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RunStatus::Running => "running",
+            RunStatus::Success => "success",
+            RunStatus::Failed => "failed",
+            RunStatus::Skipped => "skipped",
+            RunStatus::Interrupted => "interrupted",
+        }
+    }
+
+    /// Unknown values read as `None` so a row written by a newer binary degrades to
+    /// "no status" instead of failing the whole query.
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "running" => Some(RunStatus::Running),
+            "success" => Some(RunStatus::Success),
+            "failed" => Some(RunStatus::Failed),
+            "skipped" => Some(RunStatus::Skipped),
+            "interrupted" => Some(RunStatus::Interrupted),
+            _ => None,
+        }
+    }
+}
+
 /// Session record from database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
@@ -52,6 +94,9 @@ pub struct SessionMetadata {
     pub updated_at: i64,
     pub relative_time: String,
     pub agent_name: Option<String>,
+    /// Only ever set for agent-run sessions; `None` for interactive chats and for
+    /// rows written before the column existed.
+    pub run_status: Option<RunStatus>,
 }
 
 /// In-memory session for runtime use
@@ -60,6 +105,7 @@ pub struct MemorySession {
     pub name: String,
     pub user_id: Option<String>,
     pub agent_name: Option<String>,
+    pub run_status: Option<RunStatus>,
     pub created_at: i64,
     pub updated_at: i64,
     pub history: Vec<Message>,
@@ -76,6 +122,7 @@ impl MemorySession {
             name,
             user_id,
             agent_name: None,
+            run_status: None,
             created_at: now,
             updated_at: now,
             history: Vec::new(),
@@ -135,6 +182,7 @@ impl SessionStorage {
         let conn = Connection::open(path)?;
         Self::init_schema(&conn)?;
         Self::migrate_schema(&conn)?;
+        Self::sweep_interrupted_runs(&conn)?;
         Ok(SessionStorage::Sqlite {
             conn: Arc::new(Mutex::new(conn)),
             runtime: Arc::new(RwLock::new(HashMap::new())),
@@ -149,6 +197,7 @@ impl SessionStorage {
                 name TEXT NOT NULL UNIQUE,
                 user_id TEXT,
                 agent_name TEXT,
+                run_status TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -190,12 +239,28 @@ impl SessionStorage {
             conn.execute("ALTER TABLE sessions ADD COLUMN agent_name TEXT", [])?;
         }
 
+        if !columns.iter().any(|c| c == "run_status") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN run_status TEXT", [])?;
+        }
+
         // Indexed after the column is guaranteed to exist: an index on a missing
         // column is an error, which would abort init_schema on an old database.
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_sessions_agent_name ON sessions(agent_name, updated_at DESC);",
         )?;
         Ok(())
+    }
+
+    /// Nothing is running the instant the process starts, so any row still marked
+    /// `running` belongs to a run the previous process never finished. Without this
+    /// the UI would show it spinning forever. Runs at startup, after migration, so
+    /// the column is guaranteed to exist.
+    fn sweep_interrupted_runs(conn: &Connection) -> Result<usize> {
+        let updated = conn.execute(
+            "UPDATE sessions SET run_status = ? WHERE run_status = ?",
+            params![RunStatus::Interrupted.as_str(), RunStatus::Running.as_str()],
+        )?;
+        Ok(updated)
     }
 
     /// Check if using SQLite persistence
@@ -287,6 +352,7 @@ impl SessionStorage {
                 let name = Self::generate_memory_name();
                 let mut session = MemorySession::new(id.clone(), name.clone(), None);
                 session.agent_name = Some(agent_name.to_string());
+                session.run_status = Some(RunStatus::Running);
                 store.write().await.insert(id.clone(), session);
                 Ok(SessionRecord {
                     id,
@@ -301,8 +367,8 @@ impl SessionStorage {
                 let conn = conn.lock().await;
                 let name = Self::generate_name(&conn)?;
                 conn.execute(
-                    "INSERT INTO sessions (id, name, user_id, agent_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    params![&id, &name, None::<String>, agent_name, now, now],
+                    "INSERT INTO sessions (id, name, user_id, agent_name, run_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    params![&id, &name, None::<String>, agent_name, RunStatus::Running.as_str(), now, now],
                 )?;
                 runtime.write().await.insert(id.clone(), RuntimeState::new());
                 Ok(SessionRecord {
@@ -313,6 +379,29 @@ impl SessionStorage {
                     created_at: now,
                     updated_at: now,
                 })
+            }
+        }
+    }
+
+    /// Record the outcome of an agent run on its session. Deliberately leaves
+    /// `updated_at` untouched: the transcript's last event is what orders the list,
+    /// and bumping it here would float finished runs above newer activity.
+    pub async fn set_run_status(&self, session_id: &str, status: RunStatus) -> Result<()> {
+        match self {
+            SessionStorage::Memory(store) => {
+                let mut store = store.write().await;
+                if let Some(session) = store.get_mut(session_id) {
+                    session.run_status = Some(status);
+                }
+                Ok(())
+            }
+            SessionStorage::Sqlite { conn, .. } => {
+                let conn = conn.lock().await;
+                conn.execute(
+                    "UPDATE sessions SET run_status = ? WHERE id = ?",
+                    params![status.as_str(), session_id],
+                )?;
+                Ok(())
             }
         }
     }
@@ -377,6 +466,7 @@ impl SessionStorage {
                             updated_at: s.updated_at,
                             relative_time: format_relative_time(s.updated_at, now),
                             agent_name: s.agent_name.clone(),
+                            run_status: s.run_status,
                         }
                     })
                     .collect();
@@ -394,7 +484,7 @@ impl SessionStorage {
                         "SELECT s.id, s.name, s.updated_at,
                                 (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id
                                  AND e.event_type IN ('user_message', 'assistant_message')) as turn_count,
-                                s.agent_name
+                                s.agent_name, s.run_status
                          FROM sessions s WHERE s.user_id = ? ORDER BY s.updated_at DESC"
                     )?;
                     let rows = stmt.query_map([uid], |row| {
@@ -404,10 +494,11 @@ impl SessionStorage {
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
                             row.get::<_, Option<String>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
                         ))
                     })?;
                     for row in rows {
-                        let (id, name, updated_at, turn_count, agent_name) = row?;
+                        let (id, name, updated_at, turn_count, agent_name, run_status) = row?;
                         sessions.push(SessionMetadata {
                             id,
                             name,
@@ -415,6 +506,7 @@ impl SessionStorage {
                             updated_at,
                             relative_time: format_relative_time(updated_at, now),
                             agent_name,
+                            run_status: run_status.as_deref().and_then(RunStatus::from_str),
                         });
                     }
                 } else {
@@ -422,7 +514,7 @@ impl SessionStorage {
                         "SELECT s.id, s.name, s.updated_at,
                                 (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id
                                  AND e.event_type IN ('user_message', 'assistant_message')) as turn_count,
-                                s.agent_name
+                                s.agent_name, s.run_status
                          FROM sessions s ORDER BY s.updated_at DESC"
                     )?;
                     let rows = stmt.query_map([], |row| {
@@ -432,10 +524,11 @@ impl SessionStorage {
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
                             row.get::<_, Option<String>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
                         ))
                     })?;
                     for row in rows {
-                        let (id, name, updated_at, turn_count, agent_name) = row?;
+                        let (id, name, updated_at, turn_count, agent_name, run_status) = row?;
                         sessions.push(SessionMetadata {
                             id,
                             name,
@@ -443,6 +536,7 @@ impl SessionStorage {
                             updated_at,
                             relative_time: format_relative_time(updated_at, now),
                             agent_name,
+                            run_status: run_status.as_deref().and_then(RunStatus::from_str),
                         });
                     }
                 }
@@ -472,6 +566,7 @@ impl SessionStorage {
                             updated_at: s.updated_at,
                             relative_time: format_relative_time(s.updated_at, now),
                             agent_name: s.agent_name.clone(),
+                            run_status: s.run_status,
                         }
                     })
                     .collect();
@@ -487,7 +582,7 @@ impl SessionStorage {
                     "SELECT s.id, s.name, s.updated_at,
                             (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id
                              AND e.event_type IN ('user_message', 'assistant_message')) as turn_count,
-                            s.agent_name
+                            s.agent_name, s.run_status
                      FROM sessions s WHERE s.agent_name = ? ORDER BY s.updated_at DESC LIMIT ?"
                 )?;
                 let rows = stmt.query_map(params![agent_name, limit as i64], |row| {
@@ -497,12 +592,13 @@ impl SessionStorage {
                         row.get::<_, i64>(2)?,
                         row.get::<_, i64>(3)?,
                         row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 })?;
 
                 let mut sessions = Vec::new();
                 for row in rows {
-                    let (id, name, updated_at, turn_count, agent_name) = row?;
+                    let (id, name, updated_at, turn_count, agent_name, run_status) = row?;
                     sessions.push(SessionMetadata {
                         id,
                         name,
@@ -510,6 +606,7 @@ impl SessionStorage {
                         updated_at,
                         relative_time: format_relative_time(updated_at, now),
                         agent_name,
+                        run_status: run_status.as_deref().and_then(RunStatus::from_str),
                     });
                 }
                 Ok(sessions)
@@ -2060,4 +2157,274 @@ mod tests {
         assert_eq!(ensured.agent_name, None);
     }
 
+    // =====================================================
+    // RUN STATUS TESTS
+    // =====================================================
+
+    #[test]
+    fn test_run_status_str_round_trip() {
+        for status in [
+            RunStatus::Running,
+            RunStatus::Success,
+            RunStatus::Failed,
+            RunStatus::Skipped,
+            RunStatus::Interrupted,
+        ] {
+            assert_eq!(RunStatus::from_str(status.as_str()), Some(status));
+        }
+
+        // The stored string must match the JSON representation, so the DB value and
+        // the API value never drift apart.
+        assert_eq!(
+            serde_json::to_string(&RunStatus::Interrupted).unwrap(),
+            "\"interrupted\""
+        );
+    }
+
+    #[test]
+    fn test_run_status_from_unknown_string_is_none() {
+        assert_eq!(RunStatus::from_str("cancelled"), None);
+        assert_eq!(RunStatus::from_str(""), None);
+        assert_eq!(RunStatus::from_str("Running"), None);
+    }
+
+    #[test]
+    fn test_migrate_schema_adds_run_status_to_old_database() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("old.db");
+        create_old_schema_db(&db_path);
+
+        let conn = Connection::open(&db_path).unwrap();
+        assert!(!column_names(&conn, "sessions").contains(&"run_status".to_string()));
+
+        SessionStorage::migrate_schema(&conn).unwrap();
+        assert!(column_names(&conn, "sessions").contains(&"run_status".to_string()));
+
+        conn.execute(
+            "INSERT INTO sessions (id, name, user_id, agent_name, run_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params!["id-1", "chrome-molly", None::<String>, "daily-digest", "success", 100, 100],
+        )
+        .unwrap();
+        let run_status: Option<String> = conn
+            .query_row("SELECT run_status FROM sessions WHERE id = ?", ["id-1"], |row| row.get(0))
+            .unwrap();
+        assert_eq!(run_status, Some("success".to_string()));
+    }
+
+    #[test]
+    fn test_migrate_schema_run_status_is_idempotent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("old.db");
+        create_old_schema_db(&db_path);
+
+        let conn = Connection::open(&db_path).unwrap();
+        SessionStorage::migrate_schema(&conn).unwrap();
+        SessionStorage::migrate_schema(&conn).unwrap();
+
+        let count = column_names(&conn, "sessions")
+            .iter()
+            .filter(|c| *c == "run_status")
+            .count();
+        assert_eq!(count, 1);
+    }
+
+    /// Rows written before the column existed must survive the upgrade and read as
+    /// "no status" rather than failing the query.
+    #[tokio::test]
+    async fn test_pre_existing_rows_read_null_run_status() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("old.db");
+        create_old_schema_db(&db_path);
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute(
+                "INSERT INTO sessions (id, name, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                params!["legacy-id", "legacy-name", None::<String>, 100, 100],
+            )
+            .unwrap();
+        }
+
+        let storage = SessionStorage::new_sqlite(db_path.to_str().unwrap()).unwrap();
+        let sessions = storage.list_sessions(None).await.unwrap();
+        let legacy = sessions.iter().find(|s| s.id == "legacy-id").unwrap();
+        assert_eq!(legacy.run_status, None);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_agent_session_starts_running() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+
+        let created = storage.create_agent_session("repo-watch").await.unwrap();
+        let sessions = storage.list_agent_sessions("repo-watch", 10).await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, created.id);
+        assert_eq!(sessions[0].run_status, Some(RunStatus::Running));
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_run_status_round_trip() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+
+        let created = storage.create_agent_session("repo-watch").await.unwrap();
+
+        for status in [RunStatus::Success, RunStatus::Failed, RunStatus::Interrupted] {
+            storage.set_run_status(&created.id, status).await.unwrap();
+            let sessions = storage.list_agent_sessions("repo-watch", 10).await.unwrap();
+            assert_eq!(sessions[0].run_status, Some(status));
+
+            // Also visible through the plain session list, which is what the UI reads.
+            let all = storage.list_sessions(None).await.unwrap();
+            let meta = all.iter().find(|s| s.id == created.id).unwrap();
+            assert_eq!(meta.run_status, Some(status));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_memory_run_status_round_trip() {
+        let storage = SessionStorage::new(false).unwrap();
+
+        let created = storage.create_agent_session("repo-watch").await.unwrap();
+        let sessions = storage.list_agent_sessions("repo-watch", 10).await.unwrap();
+        assert_eq!(sessions[0].run_status, Some(RunStatus::Running));
+
+        storage.set_run_status(&created.id, RunStatus::Success).await.unwrap();
+        let sessions = storage.list_agent_sessions("repo-watch", 10).await.unwrap();
+        assert_eq!(sessions[0].run_status, Some(RunStatus::Success));
+
+        let all = storage.list_sessions(None).await.unwrap();
+        let meta = all.iter().find(|s| s.id == created.id).unwrap();
+        assert_eq!(meta.run_status, Some(RunStatus::Success));
+    }
+
+    #[tokio::test]
+    async fn test_interactive_sessions_have_no_run_status() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+        let created = storage.create_session(None).await.unwrap();
+        let sessions = storage.list_sessions(None).await.unwrap();
+        let meta = sessions.iter().find(|s| s.id == created.id).unwrap();
+        assert_eq!(meta.run_status, None);
+
+        let memory = SessionStorage::new(false).unwrap();
+        let created = memory.create_session(None).await.unwrap();
+        let sessions = memory.list_sessions(None).await.unwrap();
+        let meta = sessions.iter().find(|s| s.id == created.id).unwrap();
+        assert_eq!(meta.run_status, None);
+    }
+
+    #[tokio::test]
+    async fn test_set_run_status_on_missing_session_is_a_no_op() {
+        let (storage, _temp_dir) = create_temp_sqlite_storage();
+        storage.set_run_status("nope", RunStatus::Failed).await.unwrap();
+
+        let memory = SessionStorage::new(false).unwrap();
+        memory.set_run_status("nope", RunStatus::Failed).await.unwrap();
+    }
+
+    /// A process killed mid-run leaves `running` on disk; reopening the database must
+    /// rewrite it so the UI does not spin forever.
+    #[tokio::test]
+    async fn test_startup_sweep_rewrites_running_to_interrupted() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("sessions.db");
+
+        let finished_id;
+        let interrupted_id;
+        {
+            let storage = SessionStorage::new_sqlite(db_path.to_str().unwrap()).unwrap();
+            let finished = storage.create_agent_session("repo-watch").await.unwrap();
+            storage.set_run_status(&finished.id, RunStatus::Success).await.unwrap();
+            finished_id = finished.id;
+
+            // Left as `running`, simulating the process dying mid-run.
+            interrupted_id = storage.create_agent_session("repo-watch").await.unwrap().id;
+        }
+
+        let storage = SessionStorage::new_sqlite(db_path.to_str().unwrap()).unwrap();
+        let sessions = storage.list_agent_sessions("repo-watch", 10).await.unwrap();
+
+        let finished = sessions.iter().find(|s| s.id == finished_id).unwrap();
+        let interrupted = sessions.iter().find(|s| s.id == interrupted_id).unwrap();
+        assert_eq!(finished.run_status, Some(RunStatus::Success));
+        assert_eq!(interrupted.run_status, Some(RunStatus::Interrupted));
+    }
+
+    #[test]
+    fn test_startup_sweep_reports_rows_touched_and_is_idempotent() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("sweep.db");
+        let conn = Connection::open(&db_path).unwrap();
+        SessionStorage::init_schema(&conn).unwrap();
+        SessionStorage::migrate_schema(&conn).unwrap();
+
+        for (id, status) in [
+            ("a", Some("running")),
+            ("b", Some("running")),
+            ("c", Some("success")),
+            ("d", None),
+        ] {
+            conn.execute(
+                "INSERT INTO sessions (id, name, user_id, agent_name, run_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                params![id, id, None::<String>, "agent", status, 100, 100],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(SessionStorage::sweep_interrupted_runs(&conn).unwrap(), 2);
+        // Nothing is left at `running`, so a second sweep touches nothing.
+        assert_eq!(SessionStorage::sweep_interrupted_runs(&conn).unwrap(), 0);
+
+        let unchanged: Option<String> = conn
+            .query_row("SELECT run_status FROM sessions WHERE id = ?", ["c"], |row| row.get(0))
+            .unwrap();
+        assert_eq!(unchanged, Some("success".to_string()));
+        let still_null: Option<String> = conn
+            .query_row("SELECT run_status FROM sessions WHERE id = ?", ["d"], |row| row.get(0))
+            .unwrap();
+        assert_eq!(still_null, None);
+    }
+
+    #[test]
+    fn test_session_metadata_serialization_shape() {
+        let meta = SessionMetadata {
+            id: "abc123".to_string(),
+            name: "chrome-molly".to_string(),
+            turn_count: 4,
+            updated_at: 1784534460,
+            relative_time: "2h ago".to_string(),
+            agent_name: Some("daily-digest".to_string()),
+            run_status: Some(RunStatus::Success),
+        };
+
+        let json: serde_json::Value = serde_json::to_value(&meta).unwrap();
+        for field in [
+            "id",
+            "name",
+            "turn_count",
+            "updated_at",
+            "relative_time",
+            "agent_name",
+            "run_status",
+        ] {
+            assert!(json.get(field).is_some(), "missing field {}", field);
+        }
+        assert_eq!(json.as_object().unwrap().len(), 7);
+        assert_eq!(json["run_status"], "success");
+
+        // An untagged chat serializes both optional fields as null, not as an
+        // omitted key, so the frontend can read them unconditionally.
+        let plain = SessionMetadata {
+            id: "def456".to_string(),
+            name: "void-case".to_string(),
+            turn_count: 0,
+            updated_at: 0,
+            relative_time: "just now".to_string(),
+            agent_name: None,
+            run_status: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&plain).unwrap();
+        assert!(json["agent_name"].is_null());
+        assert!(json["run_status"].is_null());
+        assert_eq!(json.as_object().unwrap().len(), 7);
+    }
 }

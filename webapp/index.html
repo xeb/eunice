@@ -514,6 +514,12 @@
             background: var(--bg-input);
         }
 
+        /* Declared ahead of .active so an agent run that is also the open session
+           still shows the selection colour — selection outranks provenance. */
+        .session-item.agent-run {
+            border-left-color: var(--neon-magenta);
+        }
+
         .session-item.active {
             border-left-color: var(--neon-cyan);
             background: var(--bg-input);
@@ -533,6 +539,46 @@
         .session-meta {
             font-size: 11px;
             color: var(--text-muted);
+        }
+
+        /* Only rendered when the list holds both chats and agent runs, so a list of
+           one kind keeps exactly the metrics it had before grouping existed. */
+        .session-section {
+            padding: 12px 16px 4px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.2em;
+            color: var(--text-muted);
+        }
+
+        .session-section:first-child {
+            padding-top: 4px;
+        }
+
+        /* Shape-distinct glyphs, not just colour-distinct, so a run's outcome is
+           readable without relying on colour. Fixed width keeps the names aligned. */
+        .run-status {
+            display: inline-block;
+            width: 1em;
+            margin-right: 6px;
+            font-size: 11px;
+        }
+
+        .run-status.success {
+            color: var(--neon-mint);
+        }
+
+        .run-status.failed {
+            color: var(--neon-coral);
+        }
+
+        .run-status.interrupted {
+            color: var(--neon-yellow);
+        }
+
+        .run-status.running {
+            color: var(--neon-cyan);
+            animation: pulse 1s infinite;
         }
 
         .session-delete {
@@ -605,11 +651,6 @@
         .drawer-tabs.tabbed .drawer-tab.active {
             color: var(--text);
             border-bottom-color: var(--neon-cyan);
-        }
-
-        .session-agent-badge {
-            font-size: 11px;
-            margin-right: 4px;
         }
 
         /* Agents Tab */
@@ -803,6 +844,78 @@
             color: var(--bg);
         }
 
+        /* Agent editor page
+
+           A sibling of .container that replaces it rather than an overlay on top of it,
+           so the editor has a URL of its own and the PROMPT box can take the height the
+           400px-capped modal never had. Nothing here scrolls internally; the page grows
+           and the body scrolls, which keeps the flex-grown textarea predictable. */
+        .agent-page {
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 0 20px 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .agent-page-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 24px 0 16px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-strong);
+        }
+
+        .agent-page-back {
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--text-muted);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .agent-page-back:hover {
+            color: var(--text);
+        }
+
+        .agent-page-title {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            word-break: break-all;
+        }
+
+        .agent-page-form {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        /* The whole point of the page: PROMPT takes every pixel the other fields leave,
+           and never less than 40vh — below that the page just scrolls. */
+        .form-field-prompt {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .form-field-prompt .form-textarea {
+            flex: 1;
+            min-height: 40vh;
+            resize: none;
+        }
+
         /* Declared after every rule it overrides so equal specificity still wins. */
         .hidden {
             display: none;
@@ -819,7 +932,9 @@
             display: none;
             justify-content: center;
             align-items: center;
-            z-index: 1000;
+            /* The session drawer is at z-index 1001 and can still be open behind a
+               modal, so this overlay has to outrank it. */
+            z-index: 1100;
         }
 
         .modal-overlay.visible {
@@ -862,6 +977,21 @@
 
         .modal-close:hover {
             color: var(--text);
+        }
+
+        /* The confirm dialog is a couple of lines of prose, so 700px reads as a lot of
+           empty card; it gets its own narrower width. */
+        .modal-confirm {
+            max-width: 420px;
+        }
+
+        .confirm-message {
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
 
         .api-endpoint {
@@ -927,13 +1057,6 @@
         }
 
         /* Agent editor form */
-
-        /* The session drawer is at z-index 1001 and is still open behind the editor,
-           so this overlay has to outrank it. */
-        #agent-modal {
-            z-index: 1100;
-        }
-
         .form-field {
             margin-bottom: 14px;
         }
@@ -1167,6 +1290,10 @@
                 font-size: 10px;
             }
 
+            .session-section {
+                padding: 10px 12px 4px;
+            }
+
             .agent-card {
                 padding: 10px 12px;
             }
@@ -1223,6 +1350,22 @@
                 max-height: 85vh;
             }
 
+            .agent-page {
+                padding: 0 12px 12px;
+                max-width: 100%;
+                overflow-x: hidden;
+            }
+
+            .agent-page-header {
+                padding: 16px 0 12px;
+                margin-bottom: 14px;
+                gap: 10px;
+            }
+
+            .agent-page-title {
+                font-size: 14px;
+            }
+
             .form-input,
             .form-textarea {
                 font-size: 16px; /* Prevents iOS zoom on focus */
@@ -1230,6 +1373,11 @@
 
             .form-textarea {
                 min-height: 150px;
+            }
+
+            /* 40vh of a phone screen is most of it once the on-screen keyboard is up. */
+            .form-field-prompt .form-textarea {
+                min-height: 30vh;
             }
 
             .form-row {
@@ -1406,13 +1554,13 @@
     </div>
     <div class="drawer-overlay" id="drawer-overlay"></div>
 
-    <!-- Agent editor -->
-    <div class="modal-overlay" id="agent-modal">
-        <div class="modal">
-            <div class="modal-header">
-                <div class="modal-title" id="agent-modal-title">EDIT AGENT</div>
-                <button class="modal-close" id="agent-modal-close" title="Close">&times;</button>
-            </div>
+    <!-- Agent editor page — routed at #/agent/<name> and #/agent/new -->
+    <div class="agent-page hidden" id="agent-page">
+        <div class="agent-page-header">
+            <button class="agent-page-back" id="agent-page-back">&larr; AGENTS</button>
+            <div class="agent-page-title" id="agent-page-title">EDIT AGENT</div>
+        </div>
+        <div class="agent-page-form" id="agent-page-form">
             <div class="form-field">
                 <label class="form-label" for="agent-form-name">NAME</label>
                 <input class="form-input" id="agent-form-name" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
@@ -1423,7 +1571,7 @@
                 <input class="form-input" id="agent-form-schedule" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="0 9 * * *">
                 <div class="form-hint">5-field cron in the server's local time: minute hour day-of-month month day-of-week. 0 9 * * * runs at 09:00 daily.</div>
             </div>
-            <div class="form-field">
+            <div class="form-field form-field-prompt">
                 <label class="form-label" for="agent-form-prompt" id="agent-form-prompt-label">PROMPT</label>
                 <textarea class="form-textarea" id="agent-form-prompt" spellcheck="false"></textarea>
                 <div class="form-hint" id="agent-form-prompt-hint"></div>
@@ -1458,6 +1606,29 @@
                 <button class="btn-form hidden" id="agent-form-reload">RELOAD</button>
                 <button class="btn-form" id="agent-form-cancel">CANCEL</button>
                 <button class="btn-form btn-form-primary" id="agent-form-save">SAVE</button>
+            </div>
+        </div>
+        <div class="hidden" id="agent-page-missing">
+            <div class="form-error" id="agent-page-missing-text"></div>
+            <div class="modal-actions">
+                <div class="modal-actions-spacer"></div>
+                <button class="btn-form btn-form-primary" id="agent-page-missing-back">BACK TO AGENTS</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Generic confirm dialog — reuses the modal CSS the editor left behind when it
+         became a page. Driven only through confirmDialog(). -->
+    <div class="modal-overlay" id="confirm-dialog">
+        <div class="modal modal-confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+            <div class="modal-header">
+                <div class="modal-title" id="confirm-dialog-title">CONFIRM</div>
+            </div>
+            <div class="confirm-message" id="confirm-dialog-message"></div>
+            <div class="modal-actions">
+                <div class="modal-actions-spacer"></div>
+                <button class="btn-form" id="confirm-dialog-cancel">CANCEL</button>
+                <button class="btn-form btn-form-danger" id="confirm-dialog-confirm">OK</button>
             </div>
         </div>
     </div>
@@ -1536,15 +1707,16 @@
 
         // Check if session name is in URL hash (e.g., /#/sprawl-molly)
         function getSessionFromUrl() {
-            const hash = window.location.hash;
-            if (hash && hash.startsWith('#/')) {
-                return hash.substring(2);  // Remove '#/'
-            }
-            return null;
+            const route = parseRoute();
+            return route.view === 'chat' ? route.session : null;
         }
 
         // Update URL to reflect current session
         function updateSessionUrl(sessionName) {
+            // The editor owns the URL while it is routed to, and the chat session behind
+            // it keeps resolving in the background — that must not overwrite '#/agent/...'.
+            if (parseRoute().view === 'agent') return;
+
             if (sessionName) {
                 window.history.replaceState(null, '', '#/' + sessionName);
             } else {
@@ -1851,6 +2023,85 @@
         function escapeAttr(str) {
             return escapeHtml(str === null || str === undefined ? '' : String(str)).replace(/"/g, '&quot;');
         }
+
+        // ---- Confirm dialog ----
+        //
+        // Stands in for window.confirm, of which there is none left in this file. The one
+        // behavioral difference matters: this resolves a Promise on a later turn, so it
+        // cannot block a hashchange the way window.confirm blocked synchronously. The
+        // navigation guard below is built around that.
+
+        const confirmOverlay = document.getElementById('confirm-dialog');
+        const confirmTitleEl = document.getElementById('confirm-dialog-title');
+        const confirmMessageEl = document.getElementById('confirm-dialog-message');
+        const confirmOkBtn = document.getElementById('confirm-dialog-confirm');
+        const confirmCancelBtn = document.getElementById('confirm-dialog-cancel');
+
+        // Non-null only while the dialog is up, so it doubles as the open flag.
+        let confirmResolve = null;
+        let confirmReturnFocus = null;
+
+        function confirmDialogIsOpen() {
+            return confirmResolve !== null;
+        }
+
+        function settleConfirmDialog(result) {
+            if (!confirmResolve) return;
+
+            const resolve = confirmResolve;
+            const returnFocus = confirmReturnFocus;
+            confirmResolve = null;
+            confirmReturnFocus = null;
+            confirmOverlay.classList.remove('visible');
+
+            // Focus goes back where it was, but the caller often tears that element down
+            // right after — a re-rendered session row, a hidden editor — so it is only
+            // restored while it is still in the document.
+            if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') {
+                returnFocus.focus();
+            }
+            resolve(result);
+        }
+
+        function confirmDialog({ title, message, confirmLabel }) {
+            // A second dialog would strand the first one's promise unresolved, so the
+            // outgoing one is cancelled. The navigation guard depends on this: a
+            // hashchange arriving while CANCEL's dialog is up supersedes it.
+            settleConfirmDialog(false);
+
+            // textContent throughout, so interpolated names need no escaping.
+            confirmTitleEl.textContent = title || 'CONFIRM';
+            confirmMessageEl.textContent = message || '';
+            confirmOkBtn.textContent = confirmLabel || 'OK';
+
+            confirmReturnFocus = document.activeElement;
+            confirmOverlay.classList.add('visible');
+            confirmOkBtn.focus();
+
+            return new Promise(resolve => { confirmResolve = resolve; });
+        }
+
+        confirmOkBtn.addEventListener('click', () => settleConfirmDialog(true));
+        confirmCancelBtn.addEventListener('click', () => settleConfirmDialog(false));
+
+        // Backdrop only — a click that starts inside the card and drifts out while
+        // selecting text must not count, which is why this is mousedown on the overlay.
+        confirmOverlay.addEventListener('mousedown', (e) => {
+            if (e.target === confirmOverlay) settleConfirmDialog(false);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (!confirmDialogIsOpen()) return;
+
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                settleConfirmDialog(false);
+            } else if (e.key === 'Tab') {
+                // Two controls, so trapping focus is just toggling between them.
+                e.preventDefault();
+                (document.activeElement === confirmOkBtn ? confirmCancelBtn : confirmOkBtn).focus();
+            }
+        });
 
         // Initialize markdown-it
         const md = window.markdownit ? window.markdownit({
@@ -2174,6 +2425,56 @@
         menuBtn.addEventListener('click', openDrawer);
         drawerOverlay.addEventListener('click', closeDrawer);
 
+        function runStatusMark(status) {
+            // A switch rather than a lookup table: run_status arrives off the wire, and an
+            // object lookup would resolve inherited keys like 'constructor' into a mark.
+            let mark;
+            switch (status) {
+                case 'running':
+                    mark = { cls: 'running', glyph: '●', title: 'Running now' };
+                    break;
+                case 'success':
+                    mark = { cls: 'success', glyph: '✓', title: 'Run completed successfully' };
+                    break;
+                case 'failed':
+                    mark = { cls: 'failed', glyph: '✗', title: 'Run failed' };
+                    break;
+                case 'interrupted':
+                    mark = { cls: 'interrupted', glyph: '⊘', title: 'Interrupted — the server stopped while this run was still in flight' };
+                    break;
+                default:
+                    // null for chats and for rows written before run_status existed, plus
+                    // any status a newer binary knows and this page does not. No mark
+                    // beats an unexplained one.
+                    return '';
+            }
+            return `<span class="run-status ${mark.cls}" title="${escapeAttr(mark.title)}">${escapeHtml(mark.glyph)}</span>`;
+        }
+
+        function renderSessionItem(session) {
+            // Agent runs lead with the agent name: a scheduled agent opens a fresh session
+            // per run, so the generated session name says nothing about what ran. It drops
+            // to the meta line, where it is still available for identifying a specific run.
+            const isAgentRun = !!session.agent_name;
+            const turnsAndTime = `${escapeHtml(String(session.turn_count))} turns | ${escapeHtml(session.relative_time || '')}`;
+            const primary = isAgentRun ? session.agent_name : session.name;
+            const meta = isAgentRun
+                ? `${escapeHtml(session.name)} | ${turnsAndTime}`
+                : turnsAndTime;
+
+            return `
+                <div class="session-item${isAgentRun ? ' agent-run' : ''}${session.id === sessionId ? ' active' : ''}" data-id="${escapeAttr(session.id)}" data-name="${escapeAttr(session.name)}">
+                    <div class="session-info">
+                        <div class="session-name">${runStatusMark(session.run_status)}${escapeHtml(primary)}</div>
+                        <div class="session-meta">
+                            ${meta}
+                        </div>
+                    </div>
+                    <button class="session-delete" data-id="${escapeAttr(session.id)}" title="Delete session">&times;</button>
+                </div>
+            `;
+        }
+
         async function loadSessions() {
             try {
                 const res = await fetch('/api/sessions');
@@ -2195,22 +2496,22 @@
                 if (data.sessions.length === 0) {
                     sessionList.innerHTML = '<div class="no-sessions">No sessions yet</div>';
                 } else {
-                    sessionList.innerHTML = data.sessions.map(session => {
-                        const agentBadge = session.agent_name
-                            ? `<span class="session-agent-badge" title="${escapeAttr(session.agent_name)}">⏰</span>`
-                            : '';
-                        return `
-                        <div class="session-item ${session.id === sessionId ? 'active' : ''}" data-id="${escapeAttr(session.id)}" data-name="${escapeAttr(session.name)}">
-                            <div class="session-info">
-                                <div class="session-name">${agentBadge}${escapeHtml(session.name)}</div>
-                                <div class="session-meta">
-                                    ${escapeHtml(String(session.turn_count))} turns | ${escapeHtml(session.relative_time || '')}
-                                </div>
-                            </div>
-                            <button class="session-delete" data-id="${escapeAttr(session.id)}" title="Delete session">&times;</button>
-                        </div>
-                    `;
-                    }).join('');
+                    // /api/sessions already comes back ordered by updated_at DESC, and
+                    // filter() preserves that order, so each group is sorted for free.
+                    const chats = data.sessions.filter(s => !s.agent_name);
+                    const runs = data.sessions.filter(s => s.agent_name);
+
+                    // Headers earn their space only when there are two kinds of thing to
+                    // tell apart. With no agents configured the list must render exactly
+                    // as it did before grouping — the same principle as the drawer tabs,
+                    // where the untabbed state carries no affordance.
+                    const grouped = chats.length > 0 && runs.length > 0;
+
+                    sessionList.innerHTML =
+                        (grouped ? '<div class="session-section">CHATS</div>' : '') +
+                        chats.map(renderSessionItem).join('') +
+                        (grouped ? '<div class="session-section">AGENT RUNS</div>' : '') +
+                        runs.map(renderSessionItem).join('');
 
                     // Add click handlers
                     sessionList.querySelectorAll('.session-info').forEach(el => {
@@ -2234,12 +2535,25 @@
         }
 
         async function selectSession(id, name) {
+            // The drawer stays open over the editor page, so a session can be picked from
+            // there. That is an exit from the editor and clears the same guard as CANCEL.
+            const leavingEditor = parseRoute().view === 'agent';
+            if (leavingEditor && !await confirmLeaveAgentEditor()) return;
+
             stopReconnect();
             sessionId = id;
             currentSessionName = name;
             localStorage.setItem(SESSION_KEY, sessionId);
             localStorage.setItem(SESSION_NAME_KEY, name);
-            updateSessionUrl(name);
+            if (leavingEditor) {
+                // Tear the editor down before touching the hash: the hashchange this
+                // fires runs the guard again, and it must not ask a second time.
+                // updateSessionUrl deliberately will not write over an '#/agent/...' URL.
+                closeAgentEditor();
+                window.location.hash = '#/' + name;
+            } else {
+                updateSessionUrl(name);
+            }
             closeDrawer();
 
             // Clear messages, restore history, then attach to the live stream so a
@@ -2250,7 +2564,12 @@
         }
 
         async function deleteSession(id) {
-            if (!confirm('Delete this session permanently?')) return;
+            const confirmed = await confirmDialog({
+                title: 'DELETE SESSION?',
+                message: 'This session and everything in it are removed permanently.',
+                confirmLabel: 'DELETE'
+            });
+            if (!confirmed) return;
 
             try {
                 const res = await fetch('/api/session/delete', {
@@ -2533,7 +2852,7 @@
                     e.stopPropagation();
                     const name = el.closest('.agent-card').dataset.name;
                     if (el.dataset.action === 'edit') {
-                        editAgent(name);
+                        navigateToAgent(name);
                     } else {
                         toggleAgentEnabled(name, el.dataset.enable === 'true');
                     }
@@ -2604,8 +2923,14 @@
 
         // ---- Agent editor ----
 
-        const agentModal = document.getElementById('agent-modal');
-        const agentModalTitle = document.getElementById('agent-modal-title');
+        const chatContainer = document.querySelector('.container');
+        const agentPage = document.getElementById('agent-page');
+        const agentPageTitle = document.getElementById('agent-page-title');
+        const agentPageForm = document.getElementById('agent-page-form');
+        const agentPageMissing = document.getElementById('agent-page-missing');
+        const agentPageMissingText = document.getElementById('agent-page-missing-text');
+        const agentPageMissingBackBtn = document.getElementById('agent-page-missing-back');
+        const agentPageBackBtn = document.getElementById('agent-page-back');
         const agentFormName = document.getElementById('agent-form-name');
         const agentFormNameHint = document.getElementById('agent-form-name-hint');
         const agentFormSchedule = document.getElementById('agent-form-schedule');
@@ -2622,7 +2947,6 @@
         const agentFormDeleteBtn = document.getElementById('agent-form-delete');
         const agentFormCancelBtn = document.getElementById('agent-form-cancel');
         const agentFormSaveBtn = document.getElementById('agent-form-save');
-        const agentModalCloseBtn = document.getElementById('agent-modal-close');
 
         const NAME_HINT_EDIT = 'Renaming is not supported: run state and past sessions are keyed to this name. Create a new agent to use a different one.';
         const NAME_HINT_NEW = 'Lowercase letters, digits and dashes, e.g. daily-digest. It cannot be changed once saved.';
@@ -2636,6 +2960,38 @@
         // submitting that would defeat the conflict check.
         let agentEditorFingerprint = '';
         let agentDeleteArmed = false;
+        // The form as it stood when the editor opened, or null when nothing is being
+        // edited. Everything dirty-related is a comparison against this.
+        let agentFormSnapshot = null;
+
+        function agentFormValues() {
+            return JSON.stringify([
+                agentFormName.value,
+                agentFormSchedule.value,
+                agentFormPrompt.value,
+                agentFormModel.value,
+                agentFormTimeout.value,
+                agentFormWorkingDir.value,
+                agentFormEnabled.checked
+            ]);
+        }
+
+        // Comparing values rather than tracking input events means typing a change and
+        // undoing it by hand leaves the form clean, which is what a user expects.
+        function agentFormDirty() {
+            return agentEditorOpen && agentFormSnapshot !== null && agentFormValues() !== agentFormSnapshot;
+        }
+
+        // Every exit from the editor funnels through here. False means stay put.
+        async function confirmLeaveAgentEditor() {
+            if (!agentFormDirty()) return true;
+
+            return await confirmDialog({
+                title: 'DISCARD UNSAVED CHANGES?',
+                message: 'This agent has unsaved changes. Leaving the editor throws them away.',
+                confirmLabel: 'DISCARD'
+            });
+        }
 
         // kind: 'error' (coral), 'conflict' (offers RELOAD), 'notice', or null to clear.
         function setAgentFormMessage(message, kind) {
@@ -2657,6 +3013,13 @@
             });
         }
 
+        // Swaps the chat view out for the editor page. Both are body-level siblings and
+        // exactly one is ever visible, so every entry point goes through here.
+        function showAgentPage() {
+            chatContainer.classList.add('hidden');
+            agentPage.classList.remove('hidden');
+        }
+
         // `detail` is an /api/agents/get payload, or null to open a blank create form.
         function showAgentEditor(detail) {
             const creating = !detail;
@@ -2666,7 +3029,7 @@
             agentEditorPromptFile = creating ? null : (detail.prompt_file || null);
             agentEditorFingerprint = agentsFingerprint;
 
-            agentModalTitle.textContent = creating ? 'NEW AGENT' : 'EDIT AGENT';
+            agentPageTitle.textContent = creating ? 'NEW AGENT' : `EDIT AGENT: ${detail.name}`;
             agentFormName.value = creating ? '' : detail.name;
             agentFormName.readOnly = !creating;
             agentFormNameHint.textContent = creating ? NAME_HINT_NEW : NAME_HINT_EDIT;
@@ -2694,16 +3057,44 @@
             setAgentFormMessage('', null);
             setAgentFormBusy(false);
 
-            agentModal.classList.add('visible');
+            agentPageForm.classList.remove('hidden');
+            agentPageMissing.classList.add('hidden');
+            // Snapshot last, once every field is populated — including the blank create
+            // form, so an empty new agent is clean until something is typed into it.
+            agentFormSnapshot = agentFormValues();
+            showAgentPage();
             (creating ? agentFormName : agentFormSchedule).focus();
         }
 
+        // A deep link to an agent that no longer exists resolves here rather than
+        // dead-ending: the name is stated and the way back is one click.
+        function showAgentNotFound(name) {
+            agentEditorOpen = false;
+            agentEditorTarget = null;
+            agentEditorPromptFile = null;
+            agentEditorFingerprint = '';
+            agentFormSnapshot = null;
+
+            agentPageTitle.textContent = 'AGENT NOT FOUND';
+            agentPageMissingText.textContent =
+                `No agent named '${name}' is configured. It may have been renamed or removed from agents.toml.`;
+            agentPageForm.classList.add('hidden');
+            agentPageMissing.classList.remove('hidden');
+            showAgentPage();
+        }
+
+        // Resets editor state and hides the page. It does not navigate — the router calls
+        // this when the route leaves the editor, and callers that want to leave navigate.
         function closeAgentEditor() {
             agentEditorOpen = false;
             agentEditorTarget = null;
             agentEditorPromptFile = null;
             agentEditorFingerprint = '';
-            agentModal.classList.remove('visible');
+            // Dropping the snapshot is what makes a closed editor unconditionally clean,
+            // so the hashchange this close is usually followed by asks nothing.
+            agentFormSnapshot = null;
+            agentPage.classList.add('hidden');
+            chatContainer.classList.remove('hidden');
             disarmAgentDelete();
             setAgentFormMessage('', null);
         }
@@ -2734,12 +3125,6 @@
             }
         }
 
-        async function editAgent(name) {
-            setAgentsActionError(null);
-            const detail = await fetchAgentDetail(name);
-            if (detail) showAgentEditor(detail);
-        }
-
         function agentSavePayload(detail, enabled) {
             return {
                 original_name: detail.name,
@@ -2755,7 +3140,7 @@
         }
 
         // Posts an edit and reports the outcome in the editor. Every failure leaves the
-        // modal open so nothing the user typed is lost.
+        // editor open so nothing the user typed is lost.
         async function submitAgentEdit(url, payload) {
             setAgentFormBusy(true);
             disarmAgentDelete();
@@ -2774,7 +3159,10 @@
                 const data = await res.json();
                 if (data.ok) {
                     agentsFingerprint = data.fingerprint || agentsFingerprint;
-                    closeAgentEditor();
+                    // What was typed is now on disk, so the exit below must not offer to
+                    // discard it. A delete lands here too, and has nothing left to save.
+                    agentFormSnapshot = null;
+                    await leaveAgentEditor();
                     await loadAgents(true);
                     return;
                 }
@@ -2834,7 +3222,13 @@
                 }
 
                 // A rejected toggle has nowhere to report itself in the list, so hand it
-                // to the editor with the server's message.
+                // to the editor with the server's message. The URL is synced by hand
+                // rather than by navigating, so a reload does not discard the message.
+                window.history.pushState(null, '', agentRouteHash(name));
+                // pushState fires no hashchange, so applyRoute never sees this URL; the
+                // dirty guard has to be told about it or a rewind would restore the
+                // hash this editor was opened over.
+                appliedRouteHash = window.location.hash;
                 showAgentEditor(detail);
                 agentFormEnabled.checked = enable;
                 setAgentFormMessage(data.error || 'the change was rejected', data.conflict ? 'conflict' : 'error');
@@ -2856,7 +3250,9 @@
                 });
                 await loadAgents(true);
                 // Adopt the fingerprint just read from disk, otherwise SAVE would still
-                // be submitting the stale one this reload was offered to resolve.
+                // be submitting the stale one this reload was offered to resolve. The
+                // dirty snapshot is deliberately left alone: a reload keeps every field
+                // the user typed, so it neither creates nor clears unsaved work.
                 agentEditorFingerprint = agentsFingerprint;
 
                 const suffix = agentsReloadError ? `\n\n${agentsReloadError}` : '';
@@ -2871,11 +3267,12 @@
             }
         }
 
-        drawerNewAgentBtn.addEventListener('click', () => showAgentEditor(null));
+        drawerNewAgentBtn.addEventListener('click', () => navigateToAgent(null));
         agentFormSaveBtn.addEventListener('click', submitAgentForm);
         agentFormReloadBtn.addEventListener('click', reloadAgentsFromDisk);
-        agentFormCancelBtn.addEventListener('click', closeAgentEditor);
-        agentModalCloseBtn.addEventListener('click', closeAgentEditor);
+        agentFormCancelBtn.addEventListener('click', leaveAgentEditor);
+        agentPageBackBtn.addEventListener('click', leaveAgentEditor);
+        agentPageMissingBackBtn.addEventListener('click', leaveAgentEditor);
 
         agentFormDeleteBtn.addEventListener('click', () => {
             if (!agentEditorTarget) return;
@@ -2896,6 +3293,204 @@
                 fingerprint: agentEditorFingerprint
             });
         });
+
+        // ---- Routing ----
+        //
+        // Three hash routes share one entry point, so a deep link, a refresh and the back
+        // button all resolve through the same code:
+        //
+        //   #/<session-name>   chat
+        //   #/agent/<name>     agent editor
+        //   #/agent/new        agent editor, creating
+        //
+        // Segment count is what tells a session apart from an agent, which is only safe
+        // because generated session names are two-word slugs that never contain '/'.
+
+        let currentRouteView = null;
+        // Set when leaving the editor should land on the agent list rather than on a bare
+        // chat view; consumed once the chat route has been applied.
+        let pendingAgentsTab = false;
+
+        function parseRoute() {
+            const hash = window.location.hash;
+            const path = hash.startsWith('#/') ? hash.substring(2) : '';
+            const segments = path.split('/').filter(s => s.length > 0);
+
+            if (segments.length === 2 && segments[0] === 'agent') {
+                const name = decodeURIComponent(segments[1]);
+                // 'new' is the create route, so it is not treated as an agent name.
+                return { view: 'agent', name: name === 'new' ? null : name };
+            }
+
+            return {
+                view: 'chat',
+                session: segments.length === 1 ? decodeURIComponent(segments[0]) : null
+            };
+        }
+
+        // `name` of null is the create route.
+        function agentRouteHash(name) {
+            return '#/agent/' + encodeURIComponent(name === null ? 'new' : name);
+        }
+
+        // Navigation is the entry point to the editor; the router does the fetching.
+        function navigateToAgent(name) {
+            const target = agentRouteHash(name);
+            if (window.location.hash === target) {
+                // An unchanged hash fires no hashchange, so re-route by hand.
+                applyRoute();
+            } else {
+                window.location.hash = target;
+            }
+        }
+
+        // Returns to the chat view. '← AGENTS' has nowhere else to land, so leaving the
+        // editor reopens the drawer on the tab the editor was reached from.
+        function navigateToChat(showAgents) {
+            pendingAgentsTab = !!showAgents;
+
+            const target = currentSessionName ? '#/' + currentSessionName : '';
+            if (target && window.location.hash !== target) {
+                window.location.hash = target;
+                return;
+            }
+
+            // Either there is no session to name or the hash is already right; neither
+            // case fires hashchange, so the route has to be applied by hand.
+            if (!target) {
+                window.history.pushState(null, '', window.location.pathname);
+            }
+            applyRoute();
+        }
+
+        // Used by '← AGENTS', CANCEL and a successful save. Closing before navigating is
+        // what keeps the hashchange that follows from asking about the same changes again.
+        async function leaveAgentEditor() {
+            if (!await confirmLeaveAgentEditor()) return;
+            closeAgentEditor();
+            navigateToChat(true);
+        }
+
+        // `name` is null on the create route.
+        async function openAgentRoute(name) {
+            // Claim the view before the fetches, so a deep link does not flash the chat
+            // view while the agent behind it loads.
+            agentPageTitle.textContent = 'LOADING';
+            agentPageForm.classList.add('hidden');
+            agentPageMissing.classList.add('hidden');
+            showAgentPage();
+
+            // The editor cannot exist without a writable agents.toml, and /api/agents is
+            // the only thing that knows, so a deep link has to wait for it.
+            if (!agentsFile) await loadAgents(true);
+
+            if (!agentsFile || !agentsEditable) {
+                // Nothing here to edit; land on the agent list rather than dead-ending on
+                // a form whose every save the server would reject.
+                navigateToChat(true);
+                return;
+            }
+
+            setAgentsActionError(null);
+
+            if (name === null) {
+                showAgentEditor(null);
+                return;
+            }
+
+            const detail = await fetchAgentDetail(name);
+            if (detail) {
+                showAgentEditor(detail);
+            } else {
+                showAgentNotFound(name);
+            }
+        }
+
+        // Shows exactly one of the chat view and the editor page.
+        async function applyRoute() {
+            // Recorded here rather than in the hashchange handler so that every way in —
+            // deep link, manual re-route, initial load — leaves the guard below with an
+            // accurate idea of which URL is actually on screen.
+            appliedRouteHash = window.location.hash;
+
+            const route = parseRoute();
+
+            if (route.view === 'agent') {
+                currentRouteView = 'agent';
+                await openAgentRoute(route.name);
+                return;
+            }
+
+            const wasElsewhere = currentRouteView !== 'chat';
+            currentRouteView = 'chat';
+            closeAgentEditor();
+
+            if (pendingAgentsTab) {
+                pendingAgentsTab = false;
+                openDrawer();
+                // A server started without --agents has no AGENTS tab to switch to;
+                // switchDrawerTab refuses, and the drawer stays on SESSIONS.
+                switchDrawerTab('agents');
+            }
+
+            if (wasElsewhere) queryInput.focus();
+        }
+
+        // ---- Dirty-navigation guard ----
+        //
+        // window.confirm could block a hashchange; a promise cannot. So a navigation away
+        // from a dirty editor is undone first — putting the hash back leaves the editor
+        // mounted with everything typed still in it — and replayed only if the user
+        // discards. Restoring the hash fires another hashchange, hence the re-entrancy
+        // flag; without it the handler would see its own rewind and loop.
+
+        // The hash applyRoute last acted on, and therefore what a rewind restores.
+        let appliedRouteHash = window.location.hash;
+        let restoringRouteHash = false;
+        // The route a dirty navigation is waiting on. A second navigation arriving while
+        // the dialog is up overwrites this rather than opening a dialog of its own, so
+        // the answer applies to wherever the user most recently tried to go.
+        let pendingRouteHash = null;
+
+        async function handleHashChange() {
+            if (restoringRouteHash) {
+                restoringRouteHash = false;
+                return;
+            }
+
+            const target = window.location.hash;
+            if (!agentFormDirty() || target === appliedRouteHash) {
+                await applyRoute();
+                return;
+            }
+
+            const alreadyAsking = pendingRouteHash !== null;
+            pendingRouteHash = target;
+
+            restoringRouteHash = true;
+            window.location.hash = appliedRouteHash;
+
+            // The dialog already up answers for this target too.
+            if (alreadyAsking) return;
+
+            const discard = await confirmLeaveAgentEditor();
+            const replay = pendingRouteHash;
+            pendingRouteHash = null;
+            if (!discard) return;
+
+            closeAgentEditor();
+            if (window.location.hash === replay) {
+                await applyRoute();
+            } else {
+                // Pushed rather than rewound: a hashchange does not say which direction
+                // the user went, so history.go() cannot be aimed. The cost is one extra
+                // entry — a back press from here lands on the editor route rather than
+                // skipping past it — in exchange for the URL always telling the truth.
+                window.location.hash = replay;
+            }
+        }
+
+        window.addEventListener('hashchange', handleHashChange);
 
         // Find session by name from server
         async function findSessionByName(name) {
@@ -2956,9 +3551,13 @@
 
             await restoreSessionHistory();
             reconnectToEvents();
-            queryInput.focus();
+            if (currentRouteView !== 'agent') queryInput.focus();
         }
 
+        // The router owns which view is showing and runs ahead of init's network work, so
+        // an '#/agent/...' deep link never flashes the chat view. init() still resolves the
+        // chat session behind it — leaving the editor has to land somewhere real.
+        applyRoute();
         init();
     </script>
 </body>

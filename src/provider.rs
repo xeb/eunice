@@ -92,7 +92,7 @@ fn resolve_anthropic_alias(model: &str) -> &str {
 /// Resolve Gemini model aliases to full model names
 fn resolve_gemini_alias(model: &str) -> &str {
     match model {
-        "flash" => "gemini-3.5-flash",
+        "flash" => "gemini-3.6-flash",
         "gemini-3-flash" => "gemini-3-flash-preview",
         "pro" | "gemini-3.1-pro" => "gemini-3.1-pro-preview",
         "gemini-3-pro" => "gemini-3-pro-preview",
@@ -287,9 +287,9 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
 
 /// Get the smart default model based on available providers
 pub fn get_smart_default_model() -> Result<String> {
-    // 1. Try Gemini first (preferred default) - use gemini-3.1-pro-preview
+    // 1. Try Gemini first (preferred default) - use gemini-3.6-flash
     if env::var("GEMINI_API_KEY").is_ok() {
-        return Ok("gemini-3.1-pro-preview".to_string());
+        return Ok("gemini-3.6-flash".to_string());
     }
 
     // 2. Try Anthropic
@@ -350,8 +350,9 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 
     // Gemini
     let gemini_models = vec![
-        "gemini-3.1-pro, gemini-3.1-pro-preview (default)".to_string(),
-        "gemini-3.5-flash, flash".to_string(),
+        "gemini-3.6-flash, flash (default)".to_string(),
+        "gemini-3.1-pro, gemini-3.1-pro-preview".to_string(),
+        "gemini-3.5-flash".to_string(),
         "gemini-3-flash, gemini-3-flash-preview".to_string(),
         "gemini-3-pro, gemini-3-pro-preview".to_string(),
         "gemini-2.5-flash".to_string(),
@@ -528,13 +529,39 @@ mod tests {
 
         // gemini-3.5-flash is GA (no -preview suffix) and must use the native
         // API so thought signatures round-trip on function calls.
-        for model in ["gemini-3.5-flash", "flash"] {
+        let provider_info = detect_provider("gemini-3.5-flash").unwrap();
+        assert_eq!(provider_info.provider, Provider::Gemini);
+        assert!(provider_info.use_native_gemini_api);
+        assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
+        assert_eq!(provider_info.resolved_model, "gemini-3.5-flash");
+
+        std::env::remove_var("GEMINI_API_KEY");
+    }
+
+    #[test]
+    fn test_gemini_3_6_flash_uses_native_api() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+
+        // Reached through the `gemini-3` prefix rather than an entry in the alias
+        // table, so this also guards that a future `gemini-3.x` needs no new match arm.
+        for model in ["gemini-3.6-flash", "flash"] {
             let provider_info = detect_provider(model).unwrap();
             assert_eq!(provider_info.provider, Provider::Gemini);
             assert!(provider_info.use_native_gemini_api, "{} should use native API", model);
             assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
-            assert_eq!(provider_info.resolved_model, "gemini-3.5-flash");
+            assert_eq!(provider_info.resolved_model, "gemini-3.6-flash");
         }
+
+        std::env::remove_var("GEMINI_API_KEY");
+    }
+
+    #[test]
+    fn test_smart_default_prefers_gemini_3_6_flash() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+
+        assert_eq!(get_smart_default_model().unwrap(), "gemini-3.6-flash");
 
         std::env::remove_var("GEMINI_API_KEY");
     }
@@ -544,8 +571,9 @@ mod tests {
         assert_eq!(resolve_gemini_alias("gemini-3-flash"), "gemini-3-flash-preview");
         assert_eq!(resolve_gemini_alias("gemini-3-pro"), "gemini-3-pro-preview");
         assert_eq!(resolve_gemini_alias("gemini-3.1-pro"), "gemini-3.1-pro-preview");
-        // Short aliases
-        assert_eq!(resolve_gemini_alias("flash"), "gemini-3.5-flash");
+        // Short aliases. `flash` tracks the newest flash model, so it moves with
+        // each release; the versioned ids stay pinned.
+        assert_eq!(resolve_gemini_alias("flash"), "gemini-3.6-flash");
         assert_eq!(resolve_gemini_alias("pro"), "gemini-3.1-pro-preview");
         // Pass through if not an alias
         assert_eq!(resolve_gemini_alias("gemini-2.5-flash"), "gemini-2.5-flash");

@@ -16,7 +16,7 @@ User Input -> Provider Detection -> Client -> API Request -> Response
 
 **Special Case: Gemini API Dual Support**
 - Gemini 1.x/2.x models: Use OpenAI-compatible API (`/v1beta/openai/`)
-- Gemini 3.x models (`gemini-3*`, e.g. `gemini-3.5-flash`, `gemini-3.1-pro-preview`): Use native Gemini API (`/v1beta/models/{model}:generateContent`) — required because Gemini 3 thought signatures must be round-tripped on function calls
+- Gemini 3.x models (`gemini-3*`, e.g. `gemini-3.6-flash` (the default), `gemini-3.1-pro-preview`): Use native Gemini API (`/v1beta/models/{model}:generateContent`) — required because Gemini 3 thought signatures must be round-tripped on function calls
 
 ### Key Components
 

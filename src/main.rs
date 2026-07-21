@@ -47,7 +47,7 @@ struct Args {
     #[arg(long)]
     gemmad: bool,
 
-    /// Do not auto-use a running gemmad daemon; fall back to the cloud smart-default
+    /// No-op; kept for compatibility (gemmad is never used implicitly)
     #[arg(long)]
     no_gemmad: bool,
 
@@ -453,10 +453,10 @@ async fn main() -> Result<()> {
     // Determine if we need TUI mode
     let use_tui = args.chat || (prompt.is_none() && atty::is(atty::Stream::Stdin));
 
-    // Select model. A running gemmad daemon is the global default; --gemmad
-    // forces it, --no-gemmad opts out, --gemma still builds the 31B MTP server.
-    let need_probe =
-        args.gemmad || (!args.gemma && args.model.is_none() && !args.no_gemmad);
+    // Select model. The smart default is the global default; --gemmad selects the
+    // local daemon, --gemma still builds the 31B MTP server. Only --gemmad probes,
+    // so a bare invocation no longer pays the daemon round-trip on every startup.
+    let need_probe = args.gemmad;
     let gemmad_up = if need_probe { gemmad::is_available().await } else { false };
     let choice = gemmad::decide_model(
         args.gemma,
