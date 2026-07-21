@@ -13,7 +13,7 @@ use chrono::{DateTime, Local};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, watch, Mutex, MutexGuard, Notify, RwLock};
 
@@ -137,6 +137,23 @@ pub struct AgentsResponse {
     pub fingerprint: String,
     pub loaded_at: i64,
     pub reload_error: Option<String>,
+    /// IANA name of the server's local timezone (e.g. `America/Los_Angeles`). Cron fires
+    /// in server-local time but the browser computes in its own, so the UI needs this to
+    /// preview next-run times honestly. `None` when the zone cannot be determined — the
+    /// client then falls back to browser-local and says so, rather than being told a
+    /// default that may be wrong.
+    pub server_timezone: Option<String>,
+}
+
+/// Server-local IANA timezone name, resolved once per process.
+///
+/// `iana_time_zone::get_timezone()` reads `/etc/localtime` (or the platform equivalent),
+/// and `/api/agents` is polled every 30s by every open UI, so this is cached. The value
+/// cannot meaningfully change while the process runs. Failure is cached as `None`.
+pub fn server_timezone() -> Option<String> {
+    static TZ: OnceLock<Option<String>> = OnceLock::new();
+    TZ.get_or_init(|| iana_time_zone::get_timezone().ok())
+        .clone()
 }
 
 impl AgentRegistry {
@@ -979,6 +996,82 @@ mod tests {
         assert!(next_run_at(&agent("nine", "0 9 * * *", true)).is_some());
     }
 
+    /// Regression: `cron` 0.12 walked candidate dates through chrono's deprecated
+    /// `ymd`, which *panics* when a local date is ambiguous. Zones that move the
+    /// clock at midnight (Chile, Cuba, Lebanon) make the plainest schedule there is
+    /// — daily at midnight — hit exactly that on the fall-back date. The panic fired
+    /// inside the scheduler's own spawned task, so it never crashed the server: it
+    /// silently killed the scheduler while the web UI kept serving normally, and
+    /// agents just quietly stopped. Fixed by cron 0.17.
+    ///
+    /// `TZ` and `chrono::Local` are process-global, and chrono caches the zone on
+    /// first use — setting `TZ` from inside a test is both order-dependent (the
+    /// cache may already be warm) and permanently corrupting for every other test in
+    /// the binary. So the check runs in a child process with `TZ` set at exec time.
+    #[test]
+    fn test_midnight_schedule_in_midnight_transition_zone_does_not_panic() {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "webapp::scheduler::tests::midnight_transition_zone_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("TZ", "America/Santiago")
+            .output()
+            .expect("re-exec the test binary");
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+
+        // Without this the test would pass vacuously if the filter ever stopped
+        // matching (a rename, a moved module), which is the one way a
+        // regression test like this can rot silently.
+        assert!(
+            stdout.contains("1 passed"),
+            "child ran no case -- the filter matched nothing.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        assert!(
+            out.status.success(),
+            "a midnight schedule panicked in a midnight-transition zone.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+
+    #[ignore = "driven by test_midnight_schedule_in_midnight_transition_zone_does_not_panic, which sets TZ"]
+    #[test]
+    fn midnight_transition_zone_child() {
+        assert_eq!(
+            std::env::var("TZ").ok().as_deref(),
+            Some("America/Santiago"),
+            "must be run by its parent, which sets TZ"
+        );
+
+        // Chile moves the clock back one hour at midnight on 2027-04-04, so the
+        // local time 2027-04-04 00:00 happens twice (once at -03, once at -04) and
+        // the date itself is ambiguous. This is the instant 0.12 panicked on.
+        let agents = vec![agent("midnight", "0 0 * * *", true)];
+        let before = Local.with_ymd_and_hms(2027, 4, 3, 12, 0, 0).unwrap();
+
+        // The scheduler's own loop: repeatedly ask for the next occurrence, walking
+        // straight through the ambiguous date rather than stopping short of it.
+        let mut cursor = before;
+        for _ in 0..4 {
+            let next = next_occurrence(&agents, &cursor)
+                .expect("a daily schedule always has a next occurrence");
+            assert!(next > cursor, "occurrences must advance, got {next} after {cursor}");
+            cursor = next;
+        }
+        assert!(
+            cursor > Local.with_ymd_and_hms(2027, 4, 5, 0, 0, 0).unwrap(),
+            "should have stepped past the transition, stopped at {cursor}"
+        );
+
+        // The /api/agents handler reads the same schedule through next_run_at.
+        // (This one measures from "now", so it is a smoke check on the same
+        // schedule object rather than a second crossing of the transition.)
+        assert!(next_run_at(&agents[0]).is_some());
+    }
+
     #[test]
     fn test_due_agents_covers_the_elapsed_window_only() {
         let agents = vec![
@@ -1350,6 +1443,7 @@ mod tests {
             fingerprint: "0123456789abcdef".to_string(),
             loaded_at: 1784534400,
             reload_error: None,
+            server_timezone: Some("America/Los_Angeles".to_string()),
             agents: vec![AgentStatus {
                 name: "daily-digest".to_string(),
                 schedule: "0 9 * * *".to_string(),
@@ -1387,6 +1481,7 @@ mod tests {
         assert_eq!(json["fingerprint"], "0123456789abcdef");
         assert_eq!(json["loaded_at"], 1784534400);
         assert!(json["reload_error"].is_null());
+        assert_eq!(json["server_timezone"], "America/Los_Angeles");
 
         let agent = &json["agents"][0];
         for field in [
@@ -1421,10 +1516,47 @@ mod tests {
             fingerprint: String::new(),
             loaded_at: 0,
             reload_error: None,
+            server_timezone: None,
         };
         assert_eq!(
             serde_json::to_string(&empty).unwrap(),
-            r#"{"agents_file":null,"agents":[],"server_model":"gpt-5","editable":false,"fingerprint":"","loaded_at":0,"reload_error":null}"#
+            r#"{"agents_file":null,"agents":[],"server_model":"gpt-5","editable":false,"fingerprint":"","loaded_at":0,"reload_error":null,"server_timezone":null}"#
         );
+    }
+
+    /// An undeterminable timezone must serialize as JSON null, because the client keys
+    /// off null to fall back to browser-local time with an explicit note. Any fabricated
+    /// default (e.g. "UTC") would make it silently show wrong fire times instead.
+    #[test]
+    fn test_unknown_server_timezone_serializes_as_null() {
+        let response = AgentsResponse {
+            agents_file: None,
+            agents: vec![],
+            server_model: "gpt-5".to_string(),
+            editable: false,
+            fingerprint: String::new(),
+            loaded_at: 0,
+            reload_error: None,
+            server_timezone: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&response).unwrap();
+        assert!(json.get("server_timezone").is_some(), "field must be present");
+        assert!(json["server_timezone"].is_null());
+    }
+
+    #[test]
+    fn test_server_timezone_lookup_is_stable_and_infallible() {
+        // Must never panic, whatever the host's /etc/localtime looks like.
+        let first = server_timezone();
+        // Cached, so repeated calls agree — the UI polls this endpoint continuously.
+        assert_eq!(first, server_timezone());
+        if let Some(tz) = first {
+            assert!(!tz.is_empty());
+            assert!(
+                !tz.contains(char::is_whitespace),
+                "IANA names have no whitespace, got {:?}",
+                tz
+            );
+        }
     }
 }

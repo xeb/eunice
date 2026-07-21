@@ -79,6 +79,22 @@ User Input -> Provider Detection -> Client -> API Request -> Response
    - **Cron dialect:** `agents.toml` takes standard 5-field Unix cron. The `cron` crate needs
      6 fields (seconds first) and numbers day-of-week 1=Sunday..7=Saturday, so
      `agents::normalize_cron` translates. Do not pass a raw user expression to `cron::Schedule`.
+   - **Day fields intersect, they do not union.** `0 9 1 * 1` fires only on a Monday that is
+     also the 1st; Unix cron would fire on either. `agents::restricts_both_day_fields` detects
+     this, and both the startup log and the web editor warn about it.
+   - **Requires `cron` >= 0.17.** 0.12 called chrono's panicking `ymd` and aborted on an
+     ambiguous local *date* — real in midnight-transition zones (Chile, Cuba, Lebanon) — which
+     silently killed the scheduler task while the web UI kept serving. 0.12 also skipped fires
+     landing in a DST fall-back repeated hour, dropping real runs (`0 2 * * *` skipped Nov 1
+     each year in US zones). Do not downgrade.
+   - **Only ever call `.next()` on a `Schedule`.** 0.17's `after()` is non-monotonic inside a
+     fall-back overlap: it interleaves the two passes of the repeated hour and can emit times
+     that do not match the expression. Taking just the first element is safe and is what every
+     call site does.
+   - **Known gap:** chrono cannot parse `Africa/Casablanca` and silently falls back to another
+     zone (measured -07:00 where +01:00 is correct). A server there would schedule wrongly and
+     disagree with the browser preview, which uses `Intl` and is correct. Fixing it properly
+     means moving off `chrono::Local` to `chrono-tz`.
 
 11. **Daemon Install** (`src/daemon.rs`)
    - `--install` writes a systemd **user** unit (no sudo), enables lingering, and snapshots API
@@ -92,15 +108,20 @@ User Input -> Provider Detection -> Client -> API Request -> Response
 
 ## Testing
 
-The project includes **248 unit tests** covering:
+The project includes **328 unit tests** covering:
 - Provider detection logic
 - Message format conversions
 - Response parsing
 - Tool execution
-- Session persistence and schema migration
+- Session persistence, schema migration, and agent-run status
 - `agents.toml` parsing, validation, and cron translation
 - Scheduler run-state transitions and API serialization
 - systemd unit rendering
+
+One test is `#[ignore]`d by design: the DST regression test re-execs the test binary
+with `TZ=America/Santiago` and drives the ignored child, because chrono *caches* the
+local zone — setting `TZ` in-process would be order-dependent and would corrupt
+`Local` for every other test in the binary.
 
 Run tests with:
 ```bash

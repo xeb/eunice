@@ -916,6 +916,108 @@
             resize: none;
         }
 
+        /* Agent index page
+
+           The full-screen counterpart to the drawer's AGENTS tab, routed at '#/agent/'.
+           A third body-level sibling of .container and .agent-page; exactly one of the
+           three is ever visible. Wider than the editor because a row is a set of
+           columns rather than a form, and the drawer's 300px never had room for the
+           plain-English schedule this page leads with. */
+        .agent-index {
+            max-width: 1100px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 0 20px 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .agent-index-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 24px 0 16px;
+            margin-bottom: 4px;
+            border-bottom: 1px solid var(--border-strong);
+        }
+
+        /* Absorbs the slack so '+ NEW AGENT' sits at the far edge without the title
+           having to stretch to reach it. */
+        .agent-index-header-spacer {
+            flex: 1;
+        }
+
+        .agent-index-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 200px) minmax(0, 170px);
+            gap: 4px 16px;
+            align-items: center;
+            padding: 12px 10px;
+            border-bottom: 1px solid var(--border);
+            border-left: 3px solid transparent;
+        }
+
+        .agent-index-row.clickable {
+            cursor: pointer;
+        }
+
+        .agent-index-row.clickable:hover {
+            background: var(--bg-input);
+            border-left-color: var(--neon-cyan);
+        }
+
+        .agent-index-row.disabled {
+            opacity: 0.45;
+        }
+
+        .agent-index-name {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .agent-index-name-text {
+            min-width: 0;
+            word-break: break-all;
+        }
+
+        .agent-index-schedule {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            word-break: break-word;
+        }
+
+        /* The plain English leads and the raw expression trails it, so the row reads
+           without decoding cron but still shows what is actually in agents.toml. */
+        .agent-index-desc {
+            color: var(--text);
+        }
+
+        .agent-index-model,
+        .agent-index-runs {
+            font-size: 11px;
+            color: var(--text-muted);
+            word-break: break-word;
+        }
+
+        .agent-index-empty {
+            padding: 32px 10px;
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .agent-index-note {
+            padding: 16px 10px 0;
+            color: var(--text-muted);
+            font-size: 11px;
+            word-break: break-word;
+        }
+
         /* Declared after every rule it overrides so equal specificity still wins. */
         .hidden {
             display: none;
@@ -1105,6 +1207,46 @@
             word-break: break-word;
         }
 
+        /* Live cron feedback under the SCHEDULE field. */
+        .cron-preview {
+            font-size: 10px;
+            line-height: 1.6;
+            margin-top: 6px;
+        }
+
+        .cron-line {
+            display: flex;
+            gap: 6px;
+            word-break: break-word;
+        }
+
+        .cron-mark {
+            flex-shrink: 0;
+            width: 8px;
+        }
+
+        .cron-good {
+            color: var(--text);
+        }
+
+        .cron-good .cron-mark {
+            color: var(--neon-magenta);
+        }
+
+        .cron-bad {
+            color: var(--neon-coral);
+        }
+
+        .cron-warn .cron-mark {
+            color: var(--neon-coral);
+        }
+
+        /* Continuation lines hang under the text of the line above, not its glyph. */
+        .cron-detail {
+            color: var(--text-muted);
+            padding-left: 14px;
+        }
+
         .form-row {
             display: flex;
             gap: 12px;
@@ -1193,6 +1335,50 @@
         .btn-form-danger.armed {
             background: var(--neon-coral);
             color: var(--bg);
+        }
+
+        /* Toast — a confirmation for an action whose own page is gone by the time it
+           succeeds, so there is nowhere on screen left to report it. */
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translateX(-50%);
+            /* Bounded against the viewport rather than a fixed width, so a long agent
+               name wraps on a phone instead of running off the side. */
+            max-width: min(420px, calc(100vw - 32px));
+            padding: 10px 16px;
+            background: var(--text);
+            color: var(--bg);
+            border: 1px solid var(--border-strong);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.4;
+            text-align: center;
+            word-break: break-word;
+            /* Above the drawer (1001) and the modal overlay (1100): a confirmation that
+               lands behind something has not confirmed anything. */
+            z-index: 1200;
+            /* Fixed and inert: the toast must neither move the page it is confirming nor
+               swallow a click aimed at what is underneath it. */
+            pointer-events: none;
+            /* Faded rather than display:none so the element stays in the accessibility
+               tree the whole time — a live region that appears and fills in at once is
+               unreliably announced. showToast() empties the text on the way out instead. */
+            opacity: 0;
+            transition: opacity 0.25s ease-out;
+        }
+
+        .toast.visible {
+            opacity: 1;
+        }
+
+        /* The fade is decoration; the message is not. With motion reduced the toast
+           appears and leaves instantly, and still dismisses itself on the same timer. */
+        @media (prefers-reduced-motion: reduce) {
+            .toast {
+                transition: none;
+            }
         }
 
         /* Responsive */
@@ -1364,6 +1550,27 @@
 
             .agent-page-title {
                 font-size: 14px;
+            }
+
+            .agent-index {
+                padding: 0 12px 12px;
+                max-width: 100%;
+                overflow-x: hidden;
+            }
+
+            .agent-index-header {
+                padding: 16px 0 12px;
+                gap: 10px;
+                /* Three items do not fit on a phone; the button drops to its own line
+                   rather than pushing the title into a horizontal scroll. */
+                flex-wrap: wrap;
+            }
+
+            /* One column: the run and model columns become extra lines under the name
+               instead of squeezing every field into an unreadable width. */
+            .agent-index-row {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 4px;
             }
 
             .form-input,
@@ -1554,6 +1761,18 @@
     </div>
     <div class="drawer-overlay" id="drawer-overlay"></div>
 
+    <!-- Agent index page — routed at #/agent/ -->
+    <div class="agent-index hidden" id="agent-index-page">
+        <div class="agent-index-header">
+            <button class="agent-page-back" id="agent-index-back">&larr; CHAT</button>
+            <div class="agent-page-title">AGENTS</div>
+            <div class="agent-index-header-spacer"></div>
+            <button class="btn-new-session hidden" id="agent-index-new-btn">+ NEW AGENT</button>
+        </div>
+        <div id="agent-index-list"></div>
+        <div class="agent-index-note hidden" id="agent-index-note"></div>
+    </div>
+
     <!-- Agent editor page — routed at #/agent/<name> and #/agent/new -->
     <div class="agent-page hidden" id="agent-page">
         <div class="agent-page-header">
@@ -1569,6 +1788,7 @@
             <div class="form-field">
                 <label class="form-label" for="agent-form-schedule">SCHEDULE</label>
                 <input class="form-input" id="agent-form-schedule" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="0 9 * * *">
+                <div class="cron-preview hidden" id="agent-form-schedule-preview" role="status" aria-live="polite"></div>
                 <div class="form-hint">5-field cron in the server's local time: minute hour day-of-month month day-of-week. 0 9 * * * runs at 09:00 daily.</div>
             </div>
             <div class="form-field form-field-prompt">
@@ -1632,6 +1852,10 @@
             </div>
         </div>
     </div>
+
+    <!-- Transient confirmation. Mounted for the life of the page rather than created on
+         demand, so the live region is already registered when a message arrives. -->
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <div class="container">
         <header>
@@ -1713,9 +1937,10 @@
 
         // Update URL to reflect current session
         function updateSessionUrl(sessionName) {
-            // The editor owns the URL while it is routed to, and the chat session behind
-            // it keeps resolving in the background — that must not overwrite '#/agent/...'.
-            if (parseRoute().view === 'agent') return;
+            // The agent pages own the URL while one of them is routed to, and the chat
+            // session behind them keeps resolving in the background — that must not
+            // overwrite '#/agent/' or '#/agent/...'.
+            if (parseRoute().view !== 'chat') return;
 
             if (sessionName) {
                 window.history.replaceState(null, '', '#/' + sessionName);
@@ -2102,6 +2327,38 @@
                 (document.activeElement === confirmOkBtn ? confirmCancelBtn : confirmOkBtn).focus();
             }
         });
+
+        // ---- Toast ----
+        //
+        // Says what just happened when the page that would have said it is already gone.
+        // Kept generic — save and delete both use it — and deliberately not tied to the
+        // agent editor.
+
+        const toastEl = document.getElementById('toast');
+        const TOAST_VISIBLE_MS = 3000;
+        // Comfortably longer than the CSS fade, so the text never disappears mid-fade.
+        const TOAST_FADE_MS = 400;
+        let toastHideTimer = null;
+        let toastClearTimer = null;
+
+        function showToast(message) {
+            // A second toast replaces the first rather than stacking under it. Both timers
+            // have to go: an outgoing toast's clear-text timer would blank this message
+            // mid-flight, and its hide timer would cut the display short.
+            clearTimeout(toastHideTimer);
+            clearTimeout(toastClearTimer);
+
+            // textContent, so an agent name out of a config file needs no escaping.
+            toastEl.textContent = message;
+            toastEl.classList.add('visible');
+
+            toastHideTimer = setTimeout(() => {
+                toastEl.classList.remove('visible');
+                // Emptied only once it is invisible: the region stays in the accessibility
+                // tree permanently, and a stale message there would be read out of context.
+                toastClearTimer = setTimeout(() => { toastEl.textContent = ''; }, TOAST_FADE_MS);
+            }, TOAST_VISIBLE_MS);
+        }
 
         // Initialize markdown-it
         const md = window.markdownit ? window.markdownit({
@@ -2653,6 +2910,10 @@
         let agentsRefreshTimer = null;
         let agentsEditable = false;
         let agentsServerModel = '';
+        // IANA name of the zone the scheduler fires in, or null when the server could not
+        // determine it. Null is not the same as "same as the browser" — see the fallback
+        // note in renderCronPreview.
+        let agentsServerTimezone = null;
         let agentsReloadError = null;
         // Set when EDIT or the enable/disable toggle fails before the editor can open;
         // such a failure has nowhere else to report itself, so it goes in the footer.
@@ -2908,17 +3169,649 @@
                 agentsFingerprint = data.fingerprint || '';
                 agentsReloadError = data.reload_error || null;
                 agentsServerModel = data.server_model || '';
+                agentsServerTimezone = data.server_timezone || null;
                 agentsTabBtn.classList.remove('hidden');
                 drawerTabs.classList.add('tabbed');
                 drawerNewAgentBtn.classList.toggle('hidden', !(agentsEditable && activeDrawerTab === 'agents'));
                 renderAgentsFooter();
-                renderAgents(Array.isArray(data.agents) ? data.agents : [], agentsServerModel);
+
+                // One fetch feeds both surfaces. The index is rendered even while hidden,
+                // which costs nothing and means it is already correct when the route
+                // switches to it.
+                const agents = Array.isArray(data.agents) ? data.agents : [];
+                renderAgents(agents, agentsServerModel);
+                renderAgentIndex(agents, agentsServerModel);
             } catch (err) {
                 console.error('[webapp] Failed to load agents:', err);
                 if (activeDrawerTab === 'agents') {
                     agentList.innerHTML = '<div class="no-sessions">Failed to load agents</div>';
                 }
+                if (currentRouteView === 'agentIndex') {
+                    agentIndexList.innerHTML = '<div class="agent-index-empty">Failed to load agents.</div>';
+                }
             }
+        }
+
+        // ---- Cron preview ----
+        //
+        // CRON_MODULE_BEGIN (the test harness extracts everything down to CRON_MODULE_END)
+        //
+        // A hand-written 5-field cron parser and next-fire search. It deliberately does
+        // not use a cron library, because every off-the-shelf one implements *Unix*
+        // semantics and the server does not: src/agents.rs hands the expression to the
+        // `cron` crate, which differs in two ways that change what actually fires.
+        //
+        //   1. Day-of-month and day-of-week are intersected, not unioned. `0 9 1 * 1`
+        //      fires only on a 1st that is also a Monday; Unix cron fires on either.
+        //      agents::restricts_both_day_fields exists to warn about exactly this.
+        //   2. A wall-clock time that does not exist (a DST spring-forward gap) is
+        //      skipped entirely: the crate maps candidates with `TimeZone::with_ymd_and_hms`
+        //      and treats `LocalResult::None` as "not a candidate". A time that happens
+        //      *twice* (a fall-back overlap) is `LocalResult::Ambiguous`, which the crate
+        //      does fire — so `30 1 * * *` runs on the fall-back day in a zone whose
+        //      clocks repeat 01:30, at the instant cronResolve picks below.
+        //
+        //      This is a behaviour change in the crate, not a choice made here. cron 0.12
+        //      collapsed the result with `.single()`, so an overlap was `None` and the day
+        //      was silently dropped — `0 2 * * *` in New York went from Oct 31 straight to
+        //      Nov 2, and `30 1 1 11 *` skipped a whole year. 0.17 keeps the `Ambiguous`
+        //      variant and fires it. The server runs 0.17, so this module follows 0.17.
+        //
+        // The search below mirrors cron::Schedule::next_after field by field — including
+        // its stateful lower bounds — so that a divergence is a bug here, not a design
+        // difference. Ordinals are stored in the *crate's* numbering, i.e. day-of-week
+        // 1=Sunday..7=Saturday, which is what agents::normalize_cron translates the
+        // user's Unix numbering (0=Sunday) into before the crate ever sees it.
+
+        const CRON_MONTH_NAMES = {
+            jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3,
+            apr: 4, april: 4, may: 5, jun: 6, june: 6, jul: 7, july: 7,
+            aug: 8, august: 8, sep: 9, september: 9, oct: 10, october: 10,
+            nov: 11, november: 11, dec: 12, december: 12
+        };
+
+        // Crate numbering, so these are the names the crate itself accepts, unshifted.
+        const CRON_DAY_NAMES = {
+            sun: 1, sunday: 1, mon: 2, monday: 2, tue: 3, tues: 3, tuesday: 3,
+            wed: 4, wednesday: 4, thu: 5, thurs: 5, thursday: 5,
+            fri: 6, friday: 6, sat: 7, saturday: 7
+        };
+
+        const CRON_DAY_LABELS = ['', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const CRON_DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const CRON_MONTH_LABELS = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'];
+        const CRON_MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+        // `min`/`max` are the crate's ordinal bounds; `userMin`/`userMax` are what the
+        // user is allowed to type. They differ only for day-of-week, where the input is
+        // Unix-numbered and `translate` performs the same remap as agents::translate_dow.
+        // `any` marks the two fields the crate parses with `field_with_any`, i.e. the
+        // only two where `?` is accepted.
+        const CRON_FIELD_SPECS = [
+            { key: 'minute', label: 'Minute', min: 0, max: 59, userMin: 0, userMax: 59, names: null, any: false },
+            { key: 'hour', label: 'Hour', min: 0, max: 23, userMin: 0, userMax: 23, names: null, any: false },
+            { key: 'dayOfMonth', label: 'Day-of-month', min: 1, max: 31, userMin: 1, userMax: 31, names: null, any: true },
+            { key: 'month', label: 'Month', min: 1, max: 12, userMin: 1, userMax: 12, names: CRON_MONTH_NAMES, any: false },
+            {
+                key: 'dayOfWeek', label: 'Day-of-week', min: 1, max: 7, userMin: 0, userMax: 7,
+                names: CRON_DAY_NAMES, any: true,
+                translate: (n) => (n === 7 ? 1 : n + 1)
+            }
+        ];
+
+        // How far ahead nextRuns() is willing to look. Sparse expressions can be years
+        // out, and a text field that recomputes on every keystroke must never spin.
+        const CRON_SEARCH_YEARS = 5;
+        // The crate's own year ceiling; nothing fires past it however far we search.
+        const CRON_MAX_YEAR = 2100;
+        const CRON_DAY_MS = 86400000;
+
+        function cronRange(from, to) {
+            const out = [];
+            for (let value = from; value <= to; value++) out.push(value);
+            return out;
+        }
+
+        function cronPad(value) {
+            return value < 10 ? `0${value}` : String(value);
+        }
+
+        // Parse one numeric token in the user's numbering and return it in the crate's.
+        function cronOrdinal(text, spec) {
+            const value = Number(text);
+            if (!Number.isInteger(value) || value < spec.userMin || value > spec.userMax) {
+                return { error: `${spec.label} must be ${spec.userMin}-${spec.userMax} (got ${text})` };
+            }
+            return { value: spec.translate ? spec.translate(value) : value };
+        }
+
+        function cronNamed(text, spec) {
+            if (!spec.names) {
+                return { error: `${spec.label} does not accept names (got '${text}')` };
+            }
+            const value = spec.names[text.toLowerCase()];
+            if (value === undefined) {
+                return { error: `${spec.label} does not recognise the name '${text}'` };
+            }
+            return { value };
+        }
+
+        // Returns { values, all, wildcard, step } or { error }. `step` is set only when
+        // the entire field is a single `*/n`, which is what makes "Every 20 minutes"
+        // safe to say.
+        function cronParseField(text, spec) {
+            const values = new Set();
+            let wildcard = false;
+            let step = null;
+
+            const parts = text.split(',');
+            for (const part of parts) {
+                if (!part) {
+                    return { error: `${spec.label} has an empty entry: '${text}'` };
+                }
+
+                const slash = part.indexOf('/');
+                const head = slash === -1 ? part : part.slice(0, slash);
+                const tail = slash === -1 ? null : part.slice(slash + 1);
+
+                let stepSize = 1;
+                if (tail !== null) {
+                    if (!/^\d+$/.test(tail)) {
+                        return { error: `${spec.label} step must be a whole number (got '${tail}')` };
+                    }
+                    stepSize = Number(tail);
+                    if (stepSize === 0) {
+                        return { error: `${spec.label} step cannot be zero` };
+                    }
+                }
+
+                let base;
+                if (head === '*' || (head === '?' && spec.any)) {
+                    base = cronRange(spec.min, spec.max);
+                    if (parts.length === 1) {
+                        if (tail === null) wildcard = true;
+                        else step = stepSize;
+                    }
+                } else if (head === '?') {
+                    return { error: `${spec.label} does not accept '?' (only day-of-month and day-of-week do)` };
+                } else if (/^\d+$/.test(head)) {
+                    const point = cronOrdinal(head, spec);
+                    if (point.error) return point;
+                    // The crate reads a bare number before a step as "from here to the
+                    // maximum", so `5/2` is not the same as `5`.
+                    base = tail === null ? [point.value] : cronRange(point.value, spec.max);
+                } else if (/^\d+-\d+$/.test(head)) {
+                    const bounds = head.split('-');
+                    const from = cronOrdinal(bounds[0], spec);
+                    if (from.error) return from;
+                    const to = cronOrdinal(bounds[1], spec);
+                    if (to.error) return to;
+                    if (from.value > to.value) {
+                        return { error: `${spec.label} range runs backwards: '${head}'` };
+                    }
+                    base = cronRange(from.value, to.value);
+                } else if (/^[A-Za-z]+-[A-Za-z]+$/.test(head)) {
+                    const bounds = head.split('-');
+                    const from = cronNamed(bounds[0], spec);
+                    if (from.error) return from;
+                    const to = cronNamed(bounds[1], spec);
+                    if (to.error) return to;
+                    if (from.value > to.value) {
+                        return { error: `${spec.label} range runs backwards: '${head}'` };
+                    }
+                    base = cronRange(from.value, to.value);
+                } else if (/^[A-Za-z]+$/.test(head)) {
+                    // The crate's grammar puts names outside the `a/b` production, so a
+                    // step after a bare name fails to parse rather than meaning anything.
+                    if (tail !== null) {
+                        return { error: `${spec.label} does not accept a step after a name (got '${part}')` };
+                    }
+                    const named = cronNamed(head, spec);
+                    if (named.error) return named;
+                    base = [named.value];
+                } else {
+                    return { error: `${spec.label} is not valid: '${part}'` };
+                }
+
+                // The crate steps by position over the sorted base set. Every base above
+                // is a contiguous ascending range, so index stepping is value stepping.
+                for (let i = 0; i < base.length; i += stepSize) values.add(base[i]);
+            }
+
+            const sorted = Array.from(values).sort((a, b) => a - b);
+            return { values: sorted, all: sorted.length === spec.max - spec.min + 1, wildcard, step };
+        }
+
+        // parseCron('0 9 * * 1-5') -> { ok: true, fields: {...} }
+        // parseCron('0 25 * * *')  -> { ok: false, error: 'Hour must be 0-23 (got 25)' }
+        function parseCron(expr) {
+            const text = expr === null || expr === undefined ? '' : String(expr).trim();
+            const raw = text ? text.split(/\s+/) : [];
+            if (raw.length !== 5) {
+                return {
+                    ok: false,
+                    error: `Expected 5 fields (minute hour day-of-month month day-of-week), got ${raw.length}`
+                };
+            }
+
+            const fields = {};
+            for (let i = 0; i < CRON_FIELD_SPECS.length; i++) {
+                const spec = CRON_FIELD_SPECS[i];
+                const parsed = cronParseField(raw[i], spec);
+                if (parsed.error) return { ok: false, error: parsed.error };
+                fields[spec.key] = parsed;
+            }
+
+            return { ok: true, fields, raw };
+        }
+
+        // Mirrors agents::restricts_both_day_fields, which today only reaches the server
+        // log. The intersection is occasionally what someone meant, so this warns.
+        function cronRestrictsBothDayFields(expr) {
+            const parsed = parseCron(expr);
+            if (!parsed.ok) return false;
+            const unrestricted = (f) => f === '*' || f === '?' || f.startsWith('*/');
+            return !unrestricted(parsed.raw[2]) && !unrestricted(parsed.raw[4]);
+        }
+
+        function cronList(items, conjunction) {
+            if (items.length === 1) return items[0];
+            if (items.length === 2) return `${items[0]} ${conjunction} ${items[1]}`;
+            return `${items.slice(0, -1).join(', ')} ${conjunction} ${items[items.length - 1]}`;
+        }
+
+        // Worth spelling out as a span only when it is long enough to be worth reading
+        // as one, otherwise "Monday and Tuesday" beats "Monday through Tuesday".
+        function cronSpan(values, labels) {
+            const names = values.map((v) => labels[v]);
+            const contiguous = values.length > 2 && values[values.length - 1] - values[0] === values.length - 1;
+            return contiguous ? `${names[0]} through ${names[names.length - 1]}` : cronList(names, 'and');
+        }
+
+        function cronNth(n) {
+            const tens = n % 100;
+            if (tens >= 11 && tens <= 13) return `${n}th`;
+            switch (n % 10) {
+                case 1: return `${n}st`;
+                case 2: return `${n}nd`;
+                case 3: return `${n}rd`;
+                default: return `${n}th`;
+            }
+        }
+
+        function cronHourPhrase(hour) {
+            if (hour.step) return `every ${hour.step} hours`;
+            if (hour.values.length === 1) return `hour ${cronPad(hour.values[0])}`;
+            return `hours ${cronList(hour.values.map(cronPad), 'and')}`;
+        }
+
+        function cronTimePhrase(fields) {
+            const minute = fields.minute;
+            const hour = fields.hour;
+
+            if (minute.all && hour.all) return 'Every minute';
+            if (hour.all) {
+                if (minute.step) return `Every ${minute.step} minutes`;
+                return `At ${cronList(minute.values.map((m) => `:${cronPad(m)}`), 'and')} past every hour`;
+            }
+            if (minute.all) return `Every minute of ${cronHourPhrase(hour)}`;
+
+            const times = [];
+            for (const h of hour.values) {
+                for (const m of minute.values) times.push(`${cronPad(h)}:${cronPad(m)}`);
+            }
+            if (times.length <= 4) return `At ${cronList(times, 'and')}`;
+            return `At ${cronList(minute.values.map((m) => `:${cronPad(m)}`), 'and')} past ${cronHourPhrase(hour)}`;
+        }
+
+        function cronDayPhrases(fields) {
+            const phrases = [];
+            const dom = fields.dayOfMonth;
+            const dow = fields.dayOfWeek;
+
+            if (!dom.all) phrases.push(`on the ${cronList(dom.values.map(cronNth), 'and')}`);
+            if (!dow.all) {
+                const span = cronSpan(dow.values, CRON_DAY_LABELS);
+                // Restricting both day fields is an intersection here, so the wording has
+                // to say "only when" — "on the 1st, Monday" would read as the Unix union.
+                phrases.push(dom.all ? span : `only when that falls on ${span}`);
+            }
+            if (!fields.month.all) phrases.push(`in ${cronSpan(fields.month.values, CRON_MONTH_LABELS)}`);
+            return phrases;
+        }
+
+        // describeCron('0 9 * * 1-5') -> 'At 09:00, Monday through Friday'
+        // Returns null for an expression that does not parse.
+        function describeCron(expr) {
+            const parsed = parseCron(expr);
+            if (!parsed.ok) return null;
+            return [cronTimePhrase(parsed.fields)].concat(cronDayPhrases(parsed.fields)).join(', ');
+        }
+
+        // A formatter is the only way to read an instant's wall clock in another zone,
+        // so one is built per search and reused across every candidate.
+        function cronZone(timeZone) {
+            try {
+                return new Intl.DateTimeFormat('en-US', {
+                    timeZone,
+                    hourCycle: 'h23',
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit'
+                });
+            } catch (err) {
+                return null;
+            }
+        }
+
+        function cronWallParts(instant, zone) {
+            const at = {};
+            for (const part of zone.formatToParts(new Date(instant))) {
+                if (part.type !== 'literal') at[part.type] = part.value;
+            }
+            return {
+                year: Number(at.year),
+                month: Number(at.month),
+                day: Number(at.day),
+                // h23 should never produce 24, but a stray hour cycle would corrupt the
+                // whole search rather than a single field, so it is folded here.
+                hour: Number(at.hour) % 24,
+                minute: Number(at.minute),
+                second: Number(at.second)
+            };
+        }
+
+        // A zone's wall clock at `instant`, encoded as a Date.UTC value. The difference
+        // between this and `instant` is the zone's real offset at that moment — which is
+        // the only way to obtain one, and why no fixed offset is ever assumed.
+        function cronWallMs(instant, zone) {
+            const at = cronWallParts(instant, zone);
+            return Date.UTC(at.year, at.month - 1, at.day, at.hour, at.minute, at.second);
+        }
+
+        // Truncated to the second first, because the formatter reports no finer than that
+        // and a sub-second instant would otherwise report an offset carrying the leftover
+        // milliseconds — enough to make the bisect below non-monotonic.
+        function cronOffset(instant, zone) {
+            const whole = Math.floor(instant / 1000) * 1000;
+            return cronWallMs(whole, zone) - whole;
+        }
+
+        // The first instant in (lo, hi] whose offset is the later one. Called only when
+        // the two ends of the window disagree, so exactly one transition is being
+        // bisected. A window containing two transitions would land on one of them; zones
+        // do not switch twice within two days, so that case is not reachable in practice.
+        function cronTransition(lo, hi, lateOffset, zone) {
+            // Down to the millisecond: the caller compares the boundary for equality, so
+            // landing a fraction of a second late would silently miss it.
+            while (hi - lo > 1) {
+                const mid = lo + Math.floor((hi - lo) / 2);
+                if (cronOffset(mid, zone) === lateOffset) hi = mid;
+                else lo = mid;
+            }
+            return hi;
+        }
+
+        // The inverse of cronWallMs: a wall clock back to the instant the crate would fire
+        // at, or null for a wall clock it refuses. It reproduces what
+        // `TimeZone::with_ymd_and_hms` answers for the zone, reduced to the one value
+        // cron's iterator actually consumes — `Single(t)` and `Ambiguous(t, _)` both fire
+        // at `t`, `None` is skipped.
+        //
+        // Both special cases hang off the transition instant, so it is bisected for rather
+        // than assumed, and both are inclusive of a boundary that a naive reading would put
+        // outside. Measured against chrono::Local rather than reasoned about:
+        //
+        //   Spring forward (offset rises at T). Nothing exists strictly between the wall
+        //   clocks T+early and T+late, so those are `None`. The two boundaries themselves
+        //   both answer `Single(T)`: chrono reads the wall time the *stale* offset puts on
+        //   T as still resolvable, which is why New York's 02:00 on the spring-forward day
+        //   resolves at all, to the instant the clock shows as 03:00.
+        //
+        //   Fall back (offset drops at T). Every wall clock in T+late..T+early happens
+        //   twice and is `Ambiguous`, and — again because of the stale-offset read — the
+        //   upper boundary is included even though that time is really unique (New York's
+        //   02:00 on the fall-back day). chrono orders the pair by offset, not by instant,
+        //   putting the *post*-transition reading first, so the fired instant is
+        //   `wallMs - late`: the second time the clock passes that reading.
+        //
+        // Getting this wrong is worth two headline bugs: under the old `.single()` reading
+        // `0 2 * * *` in New York skipped Nov 1 entirely and `30 1 1 11 *` skipped a year.
+        function cronResolve(wallMs, zone) {
+            const earlyEnd = wallMs - CRON_DAY_MS;
+            const lateEnd = wallMs + CRON_DAY_MS;
+            const early = cronOffset(earlyEnd, zone);
+            const late = cronOffset(lateEnd, zone);
+
+            if (early !== late) {
+                const transition = cronTransition(earlyEnd, lateEnd, late, zone);
+                if (late > early) {
+                    if (wallMs === transition + early) return transition;
+                } else if (wallMs >= transition + late && wallMs <= transition + early) {
+                    return wallMs - late;
+                }
+            }
+
+            const found = [];
+            const offsets = early === late ? [early] : [early, late];
+            for (const offset of offsets) {
+                const instant = wallMs - offset;
+                if (cronWallMs(instant, zone) === wallMs && found.indexOf(instant) === -1) {
+                    found.push(instant);
+                }
+            }
+            return found.length === 1 ? found[0] : null;
+        }
+
+        function cronLeapYear(year) {
+            return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+        }
+
+        function cronDaysInMonth(month, year) {
+            if (month === 2) return cronLeapYear(year) ? 29 : 28;
+            return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+        }
+
+        // The crate's weekday ordinal (Sunday = 1) for a wall-clock date. Resolution never
+        // moves the date, so this is the same answer the crate gets from the resolved
+        // candidate — and it is available before the formatter round trip.
+        function cronWeekday(year, month, day) {
+            return new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 1;
+        }
+
+        // cron::NextAfterQuery. The first pass through each unit starts at the instant
+        // being searched from; every later pass starts at that unit's minimum. Reaching a
+        // unit resets the finer ones, which is what makes the nested loops walk forward.
+        function cronQuery(start) {
+            return {
+                firstMonth: true, firstDay: true, firstHour: true, firstMinute: true, firstSecond: true,
+                month() { if (this.firstMonth) { this.firstMonth = false; return start.month; } return 1; },
+                day() { if (this.firstDay) { this.firstDay = false; return start.day; } return 1; },
+                hour() { if (this.firstHour) { this.firstHour = false; return start.hour; } return 0; },
+                minute() { if (this.firstMinute) { this.firstMinute = false; return start.minute; } return 0; },
+                second() { if (this.firstSecond) { this.firstSecond = false; return start.second; } return 0; },
+                resetMonth() { this.firstMonth = false; this.resetDay(); },
+                resetDay() { this.firstDay = false; this.resetHour(); },
+                resetHour() { this.firstHour = false; this.resetMinute(); },
+                resetMinute() { this.firstMinute = false; this.resetSecond(); },
+                resetSecond() { this.firstSecond = false; }
+            };
+        }
+
+        // The next instant at or after `afterMs + 1s` that the server would fire on, or
+        // null once `maxYear` is passed. Stepping year -> month -> day -> hour -> minute
+        // rather than by minutes is what keeps `0 0 29 2 *` from taking two million
+        // iterations to answer.
+        function cronNextAfter(fields, afterMs, zone, maxYear) {
+            // agents::normalize_cron pins the seconds field to 0. It still has to take
+            // part in the search: starting mid-minute puts the second lower bound past 0,
+            // which is what makes the current minute drop out instead of matching again.
+            const seconds = [0];
+
+            const start = cronWallParts(afterMs + 1000, zone);
+            const query = cronQuery(start);
+
+            for (let year = start.year; year <= maxYear; year++) {
+                const monthStart = query.month();
+                if (fields.month.values.indexOf(monthStart) === -1) query.resetMonth();
+
+                for (const month of fields.month.values) {
+                    if (month < monthStart) continue;
+
+                    const dayStart = query.day();
+                    if (fields.dayOfMonth.values.indexOf(dayStart) === -1) query.resetDay();
+                    const dayEnd = cronDaysInMonth(month, year);
+                    const dayLow = Math.min(dayStart, dayEnd);
+
+                    dayLoop:
+                    for (const day of fields.dayOfMonth.values) {
+                        if (day < dayLow || day > dayEnd) continue;
+
+                        const hourStart = query.hour();
+                        if (fields.hour.values.indexOf(hourStart) === -1) query.resetHour();
+
+                        for (const hour of fields.hour.values) {
+                            if (hour < hourStart) continue;
+
+                            const minuteStart = query.minute();
+                            if (fields.minute.values.indexOf(minuteStart) === -1) query.resetMinute();
+
+                            for (const minute of fields.minute.values) {
+                                if (minute < minuteStart) continue;
+
+                                const secondStart = query.second();
+                                if (seconds.indexOf(secondStart) === -1) query.resetSecond();
+
+                                for (const second of seconds) {
+                                    if (second < secondStart) continue;
+
+                                    // Day-of-week gates the whole day, and it is an AND
+                                    // with day-of-month, not the OR a crontab would do.
+                                    if (fields.dayOfWeek.values.indexOf(cronWeekday(year, month, day)) === -1) {
+                                        continue dayLoop;
+                                    }
+
+                                    const instant = cronResolve(Date.UTC(year, month - 1, day, hour, minute, second), zone);
+                                    if (instant === null) continue;
+                                    return instant;
+                                }
+                                query.resetMinute();
+                            }
+                            query.resetHour();
+                        }
+                        query.resetDay();
+                    }
+                    query.resetMonth();
+                }
+            }
+
+            return null;
+        }
+
+        // nextRuns('0 9 * * 1-5', Date.now(), 'America/Los_Angeles', 3)
+        //   -> { ok: true, runs: [<ms>, <ms>, <ms>], exhausted: false }
+        // `exhausted` means the search hit its horizon, not that the expression is wrong.
+        //
+        // DELIBERATE DIVERGENCE — do not "fix" this back. Each run here is the crate's
+        // *first* answer for the instant before it, i.e. `schedule.after(t).next()`, which
+        // is the only value the server ever reads: scheduler.rs takes one element and then
+        // re-derives the next from the run it just performed. cron 0.17's iterator does
+        // something else with the rest — on an `Ambiguous` result it stashes the second
+        // reading and yields it next, so the sequence walks *backwards* through a fall-back
+        // hour and then repeats forever (`0 2 * * *` in New York yields 07:00Z, 06:00Z,
+        // 07:00Z, ... , and 06:00Z is not even an 02:00). That is an upstream bug, and
+        // reproducing it here would put times in the preview that no run will ever happen
+        // at. So the crate is matched one call at a time and the tail is left strictly
+        // increasing. The guard below is what pins that down.
+        function nextRuns(expr, fromInstant, timeZone, count) {
+            const parsed = parseCron(expr);
+            if (!parsed.ok) return { ok: false, error: parsed.error };
+
+            const zone = cronZone(timeZone);
+            if (!zone) return { ok: false, error: `Unknown timezone '${timeZone}'` };
+
+            // Fixed against the starting instant so asking for more runs cannot quietly
+            // extend the horizon past what the first answer was computed under.
+            const maxYear = Math.min(cronWallParts(fromInstant, zone).year + CRON_SEARCH_YEARS, CRON_MAX_YEAR);
+
+            const runs = [];
+            let after = fromInstant;
+            for (let i = 0; i < count; i++) {
+                const next = cronNextAfter(parsed.fields, after, zone, maxYear);
+                if (next === null) return { ok: true, runs, exhausted: true };
+                // cronResolve always answers an overlap with its later reading, and the
+                // search only ever moves the wall clock forward, so this cannot trip for
+                // any zone in the database. It is here so that a zone that did manage it
+                // would stop the list rather than print a run before the one above it.
+                if (runs.length && next <= runs[runs.length - 1]) {
+                    return { ok: true, runs, exhausted: true };
+                }
+                runs.push(next);
+                after = next;
+            }
+            return { ok: true, runs, exhausted: false };
+        }
+
+        // 'Tue Jul 22, 09:00' — built by hand because the parts of a formatted date, not
+        // its punctuation, are what has to be pinned across locales. A sparse expression
+        // can fire years out, so the year is spelled out whenever it is not this one.
+        function cronStamp(instant, zone) {
+            const at = cronWallParts(instant, zone);
+            const weekday = CRON_DAY_SHORT[cronWeekday(at.year, at.month, at.day) - 1];
+            const year = at.year === cronWallParts(Date.now(), zone).year ? '' : ` ${at.year}`;
+            return `${weekday} ${CRON_MONTH_SHORT[at.month - 1]} ${at.day}${year}, ${cronPad(at.hour)}:${cronPad(at.minute)}`;
+        }
+        //
+        // CRON_MODULE_END
+
+        const agentFormSchedulePreview = document.getElementById('agent-form-schedule-preview');
+
+        // Recomputed on every keystroke. Everything it calls is bounded, so there is no
+        // debounce: a half-typed expression is cheap to reject and a complete one is a
+        // few thousand comparisons at worst.
+        function renderCronPreview() {
+            const expr = agentFormSchedule.value.trim();
+            agentFormSchedulePreview.classList.toggle('hidden', !expr);
+            if (!expr) {
+                agentFormSchedulePreview.innerHTML = '';
+                return;
+            }
+
+            const parsed = parseCron(expr);
+            if (!parsed.ok) {
+                agentFormSchedulePreview.innerHTML =
+                    `<div class="cron-line cron-bad"><span class="cron-mark">&#10007;</span>${escapeHtml(parsed.error)}</div>`;
+                return;
+            }
+
+            const lines = [
+                `<div class="cron-line cron-good"><span class="cron-mark">&#10003;</span>${escapeHtml(describeCron(expr))}</div>`
+            ];
+
+            // Cron fires in the server's zone. Falling back to the browser's silently
+            // would show a confidently wrong time on any remote host, so the fallback
+            // says so.
+            const zoneName = agentsServerTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const zoneLabel = agentsServerTimezone ? 'server time' : 'assuming your local time';
+            const now = Date.now();
+            const result = nextRuns(expr, now, zoneName, 1);
+
+            if (!result.ok) {
+                lines.push(`<div class="cron-line cron-detail">${escapeHtml(result.error)}</div>`);
+            } else if (!result.runs.length) {
+                lines.push(`<div class="cron-line cron-detail">No run in the next ${CRON_SEARCH_YEARS} years.</div>`);
+            } else {
+                const at = result.runs[0];
+                const stamp = `${cronStamp(at, cronZone(zoneName))} ${zoneLabel}`;
+                lines.push(`<div class="cron-line cron-detail">Next run in ${escapeHtml(formatDuration((at - now) / 1000))} (${escapeHtml(stamp)})</div>`);
+            }
+
+            if (cronRestrictsBothDayFields(expr)) {
+                lines.push('<div class="cron-line cron-warn"><span class="cron-mark">&#9888;</span>' +
+                    'Both day fields are restricted. Unix cron would fire on either. This fires only when both match.</div>');
+            }
+
+            agentFormSchedulePreview.innerHTML = lines.join('');
         }
 
         // ---- Agent editor ----
@@ -2947,6 +3840,8 @@
         const agentFormDeleteBtn = document.getElementById('agent-form-delete');
         const agentFormCancelBtn = document.getElementById('agent-form-cancel');
         const agentFormSaveBtn = document.getElementById('agent-form-save');
+
+        agentFormSchedule.addEventListener('input', renderCronPreview);
 
         const NAME_HINT_EDIT = 'Renaming is not supported: run state and past sessions are keyed to this name. Create a new agent to use a different one.';
         const NAME_HINT_NEW = 'Lowercase letters, digits and dashes, e.g. daily-digest. It cannot be changed once saved.';
@@ -3013,11 +3908,25 @@
             });
         }
 
-        // Swaps the chat view out for the editor page. Both are body-level siblings and
-        // exactly one is ever visible, so every entry point goes through here.
+        // Swaps whatever is on screen out for the editor page. The chat view, the agent
+        // index and the editor are body-level siblings and exactly one is ever visible,
+        // so every entry point goes through here.
         function showAgentPage() {
             chatContainer.classList.add('hidden');
+            agentIndexPage.classList.add('hidden');
             agentPage.classList.remove('hidden');
+        }
+
+        function showAgentIndexPage() {
+            chatContainer.classList.add('hidden');
+            agentPage.classList.add('hidden');
+            agentIndexPage.classList.remove('hidden');
+        }
+
+        // Hiding the index does not restore anything: closeAgentEditor already brings the
+        // chat view back, and showAgentPage claims the screen for the editor.
+        function hideAgentIndexPage() {
+            agentIndexPage.classList.add('hidden');
         }
 
         // `detail` is an /api/agents/get payload, or null to open a blank create form.
@@ -3057,6 +3966,7 @@
             setAgentFormMessage('', null);
             setAgentFormBusy(false);
 
+            renderCronPreview();
             agentPageForm.classList.remove('hidden');
             agentPageMissing.classList.add('hidden');
             // Snapshot last, once every field is populated — including the blank create
@@ -3093,6 +4003,8 @@
             // Dropping the snapshot is what makes a closed editor unconditionally clean,
             // so the hashchange this close is usually followed by asks nothing.
             agentFormSnapshot = null;
+            agentFormSchedulePreview.innerHTML = '';
+            agentFormSchedulePreview.classList.add('hidden');
             agentPage.classList.add('hidden');
             chatContainer.classList.remove('hidden');
             disarmAgentDelete();
@@ -3140,8 +4052,10 @@
         }
 
         // Posts an edit and reports the outcome in the editor. Every failure leaves the
-        // editor open so nothing the user typed is lost.
-        async function submitAgentEdit(url, payload) {
+        // editor open so nothing the user typed is lost. `successMessage` is what the
+        // index says on arrival, and is built by the caller because only the caller still
+        // knows the name — returning to the index clears the editor's copy of it.
+        async function submitAgentEdit(url, payload, successMessage) {
             setAgentFormBusy(true);
             disarmAgentDelete();
 
@@ -3162,8 +4076,12 @@
                     // What was typed is now on disk, so the exit below must not offer to
                     // discard it. A delete lands here too, and has nothing left to save.
                     agentFormSnapshot = null;
-                    await leaveAgentEditor();
-                    await loadAgents(true);
+                    // Straight to returnToAgentIndex rather than leaveAgentEditor: the
+                    // dirty guard has just been satisfied above and asking again could
+                    // only produce a dialog offering to discard a saved change. The index
+                    // route refetches on arrival, so no reload is needed here either.
+                    returnToAgentIndex();
+                    showToast(successMessage);
                     return;
                 }
 
@@ -3188,17 +4106,21 @@
                 return;
             }
 
+            // The typed name, not agentEditorTarget: a create has no target, and a rename
+            // should confirm what the agent is now called.
+            const name = agentFormName.value.trim();
+
             await submitAgentEdit('/api/agents/save', {
                 original_name: agentEditorTarget,
                 fingerprint: agentEditorFingerprint,
-                name: agentFormName.value.trim(),
+                name,
                 schedule: agentFormSchedule.value.trim(),
                 prompt: agentFormPrompt.value,
                 model: agentFormModel.value.trim(),
                 enabled: agentFormEnabled.checked,
                 timeout_secs: timeoutSecs,
                 working_dir: agentFormWorkingDir.value.trim()
-            });
+            }, `Saved "${name}"`);
         }
 
         async function toggleAgentEnabled(name, enable) {
@@ -3291,15 +4213,117 @@
             submitAgentEdit('/api/agents/delete', {
                 name: agentEditorTarget,
                 fingerprint: agentEditorFingerprint
-            });
+            }, `Deleted "${agentEditorTarget}"`);
         });
+
+        // ---- Agent index page ----
+        //
+        // The same data as the drawer's AGENTS tab, at full width and with the schedule
+        // spelled out. It is a separate renderer rather than a shared one because the
+        // drawer is a 300px column of stacked cards and this is a table of rows; the two
+        // share the helpers that compute values (agentDotClass, relativeFuture,
+        // relativePast) and nothing that lays them out.
+
+        const agentIndexPage = document.getElementById('agent-index-page');
+        const agentIndexList = document.getElementById('agent-index-list');
+        const agentIndexNote = document.getElementById('agent-index-note');
+        const agentIndexNewBtn = document.getElementById('agent-index-new-btn');
+        const agentIndexBackBtn = document.getElementById('agent-index-back');
+
+        // describeCron returns null for anything it cannot parse, but agents.toml is
+        // arbitrary text and the JS parser is not the authority — the server is — so an
+        // expression this cannot read is expected, not exceptional. Either outcome falls
+        // back to the raw expression, and the throw is caught so one odd agent cannot
+        // take the rest of the list down with it.
+        function agentScheduleDescription(schedule) {
+            try {
+                return describeCron(schedule) || null;
+            } catch (err) {
+                console.error('[webapp] Failed to describe cron:', schedule, err);
+                return null;
+            }
+        }
+
+        function renderAgentIndexRow(agent, serverModel) {
+            const description = agentScheduleDescription(agent.schedule);
+            const cron = `<span class="agent-cron">${escapeHtml(agent.schedule || '')}</span>`;
+            const schedule = description
+                ? `<span class="agent-index-desc">${escapeHtml(description)}</span> &middot; ${cron}`
+                : cron;
+
+            const model = agent.model
+                ? escapeHtml(agent.model)
+                : `${escapeHtml(serverModel)} (default)`;
+
+            const nextRun = agent.enabled ? relativeFuture(agent.next_run_at) : null;
+            const lastRun = relativePast(agent.last_run_at);
+
+            return `
+                <div class="agent-index-row${agentsEditable ? ' clickable' : ''}${agent.enabled ? '' : ' disabled'}" data-name="${escapeAttr(agent.name)}">
+                    <div>
+                        <div class="agent-index-name">
+                            <span class="${agentDotClass(agent)}"></span>
+                            <span class="agent-index-name-text">${escapeHtml(agent.name)}</span>
+                            ${agent.enabled ? '' : '<span class="agent-disabled-label">DISABLED</span>'}
+                        </div>
+                        <div class="agent-index-schedule">${schedule}</div>
+                    </div>
+                    <div class="agent-index-model">${model}</div>
+                    <div class="agent-index-runs">
+                        <div>next run ${nextRun ? escapeHtml(nextRun) : '&mdash;'}</div>
+                        <div>${lastRun ? `last run ${escapeHtml(lastRun)}` : 'never run'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAgentIndex(agents, serverModel) {
+            agentIndexNewBtn.classList.toggle('hidden', !agentsEditable);
+
+            if (agents.length === 0) {
+                agentIndexList.innerHTML =
+                    `<div class="agent-index-empty">No agents configured.${agentsEditable ? ' Use + NEW AGENT to add one.' : ''}</div>`;
+            } else {
+                agentIndexList.innerHTML = agents.map(agent => renderAgentIndexRow(agent, serverModel)).join('');
+
+                // Only editable configs get click targets: the editor route bounces
+                // straight back out when the server says the file is read-only, so a
+                // clickable row there would just flicker.
+                if (agentsEditable) {
+                    agentIndexList.querySelectorAll('.agent-index-row').forEach(el => {
+                        el.addEventListener('click', () => navigateToAgent(el.dataset.name));
+                    });
+                }
+            }
+
+            let note = `Agents are configured in ${escapeHtml(agentsFile || '')}.`;
+            if (agentsReloadError) {
+                note += `<div class="agents-warning">agents.toml on disk is invalid and was not loaded; the previously loaded config is still running.\n${escapeHtml(agentsReloadError)}</div>`;
+            }
+            agentIndexNote.innerHTML = note;
+            agentIndexNote.classList.remove('hidden');
+        }
+
+        // Shown before the fetch resolves, so a deep link has something other than a
+        // blank page while /api/agents is in flight.
+        function showAgentIndexLoading() {
+            agentIndexList.innerHTML = '<div class="agent-index-empty">Loading&hellip;</div>';
+            agentIndexNote.classList.add('hidden');
+            agentIndexNewBtn.classList.add('hidden');
+        }
+
+        agentIndexNewBtn.addEventListener('click', () => navigateToAgent(null));
+        // The index has no form to guard, so it leaves for chat directly rather than
+        // through leaveAgentEditor.
+        agentIndexBackBtn.addEventListener('click', () => navigateToChat());
 
         // ---- Routing ----
         //
-        // Three hash routes share one entry point, so a deep link, a refresh and the back
+        // Four hash routes share one entry point, so a deep link, a refresh and the back
         // button all resolve through the same code:
         //
         //   #/<session-name>   chat
+        //   #/agent/           agent index
         //   #/agent/<name>     agent editor
         //   #/agent/new        agent editor, creating
         //
@@ -3307,9 +4331,6 @@
         // because generated session names are two-word slugs that never contain '/'.
 
         let currentRouteView = null;
-        // Set when leaving the editor should land on the agent list rather than on a bare
-        // chat view; consumed once the chat route has been applied.
-        let pendingAgentsTab = false;
 
         function parseRoute() {
             const hash = window.location.hash;
@@ -3320,6 +4341,12 @@
                 const name = decodeURIComponent(segments[1]);
                 // 'new' is the create route, so it is not treated as an agent name.
                 return { view: 'agent', name: name === 'new' ? null : name };
+            }
+
+            // Claimed before the chat fallthrough below, which would otherwise read
+            // '#/agent/' as a request to open a session literally named 'agent'.
+            if (segments.length === 1 && segments[0] === 'agent') {
+                return { view: 'agentIndex' };
             }
 
             return {
@@ -3344,11 +4371,19 @@
             }
         }
 
-        // Returns to the chat view. '← AGENTS' has nowhere else to land, so leaving the
-        // editor reopens the drawer on the tab the editor was reached from.
-        function navigateToChat(showAgents) {
-            pendingAgentsTab = !!showAgents;
+        function navigateToAgentIndex() {
+            const target = '#/agent/';
+            if (window.location.hash === target) {
+                applyRoute();
+            } else {
+                window.location.hash = target;
+            }
+        }
 
+        // Returns to the chat view. Only the index's own '← CHAT' and the two routes that
+        // bail out when the server has no agents at all end up here; every exit from the
+        // editor lands on the agent index instead.
+        function navigateToChat() {
             const target = currentSessionName ? '#/' + currentSessionName : '';
             if (target && window.location.hash !== target) {
                 window.location.hash = target;
@@ -3363,12 +4398,25 @@
             applyRoute();
         }
 
-        // Used by '← AGENTS', CANCEL and a successful save. Closing before navigating is
-        // what keeps the hashchange that follows from asking about the same changes again.
+        // The one way out of the editor, used by '← AGENTS', CANCEL, a successful save and
+        // a successful delete. Closing before navigating is what keeps the hashchange that
+        // follows from asking about the same changes again.
+        //
+        // The index is claimed here rather than left to the router because closeAgentEditor
+        // puts the chat view back on screen, and the hashchange that would hide it again is
+        // a task away — long enough to paint a frame of chat nobody asked for. The rows
+        // already rendered stay up until the route's own refetch replaces them.
+        function returnToAgentIndex() {
+            closeAgentEditor();
+            showAgentIndexPage();
+            navigateToAgentIndex();
+        }
+
+        // Used by '← AGENTS' and CANCEL; the save path guards itself and calls
+        // returnToAgentIndex directly.
         async function leaveAgentEditor() {
             if (!await confirmLeaveAgentEditor()) return;
-            closeAgentEditor();
-            navigateToChat(true);
+            returnToAgentIndex();
         }
 
         // `name` is null on the create route.
@@ -3384,10 +4432,17 @@
             // the only thing that knows, so a deep link has to wait for it.
             if (!agentsFile) await loadAgents(true);
 
-            if (!agentsFile || !agentsEditable) {
-                // Nothing here to edit; land on the agent list rather than dead-ending on
-                // a form whose every save the server would reject.
-                navigateToChat(true);
+            if (!agentsFile) {
+                // A server started without --agents has no agent list to fall back to.
+                navigateToChat();
+                return;
+            }
+
+            if (!agentsEditable) {
+                // Nothing here to edit; land on the index, which renders a read-only config
+                // perfectly well, rather than dead-ending on a form whose every save the
+                // server would reject.
+                navigateToAgentIndex();
                 return;
             }
 
@@ -3406,7 +4461,31 @@
             }
         }
 
-        // Shows exactly one of the chat view and the editor page.
+        async function openAgentIndexRoute() {
+            // Claim the view before the fetch, for the same reason the editor route does:
+            // a deep link must not flash the chat view while /api/agents loads.
+            closeAgentEditor();
+            showAgentIndexLoading();
+            showAgentIndexPage();
+
+            // Always refetched rather than trusting whatever the drawer last loaded: this
+            // is also how a deep link discovers whether the server has agents at all, and
+            // loadAgents paints the index as part of the same round trip.
+            await loadAgents(true);
+
+            if (!agentsFile) {
+                // A server started without --agents has no list to show. The editor route
+                // bails to chat in the same situation.
+                navigateToChat();
+                return;
+            }
+
+            // The rows carry relative times, so keep them refreshing for as long as the
+            // page is on screen. applyRoute stops the timer on the way out.
+            startAgentsRefresh();
+        }
+
+        // Shows exactly one of the chat view, the agent index and the editor page.
         async function applyRoute() {
             // Recorded here rather than in the hashchange handler so that every way in —
             // deep link, manual re-route, initial load — leaves the guard below with an
@@ -3414,6 +4493,19 @@
             appliedRouteHash = window.location.hash;
 
             const route = parseRoute();
+
+            // The index owns the agents refresh timer while it is the visible page; every
+            // other route takes it down on the way in. Opening the drawer on AGENTS starts
+            // its own, so nothing is lost.
+            if (currentRouteView === 'agentIndex' && route.view !== 'agentIndex') {
+                stopAgentsRefresh();
+            }
+
+            if (route.view === 'agentIndex') {
+                currentRouteView = 'agentIndex';
+                await openAgentIndexRoute();
+                return;
+            }
 
             if (route.view === 'agent') {
                 currentRouteView = 'agent';
@@ -3424,14 +4516,7 @@
             const wasElsewhere = currentRouteView !== 'chat';
             currentRouteView = 'chat';
             closeAgentEditor();
-
-            if (pendingAgentsTab) {
-                pendingAgentsTab = false;
-                openDrawer();
-                // A server started without --agents has no AGENTS tab to switch to;
-                // switchDrawerTab refuses, and the drawer stays on SESSIONS.
-                switchDrawerTab('agents');
-            }
+            hideAgentIndexPage();
 
             if (wasElsewhere) queryInput.focus();
         }
@@ -3551,7 +4636,9 @@
 
             await restoreSessionHistory();
             reconnectToEvents();
-            if (currentRouteView !== 'agent') queryInput.focus();
+            // Only the chat view owns the input; focusing it from under either agent page
+            // would scroll the page the user is actually looking at.
+            if (currentRouteView === 'chat') queryInput.focus();
         }
 
         // The router owns which view is showing and runs ahead of init's network work, so

@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "1.0.7"
+version = "1.0.8"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
@@ -43,10 +43,14 @@ anyhow = "1"
 
 # Time
 chrono = "0.4"
+# Server-local IANA timezone name, reported to the web UI so it can compute cron
+# fire times in the server's zone rather than the browser's. Already in the tree
+# via chrono, so this is a promotion to direct dependency, not new compilation.
+iana-time-zone = "0.1"
 
 # Scheduled agents: agents.toml parsing + cron expression evaluation
 toml = "0.8"
-cron = "0.12"
+cron = "0.17"
 # Rewriting agents.toml in place from the web UI without losing the user's
 # comments, key order, or formatting.
 toml_edit = "0.22"

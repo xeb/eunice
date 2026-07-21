@@ -396,6 +396,7 @@ pub async fn agents(State(state): State<Arc<AppState>>) -> Json<scheduler::Agent
                 fingerprint: status.fingerprint,
                 loaded_at: status.loaded_at,
                 reload_error: status.last_reload_error,
+                server_timezone: scheduler::server_timezone(),
             })
         }
         None => Json(scheduler::AgentsResponse {
@@ -406,6 +407,7 @@ pub async fn agents(State(state): State<Arc<AppState>>) -> Json<scheduler::Agent
             fingerprint: String::new(),
             loaded_at: 0,
             reload_error: None,
+            server_timezone: scheduler::server_timezone(),
         }),
     }
 }
