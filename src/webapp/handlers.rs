@@ -17,6 +17,8 @@ use chrono::Local;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -384,15 +386,538 @@ pub async fn agents(State(state): State<Arc<AppState>>) -> Json<scheduler::Agent
     let server_model = state.provider_info.resolved_model.clone();
 
     match &state.agents {
-        Some(registry) => Json(scheduler::AgentsResponse {
-            agents_file: Some(registry.config.source_path.display().to_string()),
-            agents: registry.snapshot(&state.storage).await,
-            server_model,
-        }),
+        Some(registry) => {
+            let status = registry.status().await;
+            Json(scheduler::AgentsResponse {
+                agents_file: Some(registry.source_path().display().to_string()),
+                agents: registry.snapshot(&state.storage).await,
+                server_model,
+                editable: true,
+                fingerprint: status.fingerprint,
+                loaded_at: status.loaded_at,
+                reload_error: status.last_reload_error,
+            })
+        }
         None => Json(scheduler::AgentsResponse {
             agents_file: None,
             agents: Vec::new(),
             server_model,
+            editable: false,
+            fingerprint: String::new(),
+            loaded_at: 0,
+            reload_error: None,
+        }),
+    }
+}
+
+/// Shown when an edit endpoint is called on a server started without `--agents`.
+const NO_AGENTS_FILE: &str =
+    "no agents file is configured; start the server with --agents to edit agents";
+
+/// Returned when the file changed underneath an open editor. The UI offers a reload
+/// rather than letting the browser overwrite an edit made in a text editor.
+const FINGERPRINT_CONFLICT: &str =
+    "agents.toml changed on disk since you opened this editor; reload and try again";
+
+/// Mirror the loader's defaults so a form that omits a field produces the same agent
+/// the file's own defaults would, rather than silently disabling or re-timing it.
+fn default_timeout_secs() -> u64 {
+    600
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+/// Full definition of one agent, including the complete prompt text.
+#[derive(Serialize)]
+pub struct AgentDetail {
+    name: String,
+    schedule: String,
+    model: Option<String>,
+    prompt: String,
+    prompt_file: Option<String>,
+    enabled: bool,
+    timeout_secs: u64,
+    working_dir: Option<String>,
+}
+
+/// Get agent request
+#[derive(Deserialize)]
+pub struct AgentGetRequest {
+    name: String,
+}
+
+/// Get agent response
+#[derive(Serialize)]
+pub struct AgentGetResponse {
+    found: bool,
+    agent: Option<AgentDetail>,
+    fingerprint: String,
+}
+
+/// Save agent request. `original_name` is None when creating.
+#[derive(Deserialize)]
+pub struct AgentSaveRequest {
+    #[serde(default)]
+    original_name: Option<String>,
+    fingerprint: String,
+    name: String,
+    schedule: String,
+    prompt: String,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+    #[serde(default = "default_timeout_secs")]
+    timeout_secs: u64,
+    #[serde(default)]
+    working_dir: Option<String>,
+}
+
+/// Delete agent request
+#[derive(Deserialize)]
+pub struct AgentDeleteRequest {
+    name: String,
+    fingerprint: String,
+}
+
+/// Result of a save or a delete. `conflict` is what tells the UI to offer a reload
+/// instead of showing the error inline.
+#[derive(Serialize)]
+pub struct AgentEditResponse {
+    ok: bool,
+    error: Option<String>,
+    conflict: bool,
+    fingerprint: String,
+}
+
+/// Reload agents response
+#[derive(Serialize)]
+pub struct AgentReloadResponse {
+    ok: bool,
+    changed: bool,
+    error: Option<String>,
+}
+
+/// A rejected edit. Carries `conflict` separately because the two failure modes lead
+/// to different UI: a stale fingerprint is recoverable by reloading, a validation or
+/// write failure is not.
+#[derive(Debug)]
+struct EditError {
+    message: String,
+    conflict: bool,
+}
+
+impl EditError {
+    fn failed(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            conflict: false,
+        }
+    }
+
+    fn conflict() -> Self {
+        Self {
+            message: FINGERPRINT_CONFLICT.to_string(),
+            conflict: true,
+        }
+    }
+}
+
+/// What a save or delete intends to do: one mutation of agents.toml, plus the prompt
+/// file to rewrite first when the target agent keeps its prompt outside the TOML.
+struct EditPlan {
+    mutation: crate::agents::AgentMutation,
+    prompt_write: Option<(PathBuf, String)>,
+}
+
+/// Optional text fields arrive as null, absent, or "" from the form; all three mean unset.
+fn blank_to_none(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Resolve a `prompt_file` value the way the loader does: relative paths hang off the
+/// directory containing agents.toml.
+fn resolve_prompt_file(base_dir: &Path, file: &str) -> PathBuf {
+    let candidate = Path::new(file);
+    if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        base_dir.join(candidate)
+    }
+}
+
+/// The `prompt_file` declared for `name`, resolved. None when the agent stores its
+/// prompt inline, does not exist, or the file no longer parses.
+fn declared_prompt_file(doc_text: &str, base_dir: &Path, name: &str) -> Option<PathBuf> {
+    let parsed: crate::agents::AgentsFile = toml::from_str(doc_text).ok()?;
+    let spec = parsed.agents.into_iter().find(|s| s.name == name)?;
+    spec.prompt_file
+        .map(|file| resolve_prompt_file(base_dir, &file))
+}
+
+/// Assemble one agent's full definition from agents.toml source text. An unreadable
+/// prompt_file yields an empty prompt rather than a failure, so the editor can be used
+/// to recreate it.
+fn agent_detail(doc_text: &str, base_dir: &Path, name: &str) -> Option<AgentDetail> {
+    let parsed: crate::agents::AgentsFile = toml::from_str(doc_text).ok()?;
+    let spec = parsed.agents.into_iter().find(|s| s.name == name)?;
+
+    let (prompt, prompt_file) = match &spec.prompt_file {
+        Some(file) => {
+            let resolved = resolve_prompt_file(base_dir, file);
+            let text = std::fs::read_to_string(&resolved).unwrap_or_default();
+            (text, Some(resolved.display().to_string()))
+        }
+        None => (spec.prompt.clone().unwrap_or_default(), None),
+    };
+
+    Some(AgentDetail {
+        name: spec.name,
+        schedule: spec.schedule,
+        model: spec.model,
+        prompt,
+        prompt_file,
+        enabled: spec.enabled,
+        timeout_secs: spec.timeout_secs,
+        working_dir: spec.working_dir,
+    })
+}
+
+/// Distinguishes the temp files of concurrent saves within one process.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write via a temp file in the same directory and rename over the target, so a failed
+/// or interrupted write cannot leave a half-written config behind. Same directory
+/// because rename is only atomic within a filesystem.
+fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "agents.toml".to_string());
+    let temp = dir.join(format!(
+        ".{}.{}.{}.tmp",
+        name,
+        std::process::id(),
+        TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+
+    std::fs::write(&temp, contents)
+        .map_err(|e| format!("failed to write '{}': {}", temp.display(), e))?;
+
+    if let Err(e) = std::fs::rename(&temp, path) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("failed to write '{}': {}", path.display(), e));
+    }
+
+    Ok(())
+}
+
+/// Copy the current agents.toml aside before overwriting it. Failing here aborts the
+/// save: a write that cannot be backed up is a write that loses the previous version.
+fn backup_config(path: &Path) -> Result<(), String> {
+    let Some(name) = path.file_name() else {
+        return Ok(());
+    };
+    let backup = path.with_file_name(format!("{}.bak", name.to_string_lossy()));
+    std::fs::copy(path, &backup)
+        .map(|_| ())
+        .map_err(|e| format!("failed to back up '{}': {}", path.display(), e))
+}
+
+/// The shared tail of save and delete: fingerprint check, mutate, validate, write, swap.
+///
+/// Validation runs on the PROPOSED text before anything is written, so a rejected edit
+/// leaves the file on disk exactly as it was.
+async fn commit_edit<F>(
+    registry: &scheduler::AgentRegistry,
+    submitted_fingerprint: &str,
+    build: F,
+) -> Result<String, EditError>
+where
+    F: FnOnce(&str, &Path) -> Result<EditPlan, EditError>,
+{
+    // Held across the whole read-modify-write. Validation awaits a blocking task, so
+    // without this two saves that each passed the fingerprint check both proceed and
+    // the later write silently discards the earlier one.
+    let _edit_guard = registry.lock_edits().await;
+
+    let loaded = registry.status().await;
+    if loaded.fingerprint != submitted_fingerprint {
+        return Err(EditError::conflict());
+    }
+
+    let source_path = registry.source_path().to_path_buf();
+    let base_dir = source_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let current = registry
+        .config_text()
+        .await
+        .map_err(|e| EditError::failed(e.to_string()))?;
+
+    let plan = build(&current, &base_dir)?;
+    let proposed = crate::agents::apply_mutation(&current, &plan.mutation)
+        .map_err(|e| EditError::failed(e.to_string()))?;
+
+    // Model resolution joins a thread that may make a blocking HTTP probe, so it
+    // cannot run on a runtime worker.
+    let validation_path = source_path.clone();
+    let validation_text = proposed.clone();
+    let validated = tokio::task::spawn_blocking(move || {
+        crate::agents::validate_text(&validation_text, &validation_path, &|model| {
+            crate::agents::detect_provider_isolated(model).map(|_| ())
+        })
+    })
+    .await
+    .map_err(|e| EditError::failed(format!("validation task failed: {}", e)))?;
+
+    let mut validated = validated.map_err(|e| EditError::failed(e.to_string()))?;
+
+    // Nothing has been written up to this point.
+
+    // The edit lock only serializes saves made through this process; an external editor
+    // can still have rewritten the file since `current` was read. Re-checking here makes
+    // the whole mutation a no-op rather than an overwrite of work never seen.
+    let on_disk = registry
+        .config_text()
+        .await
+        .map_err(|e| EditError::failed(e.to_string()))?;
+    if on_disk != current {
+        return Err(EditError::conflict());
+    }
+
+    let written_prompt = match &plan.prompt_write {
+        Some((path, contents)) => {
+            // Same reasoning as the agents.toml backup below, but the file may not exist
+            // yet: an agent can declare a prompt_file the editor is about to create.
+            if path.exists() {
+                backup_config(path).map_err(EditError::failed)?;
+            }
+            write_atomic(path, contents).map_err(EditError::failed)?;
+            Some((
+                std::fs::canonicalize(path).unwrap_or_else(|_| path.clone()),
+                contents.clone(),
+            ))
+        }
+        None => None,
+    };
+
+    backup_config(&source_path).map_err(EditError::failed)?;
+    write_atomic(&source_path, &proposed).map_err(EditError::failed)?;
+
+    // validate_text read the prompt file as it stood before the write, so the agent
+    // whose prompt_file was just rewritten would otherwise run on the old text until
+    // some later reload.
+    if let Some((path, contents)) = written_prompt {
+        for agent in &mut validated.agents {
+            if agent.prompt_file.as_deref() == Some(path.as_path()) {
+                agent.prompt = contents.clone();
+            }
+        }
+    }
+
+    registry
+        .apply(validated)
+        .await
+        .map_err(|e| EditError::failed(e.to_string()))?;
+
+    Ok(registry.status().await.fingerprint)
+}
+
+/// Turn a commit result into the response both save and delete return.
+async fn edit_response(
+    registry: &scheduler::AgentRegistry,
+    result: Result<String, EditError>,
+) -> Json<AgentEditResponse> {
+    match result {
+        Ok(fingerprint) => Json(AgentEditResponse {
+            ok: true,
+            error: None,
+            conflict: false,
+            fingerprint,
+        }),
+        Err(EditError { message, conflict }) => Json(AgentEditResponse {
+            ok: false,
+            error: Some(message),
+            conflict,
+            // The current fingerprint, so the UI can recover without a full reload.
+            fingerprint: registry.status().await.fingerprint,
+        }),
+    }
+}
+
+/// Full definition of a single agent, for the editor
+pub async fn get_agent(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<AgentGetRequest>,
+) -> Json<AgentGetResponse> {
+    let Some(registry) = &state.agents else {
+        return Json(AgentGetResponse {
+            found: false,
+            agent: None,
+            fingerprint: String::new(),
+        });
+    };
+
+    let fingerprint = registry.status().await.fingerprint;
+    let base_dir = registry
+        .source_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let agent = match registry.config_text().await {
+        Ok(text) => agent_detail(&text, &base_dir, &request.name),
+        Err(e) => {
+            log(&format!("Failed to read agents file: {}", e));
+            None
+        }
+    };
+
+    Json(AgentGetResponse {
+        found: agent.is_some(),
+        agent,
+        fingerprint,
+    })
+}
+
+/// Create or update an agent
+pub async fn save_agent(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<AgentSaveRequest>,
+) -> Json<AgentEditResponse> {
+    let Some(registry) = &state.agents else {
+        return Json(AgentEditResponse {
+            ok: false,
+            error: Some(NO_AGENTS_FILE.to_string()),
+            conflict: false,
+            fingerprint: String::new(),
+        });
+    };
+
+    let AgentSaveRequest {
+        original_name,
+        fingerprint,
+        name,
+        schedule,
+        prompt,
+        model,
+        enabled,
+        timeout_secs,
+        working_dir,
+    } = request;
+
+    let result = commit_edit(registry, &fingerprint, |current, base_dir| {
+        // The loader catches an empty inline prompt, but a prompt_file agent is
+        // validated against the file as it stands *before* the write, so an emptied
+        // prompt would otherwise slip through and only fail on the next reload.
+        if prompt.trim().is_empty() {
+            return Err(EditError::failed(format!("agent '{}': prompt is empty", name)));
+        }
+
+        let prompt_file = original_name
+            .as_deref()
+            .and_then(|target| declared_prompt_file(current, base_dir, target));
+
+        let spec = crate::agents::AgentSpec {
+            name: name.clone(),
+            schedule,
+            model: blank_to_none(model),
+            prompt: Some(prompt.clone()),
+            // Never set from the UI: apply_mutation leaves an existing `prompt_file`
+            // key alone, and a newly created agent always stores its prompt inline.
+            prompt_file: None,
+            enabled,
+            timeout_secs,
+            working_dir: blank_to_none(working_dir),
+        };
+
+        Ok(EditPlan {
+            mutation: crate::agents::AgentMutation::Upsert {
+                original_name,
+                spec,
+            },
+            prompt_write: prompt_file.map(|path| (path, prompt)),
+        })
+    })
+    .await;
+
+    match &result {
+        Ok(_) => log(&format!("Saved agent: {}", name)),
+        Err(e) => log(&format!("Failed to save agent {}: {}", name, e.message)),
+    }
+
+    edit_response(registry, result).await
+}
+
+/// Delete an agent
+pub async fn delete_agent(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<AgentDeleteRequest>,
+) -> Json<AgentEditResponse> {
+    let Some(registry) = &state.agents else {
+        return Json(AgentEditResponse {
+            ok: false,
+            error: Some(NO_AGENTS_FILE.to_string()),
+            conflict: false,
+            fingerprint: String::new(),
+        });
+    };
+
+    let name = request.name.clone();
+    let result = commit_edit(registry, &request.fingerprint, |_current, _base_dir| {
+        Ok(EditPlan {
+            // The prompt file of a deleted agent is left on disk: it may be shared,
+            // and removing a file the user wrote is not this endpoint's call.
+            mutation: crate::agents::AgentMutation::Delete { name },
+            prompt_write: None,
+        })
+    })
+    .await;
+
+    match &result {
+        Ok(_) => log(&format!("Deleted agent: {}", request.name)),
+        Err(e) => log(&format!(
+            "Failed to delete agent {}: {}",
+            request.name, e.message
+        )),
+    }
+
+    edit_response(registry, result).await
+}
+
+/// Re-read agents.toml on demand
+pub async fn reload_agents(State(state): State<Arc<AppState>>) -> Json<AgentReloadResponse> {
+    let Some(registry) = &state.agents else {
+        return Json(AgentReloadResponse {
+            ok: false,
+            changed: false,
+            error: Some(NO_AGENTS_FILE.to_string()),
+        });
+    };
+
+    match registry.reload_from_disk().await {
+        Ok(changed) => {
+            // A file that fails validation is reported as unchanged, not as an error,
+            // so surface the rejection the registry recorded instead of claiming success.
+            let error = registry.status().await.last_reload_error;
+            Json(AgentReloadResponse {
+                ok: error.is_none(),
+                changed,
+                error,
+            })
+        }
+        Err(e) => Json(AgentReloadResponse {
+            ok: false,
+            changed: false,
+            error: Some(e.to_string()),
         }),
     }
 }
@@ -1159,7 +1684,455 @@ pub(super) async fn run_agent_with_events(
 
 #[cfg(test)]
 mod tests {
-    use super::compose_first_message;
+    use super::*;
+    use tempfile::TempDir;
+
+    const INLINE_AND_FILE: &str = r#"
+[[agent]]
+name = "daily-digest"
+schedule = "0 9 * * *"
+model = "sonnet"
+prompt = "Summarize yesterday's commits"
+working_dir = "/home/xeb/p/myrepo"
+
+[[agent]]
+name = "repo-watch"
+schedule = "*/30 * * * *"
+prompt_file = "prompts/repo-watch.md"
+enabled = false
+timeout_secs = 900
+"#;
+
+    #[test]
+    fn test_blank_to_none_treats_absent_null_and_empty_alike() {
+        assert_eq!(blank_to_none(None), None);
+        assert_eq!(blank_to_none(Some(String::new())), None);
+        assert_eq!(blank_to_none(Some("   ".to_string())), None);
+        assert_eq!(
+            blank_to_none(Some("  sonnet  ".to_string())),
+            Some("sonnet".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_prompt_file_is_relative_to_the_config_directory() {
+        let base = Path::new("/home/xeb/agents");
+        assert_eq!(
+            resolve_prompt_file(base, "prompts/watch.md"),
+            PathBuf::from("/home/xeb/agents/prompts/watch.md")
+        );
+        assert_eq!(
+            resolve_prompt_file(base, "/etc/eunice/watch.md"),
+            PathBuf::from("/etc/eunice/watch.md")
+        );
+    }
+
+    #[test]
+    fn test_declared_prompt_file_only_for_agents_that_use_one() {
+        let base = Path::new("/home/xeb/agents");
+
+        assert_eq!(
+            declared_prompt_file(INLINE_AND_FILE, base, "repo-watch"),
+            Some(PathBuf::from("/home/xeb/agents/prompts/repo-watch.md"))
+        );
+        assert_eq!(
+            declared_prompt_file(INLINE_AND_FILE, base, "daily-digest"),
+            None
+        );
+        assert_eq!(declared_prompt_file(INLINE_AND_FILE, base, "nope"), None);
+        assert_eq!(declared_prompt_file("not : toml", base, "repo-watch"), None);
+    }
+
+    #[test]
+    fn test_agent_detail_returns_the_full_inline_prompt() {
+        let base = Path::new("/home/xeb/agents");
+        let detail = agent_detail(INLINE_AND_FILE, base, "daily-digest").unwrap();
+
+        assert_eq!(detail.name, "daily-digest");
+        assert_eq!(detail.schedule, "0 9 * * *");
+        assert_eq!(detail.model, Some("sonnet".to_string()));
+        assert_eq!(detail.prompt, "Summarize yesterday's commits");
+        assert_eq!(detail.prompt_file, None);
+        assert!(detail.enabled);
+        assert_eq!(detail.timeout_secs, 600);
+        assert_eq!(detail.working_dir, Some("/home/xeb/p/myrepo".to_string()));
+
+        assert!(agent_detail(INLINE_AND_FILE, base, "missing").is_none());
+    }
+
+    #[test]
+    fn test_agent_detail_reads_the_prompt_file_contents() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("prompts")).unwrap();
+        std::fs::write(
+            dir.path().join("prompts/repo-watch.md"),
+            "Check the repo for new tags",
+        )
+        .unwrap();
+
+        let detail = agent_detail(INLINE_AND_FILE, dir.path(), "repo-watch").unwrap();
+        assert_eq!(detail.prompt, "Check the repo for new tags");
+        assert_eq!(
+            detail.prompt_file,
+            Some(
+                dir.path()
+                    .join("prompts/repo-watch.md")
+                    .display()
+                    .to_string()
+            )
+        );
+        assert!(!detail.enabled);
+        assert_eq!(detail.timeout_secs, 900);
+    }
+
+    #[test]
+    fn test_agent_detail_survives_a_missing_prompt_file() {
+        let dir = TempDir::new().unwrap();
+        let detail = agent_detail(INLINE_AND_FILE, dir.path(), "repo-watch").unwrap();
+        assert_eq!(detail.prompt, "");
+        assert!(detail.prompt_file.is_some());
+    }
+
+    #[test]
+    fn test_save_request_treats_absent_optionals_as_unset() {
+        let request: AgentSaveRequest = serde_json::from_str(
+            r#"{"fingerprint":"abc","name":"nightly","schedule":"0 2 * * *","prompt":"go"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(request.original_name, None);
+        assert_eq!(request.model, None);
+        assert_eq!(request.working_dir, None);
+        assert_eq!(request.timeout_secs, 600);
+        // An omitted `enabled` must not disable an agent; the file format defaults to true.
+        assert!(request.enabled);
+
+        let with_nulls: AgentSaveRequest = serde_json::from_str(
+            r#"{"original_name":"nightly","fingerprint":"abc","name":"nightly","schedule":"0 2 * * *",
+                "prompt":"go","model":null,"enabled":false,"timeout_secs":30,"working_dir":""}"#,
+        )
+        .unwrap();
+
+        assert_eq!(with_nulls.original_name, Some("nightly".to_string()));
+        assert_eq!(with_nulls.timeout_secs, 30);
+        assert!(!with_nulls.enabled);
+        assert_eq!(blank_to_none(with_nulls.working_dir), None);
+    }
+
+    #[test]
+    fn test_edit_responses_serialize_contract_field_names() {
+        let ok = serde_json::to_value(AgentEditResponse {
+            ok: true,
+            error: None,
+            conflict: false,
+            fingerprint: "deadbeef".to_string(),
+        })
+        .unwrap();
+        assert_eq!(ok["ok"], true);
+        assert!(ok["error"].is_null());
+        assert_eq!(ok["conflict"], false);
+        assert_eq!(ok["fingerprint"], "deadbeef");
+
+        let conflicted = EditError::conflict();
+        assert!(conflicted.conflict);
+        assert_eq!(conflicted.message, FINGERPRINT_CONFLICT);
+
+        let reload = serde_json::to_string(&AgentReloadResponse {
+            ok: false,
+            changed: false,
+            error: Some("bad cron".to_string()),
+        })
+        .unwrap();
+        assert_eq!(reload, r#"{"ok":false,"changed":false,"error":"bad cron"}"#);
+
+        let missing = serde_json::to_value(AgentGetResponse {
+            found: false,
+            agent: None,
+            fingerprint: String::new(),
+        })
+        .unwrap();
+        assert_eq!(missing["found"], false);
+        assert!(missing["agent"].is_null());
+    }
+
+    #[test]
+    fn test_get_response_carries_every_editable_field() {
+        let base = Path::new("/home/xeb/agents");
+        let response = AgentGetResponse {
+            found: true,
+            agent: agent_detail(INLINE_AND_FILE, base, "daily-digest"),
+            fingerprint: "abc".to_string(),
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        let agent = &json["agent"];
+        for field in [
+            "name",
+            "schedule",
+            "model",
+            "prompt",
+            "prompt_file",
+            "enabled",
+            "timeout_secs",
+            "working_dir",
+        ] {
+            assert!(agent.get(field).is_some(), "missing field {}", field);
+        }
+        assert_eq!(agent.as_object().unwrap().len(), 8);
+    }
+
+    #[test]
+    fn test_write_atomic_replaces_the_target_and_leaves_no_temp_file() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("agents.toml");
+        std::fs::write(&target, "old").unwrap();
+
+        write_atomic(&target, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .filter(|name| name != "agents.toml")
+            .collect();
+        assert!(leftovers.is_empty(), "left behind {:?}", leftovers);
+    }
+
+    #[test]
+    fn test_write_atomic_reports_an_unwritable_target_as_an_error() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("no-such-dir").join("agents.toml");
+
+        let error = write_atomic(&target, "body").unwrap_err();
+        assert!(
+            error.starts_with("failed to write"),
+            "unreadable error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn test_backup_config_keeps_the_previous_contents() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("agents.toml");
+        std::fs::write(&target, "first").unwrap();
+
+        backup_config(&target).unwrap();
+        write_atomic(&target, "second").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "second");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("agents.toml.bak")).unwrap(),
+            "first"
+        );
+
+        backup_config(&target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("agents.toml.bak")).unwrap(),
+            "second"
+        );
+    }
+
+    #[test]
+    fn test_backup_config_reports_a_missing_source_as_an_error() {
+        let dir = TempDir::new().unwrap();
+        let error = backup_config(&dir.path().join("agents.toml")).unwrap_err();
+        assert!(
+            error.starts_with("failed to back up"),
+            "unreadable error: {}",
+            error
+        );
+    }
+
+    /// A registry backed by a real agents.toml. No agent declares a `model`, so
+    /// neither the registry nor validation reaches provider detection.
+    fn on_disk_registry(dir: &TempDir) -> (PathBuf, scheduler::AgentRegistry) {
+        let path = dir.path().join("agents.toml");
+        std::fs::write(
+            &path,
+            "# hand-written header\n\n[[agent]]\nname = \"daily-digest\"\nschedule = \"0 9 * * *\"\nprompt = \"summarize\"\n",
+        )
+        .unwrap();
+        let config = crate::agents::load_agents_file(&path, &|_| Ok(())).unwrap();
+        let registry = scheduler::AgentRegistry::new(config, "server-model").unwrap();
+        (path, registry)
+    }
+
+    fn delete_plan(name: &str) -> EditPlan {
+        EditPlan {
+            mutation: crate::agents::AgentMutation::Delete {
+                name: name.to_string(),
+            },
+            prompt_write: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_commit_edit_rejects_a_stale_fingerprint_without_writing() {
+        let dir = TempDir::new().unwrap();
+        let (path, registry) = on_disk_registry(&dir);
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        let error = commit_edit(&registry, "not-the-current-fingerprint", |_, _| {
+            Ok(delete_plan("daily-digest"))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(error.conflict);
+        assert_eq!(error.message, FINGERPRINT_CONFLICT);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        assert!(!dir.path().join("agents.toml.bak").exists());
+    }
+
+    #[tokio::test]
+    async fn test_commit_edit_leaves_the_file_untouched_when_validation_fails() {
+        let dir = TempDir::new().unwrap();
+        let (path, registry) = on_disk_registry(&dir);
+        let before = std::fs::read_to_string(&path).unwrap();
+        let fingerprint = registry.status().await.fingerprint;
+
+        let error = commit_edit(&registry, &fingerprint, |_, _| {
+            Ok(EditPlan {
+                mutation: crate::agents::AgentMutation::Upsert {
+                    original_name: Some("daily-digest".to_string()),
+                    spec: crate::agents::AgentSpec {
+                        name: "daily-digest".to_string(),
+                        schedule: "not a cron".to_string(),
+                        model: None,
+                        prompt: Some("summarize".to_string()),
+                        prompt_file: None,
+                        enabled: true,
+                        timeout_secs: 600,
+                        working_dir: None,
+                    },
+                },
+                prompt_write: None,
+            })
+        })
+        .await
+        .unwrap_err();
+
+        assert!(!error.conflict);
+        assert!(
+            error.message.contains("invalid schedule"),
+            "unhelpful error: {}",
+            error.message
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        assert!(!dir.path().join("agents.toml.bak").exists());
+    }
+
+    #[tokio::test]
+    async fn test_commit_edit_writes_backs_up_and_refreshes_the_fingerprint() {
+        let dir = TempDir::new().unwrap();
+        let (path, registry) = on_disk_registry(&dir);
+        let before = std::fs::read_to_string(&path).unwrap();
+        let submitted = registry.status().await.fingerprint;
+
+        let returned = commit_edit(&registry, &submitted, |_, _| {
+            Ok(delete_plan("daily-digest"))
+        })
+        .await
+        .unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(!after.contains("daily-digest"));
+        assert!(after.contains("# hand-written header"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("agents.toml.bak")).unwrap(),
+            before
+        );
+
+        // The registry must already agree with what is on disk, or the watcher would
+        // re-read the file this save just wrote.
+        assert_ne!(returned, submitted);
+        assert_eq!(registry.status().await.fingerprint, returned);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_concurrent_commit_edits_do_not_lose_an_update() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agents.toml");
+        std::fs::write(
+            &path,
+            "[[agent]]\nname = \"one\"\nschedule = \"0 9 * * *\"\nprompt = \"a\"\n\n[[agent]]\nname = \"two\"\nschedule = \"0 10 * * *\"\nprompt = \"b\"\n",
+        )
+        .unwrap();
+        let config = crate::agents::load_agents_file(&path, &|_| Ok(())).unwrap();
+        let registry = Arc::new(scheduler::AgentRegistry::new(config, "server-model").unwrap());
+        let fingerprint = registry.status().await.fingerprint;
+
+        // Two saves prepared against the same fingerprint, targeting different agents.
+        // Whichever lands second must be rejected, not silently overwrite the first.
+        let (first, second) = tokio::join!(
+            {
+                let registry = registry.clone();
+                let fingerprint = fingerprint.clone();
+                async move {
+                    commit_edit(&registry, &fingerprint, |_, _| Ok(delete_plan("one"))).await
+                }
+            },
+            {
+                let registry = registry.clone();
+                let fingerprint = fingerprint.clone();
+                async move {
+                    commit_edit(&registry, &fingerprint, |_, _| Ok(delete_plan("two"))).await
+                }
+            }
+        );
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let survivors = [("one", "one"), ("two", "two")]
+            .iter()
+            .filter(|(_, needle)| text.contains(*needle))
+            .count();
+        assert_eq!(survivors, 1, "one deletion was lost: {}", text);
+
+        let losers = [&first, &second].iter().filter(|r| r.is_err()).count();
+        assert_eq!(losers, 1, "both saves reported success");
+        for result in [&first, &second] {
+            if let Err(e) = result {
+                assert!(e.conflict, "the losing save must be reported as a conflict");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_commit_edit_reports_an_external_rewrite_as_a_conflict() {
+        let dir = TempDir::new().unwrap();
+        let (path, registry) = on_disk_registry(&dir);
+        let fingerprint = registry.status().await.fingerprint;
+
+        let external = "[[agent]]\nname = \"typed-by-hand\"\nschedule = \"0 9 * * *\"\nprompt = \"x\"\n";
+        let error = commit_edit(&registry, &fingerprint, |_, _| {
+            // Stands in for an external editor writing between the read and the write.
+            std::fs::write(&path, external).unwrap();
+            Ok(delete_plan("daily-digest"))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(error.conflict);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), external);
+        assert!(!dir.path().join("agents.toml.bak").exists());
+    }
+
+    #[tokio::test]
+    async fn test_commit_edit_reports_a_missing_agent_as_a_plain_error() {
+        let dir = TempDir::new().unwrap();
+        let (path, registry) = on_disk_registry(&dir);
+        let before = std::fs::read_to_string(&path).unwrap();
+        let fingerprint = registry.status().await.fingerprint;
+
+        let error = commit_edit(&registry, &fingerprint, |_, _| Ok(delete_plan("ghost")))
+            .await
+            .unwrap_err();
+
+        assert!(!error.conflict);
+        assert_eq!(error.message, "no agent named 'ghost' in the config");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
 
     #[test]
     fn test_system_prompt_prepended_on_first_turn_only() {

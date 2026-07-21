@@ -97,6 +97,7 @@ pub fn render_unit(exec_start: &str, working_dir: &str, home: &str) -> String {
          Type=simple\n\
          ExecStart={}\n\
          WorkingDirectory={}\n\
+         ExecReload=/bin/kill -HUP $MAINPID\n\
          EnvironmentFile=-{}/.eunice/eunice.env\n\
          Restart=on-failure\n\
          RestartSec=5\n\
@@ -502,6 +503,7 @@ mod tests {
              Type=simple\n\
              ExecStart=/usr/bin/eunice --webapp --port 9000 --host 0.0.0.0\n\
              WorkingDirectory=/home/xeb/work\n\
+             ExecReload=/bin/kill -HUP $MAINPID\n\
              EnvironmentFile=-/home/xeb/.eunice/eunice.env\n\
              Restart=on-failure\n\
              RestartSec=5\n\

@@ -378,14 +378,50 @@ when the agent does not set one), the next run as a relative time, and the last 
 card adds the prompt preview (first 240 characters), `working_dir`, `timeout_secs`, the last error,
 and up to ten recent runs.
 
-**The view is read-only by design.** There is no "run now" button, no enable toggle, no editor.
-`agents.toml` is the single source of truth, and the file is read once at startup — so the drawer
-footer reminds you:
+### Editing agents from the browser
 
-> Agents are configured in /home/me/agents.toml — restart the service to apply changes.
+Expanding a card gives you an **EDIT** button and an enable/disable toggle, and the tab header has
+**+ NEW AGENT**. Editing opens a modal with the agent's schedule, full prompt, model, timeout,
+working directory and enabled flag. Saving writes `agents.toml` and applies immediately — no
+restart.
 
-After editing `agents.toml` or any `prompt_file`, restart the server. Under systemd that is
-`systemctl --user restart eunice`, or just re-run `eunice --install`, which restarts for you.
+A few things worth knowing about how saving behaves:
+
+- **Your file is edited, not regenerated.** Comments, key order and formatting are preserved; only
+  the keys you changed are touched. A hand-written, commented `agents.toml` survives a UI save
+  intact.
+- **`agents.toml.bak`** is written next to the config before each successful save.
+- **Renaming is not supported.** Run history and past sessions are keyed to the agent's name, so the
+  name field is read-only when editing. Create a new agent to use a different name.
+- **Invalid input is rejected before anything is written**, with the same error messages the server
+  prints at startup, shown inline in the modal. Your typing is kept.
+- **If the file changed on disk** since the editor was opened — you edited it in a text editor, or
+  another browser tab saved — the save is refused rather than clobbering it. The modal offers a
+  reload and keeps your input.
+- For an agent that uses `prompt_file`, the textarea edits **that file**, not the TOML. The modal
+  shows which path it will write.
+- Deleting an agent removes it from `agents.toml` but deliberately leaves any `prompt_file` on
+  disk, since prompt files can be shared and are yours to manage.
+
+> **Anyone who can reach the port can do this.** The webapp has no authentication of its own, so
+> agent editing is available to whoever can load the page. See the `--host` warning in section 7 —
+> bind to `127.0.0.1` unless you have an authenticating proxy in front.
+
+### Changes apply without a restart
+
+The server watches `agents.toml` and every file it references via `prompt_file`, and reloads within
+a few seconds of a change — whether you edited it in the browser, in vim, or from a script.
+
+If an edit is invalid, **the running config is kept** and the daemon stays up. The error appears in
+the log and in the drawer, and the moment you fix the file it loads normally. That is the opposite
+of startup behavior, where a bad config correctly refuses to start: once agents are running, a typo
+must not take the service down.
+
+You can also force a reload without touching the file:
+
+```bash
+systemctl --user reload eunice     # or: kill -HUP <pid>
+```
 
 ---
 
@@ -546,11 +582,12 @@ curl -s http://127.0.0.1:8811/api/agents | python3 -m json.tool
 
 ### Changing the configuration
 
-Editing `agents.toml` is not enough on its own — the file is read once at startup.
+Agent definitions reload themselves; everything baked into `ExecStart` does not.
 
 | Change | What to do |
 |---|---|
-| Edited `agents.toml` | `systemctl --user restart eunice` |
+| Edited `agents.toml` or a `prompt_file` | Nothing — it reloads within a few seconds |
+| Edited an agent in the browser | Nothing — saving applies immediately |
 | Changed port, host, model, or the agents path | Re-run `eunice --install` with the new flags |
 | Rotated an API key | Re-run `eunice --install` (see below) |
 | Upgraded eunice (`eunice --update`) | `systemctl --user restart eunice` |
@@ -665,7 +702,8 @@ loader (`src/agents.rs`) and from argument parsing (`src/main.rs`):
 | Ticks are recorded as `skipped` (yellow dot) | The previous run was still in flight | Widen the interval, cut the prompt's workload, or accept it — nothing queues up |
 | A run fails with an auth error under systemd but works fine in your shell | The service does not inherit your shell environment; the key was exported after the last `--install`, or rotated since | Export the key, re-run `eunice --install`, and check that it prints `Captured N API key(s)` rather than the no-keys warning. `~/.eunice/eunice.env` lists exactly what the service will see |
 | An agent's Bash tool reports "command not found" for something on your `PATH` | Same cause: the service uses the `PATH` captured at install time | Re-run `eunice --install` from a shell with the right `PATH`, or use absolute paths in the prompt |
-| Edits to `agents.toml` or a `prompt_file` have no effect | Both are read once, at startup | `systemctl --user restart eunice`, or re-run `eunice --install` |
+| Edits to `agents.toml` or a `prompt_file` have no effect | The file is invalid, so the previous config is still running | Check the drawer or the log for the rejection message; `journalctl --user -u eunice \| grep "reload REJECTED"`. Reloads take a few seconds; `systemctl --user reload eunice` forces one |
+| A browser save is refused with "changed on disk" | The file was edited elsewhere since the editor was opened | Use the modal's reload button, then save again. Your typing is preserved |
 | A run is marked failed with `timed out after Ns` | The work exceeded `timeout_secs` | Raise `timeout_secs`, or narrow the prompt. The partial transcript is in the session |
 | A run is marked `timed out after Ns and did not stop cleanly` | It was stuck in a long tool call or API request and could not be interrupted within the 30-second grace window | Add a timeout to the command the prompt runs; the transcript for that run is gone, only the failure note remains |
 | The AGENTS tab shows "never run" after a restart | Run state is in-memory and rebuilt on restart | The runs themselves are still in SESSIONS; the tab repopulates on the next fire |

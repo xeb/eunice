@@ -26,11 +26,49 @@ web UI. A new `--install` flag installs the webapp as a systemd **user** service
 
 ## Non-Goals
 
-- Editing agents from the web UI. The TOML file is the single source of truth.
-- Hot-reload of `agents.toml` (restart the service to pick up changes; SIGHUP reload
-  is a possible future enhancement).
+- ~~Editing agents from the web UI. The TOML file is the single source of truth.~~
+  **[superseded]** — see "Hot Reload and Editing" below.
+- ~~Hot-reload of `agents.toml` (restart the service to pick up changes; SIGHUP reload
+  is a possible future enhancement).~~ **[superseded]** — same.
 - Catch-up/backfill of missed schedules while the server was down.
 - Multi-user auth, remote management, or agent-to-agent orchestration.
+
+## Hot Reload and Editing (added after the original spec)
+
+Both of the first two non-goals were reversed on request. The design that replaced them:
+
+**Reload.** A watcher fingerprints `agents.toml` plus every file it references via `prompt_file`
+and polls every 3s; `SIGHUP` (wired to systemd `ExecReload`) forces one. A change is parsed and
+validated on a blocking thread — `detect_provider` may make a blocking Ollama probe — and swapped in
+only on success.
+
+The governing rule inverts startup behavior: **at startup an invalid config aborts; once running, an
+invalid config is rejected and the previous one keeps serving.** A typo in a file being edited must
+never take down a daemon that is already working. The rejection is recorded and surfaced through
+`/api/agents` so the UI can explain why an edit did not apply, and the fingerprint of the rejected
+bytes is stored so the same failure is not re-logged every poll.
+
+Across a swap, run state is preserved for agents that still exist by name and dropped for those that
+do not; per-agent `Client`s and `ToolRegistry`s are reused unless the model or `working_dir` actually
+changed. In-flight runs are never cancelled — only future scheduling reflects the new config — and
+`finish_run` is a no-op for an agent that no longer exists, so a run outliving its own deletion
+cannot resurrect a phantom state entry. `last_tick` is not reset, so a newly added agent does not
+back-fire historical occurrences.
+
+Two early exits had to be removed for this to work: the scheduler previously returned when zero
+agents were enabled, and when no future occurrence existed. Either would have permanently wedged
+the loop against a later reload.
+
+**Editing.** The AGENTS tab gained create/edit/enable/delete. Writes go through `toml_edit` rather
+than re-serializing, so comments, key order and formatting in a hand-written file survive a save.
+The pipeline validates the *proposed* file text before writing anything, then writes atomically
+(temp file + rename) with a `.bak`. Each edit carries the fingerprint the editor was opened with;
+a mismatch is refused as a conflict rather than clobbering a concurrent edit. Renaming is not
+supported, because run state and `sessions.agent_name` are keyed by name.
+
+**Accepted risk.** Editing is deliberately ungated: no auth gate, no host restriction. The webapp
+has no authentication of its own, so anyone who can reach the port can create scheduled shell
+execution. This was an explicit product decision; the docs steer users to `--host 127.0.0.1`.
 
 ## Alternatives Considered
 

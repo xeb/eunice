@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
 
-**11,496 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
+**12,615 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -251,11 +251,20 @@ eunice --webapp --agents agents.toml
 
 Each run creates a normal session, so the full transcript — prompts, tool calls, output — is
 readable in the web UI, and you can watch a run live while it happens. The hamburger drawer gains
-an **AGENTS** tab showing each agent's schedule, next and last run, status, and recent runs. It is
-read-only: `agents.toml` is the single source of truth, and the server reloads it on restart.
+an **AGENTS** tab showing each agent's schedule, next and last run, status, and recent runs — and
+lets you create, edit, enable and delete agents directly.
+
+**Changes apply without a restart.** The server watches `agents.toml` and any `prompt_file` it
+references, and reloads a few seconds after a change, however you made it. Browser edits rewrite the
+file in place, preserving your comments and formatting.
 
 The config is validated at startup and the server refuses to start if anything is wrong, so a typo
-fails immediately rather than silently never firing.
+fails immediately rather than silently never firing. Once it is running the rule inverts: an invalid
+edit is rejected and the previous config keeps running, so a typo can never take the daemon down.
+
+Note the webapp has no authentication of its own, so anyone who can reach the port can edit agents —
+and agents run shell commands. Bind to `--host 127.0.0.1` unless it sits behind an authenticating
+proxy.
 
 **Schedules use standard 5-field Unix cron** (`minute hour day-of-month month day-of-week`), with
 day-of-week `0`/`7` = Sunday, and names like `MON-FRI` accepted. Missed schedules are not backfilled:

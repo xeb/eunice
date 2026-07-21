@@ -1,9 +1,12 @@
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 /// One `[[agent]]` table as written in agents.toml.
 #[derive(Debug, Clone, Deserialize)]
@@ -45,6 +48,8 @@ pub struct LoadedAgent {
     pub model: Option<String>,
     /// Fully resolved prompt text (inline, or the contents of prompt_file).
     pub prompt: String,
+    /// Resolved absolute path of `prompt_file`, `None` for an inline prompt.
+    pub prompt_file: Option<PathBuf>,
     pub enabled: bool,
     pub timeout_secs: u64,
     pub working_dir: Option<PathBuf>,
@@ -157,7 +162,22 @@ pub fn load_agents_file(
     let content = fs::read_to_string(path)
         .map_err(|e| anyhow!("failed to read agents file '{}': {}", path.display(), e))?;
 
-    let parsed: AgentsFile = toml::from_str(&content)
+    validate_text(&content, path, model_validator)
+}
+
+/// Validate proposed file text without touching the live config. Returns the parsed
+/// config so the caller can swap it in on success.
+///
+/// This is the one validation body; `load_agents_file` is a read plus a call to it,
+/// so a proposed edit is held to exactly the rules a startup load enforces.
+pub fn validate_text(
+    doc_text: &str,
+    source_path: &Path,
+    model_validator: &dyn Fn(&str) -> Result<()>,
+) -> Result<AgentsConfig> {
+    let path = source_path;
+
+    let parsed: AgentsFile = toml::from_str(doc_text)
         .map_err(|e| anyhow!("failed to parse '{}': {}", path.display(), e))?;
 
     let source_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -181,22 +201,24 @@ pub fn load_agents_file(
             return Err(anyhow!("duplicate agent name '{}'", spec.name));
         }
 
-        let prompt = match (&spec.prompt, &spec.prompt_file) {
-            (Some(prompt), None) => prompt.clone(),
+        let (prompt, prompt_file) = match (&spec.prompt, &spec.prompt_file) {
+            (Some(prompt), None) => (prompt.clone(), None),
             (None, Some(file)) => {
                 let resolved = if Path::new(file).is_absolute() {
                     PathBuf::from(file)
                 } else {
                     base_dir.join(file)
                 };
-                fs::read_to_string(&resolved).map_err(|e| {
+                let text = fs::read_to_string(&resolved).map_err(|e| {
                     anyhow!(
                         "agent '{}': failed to read prompt_file '{}': {}",
                         spec.name,
                         resolved.display(),
                         e
                     )
-                })?
+                })?;
+                let absolute = fs::canonicalize(&resolved).unwrap_or(resolved);
+                (text, Some(absolute))
             }
             _ => {
                 return Err(anyhow!(
@@ -276,6 +298,7 @@ pub fn load_agents_file(
             schedule,
             model: spec.model,
             prompt,
+            prompt_file,
             enabled: spec.enabled,
             timeout_secs: spec.timeout_secs,
             working_dir,
@@ -305,6 +328,230 @@ pub fn detect_provider_isolated(model: &str) -> Result<crate::models::ProviderIn
 /// via `crate::provider::detect_provider`.
 pub fn load_agents(path: &Path) -> Result<AgentsConfig> {
     load_agents_file(path, &|model| detect_provider_isolated(model).map(|_| ()))
+}
+
+/// Content fingerprint of the config: agents.toml plus every file it references
+/// via `prompt_file`. Editing a prompt file must trigger a reload just like
+/// editing agents.toml, so both feed the hash.
+pub fn fingerprint(config_path: &Path, agents: &[LoadedAgent]) -> String {
+    let mut hasher = DefaultHasher::new();
+    hash_file(&mut hasher, config_path);
+
+    // Sorted and deduped so the hash depends on the set of referenced files, not
+    // on the order agents happen to appear in.
+    let mut prompt_files: Vec<&PathBuf> = agents
+        .iter()
+        .filter_map(|agent| agent.prompt_file.as_ref())
+        .collect();
+    prompt_files.sort();
+    prompt_files.dedup();
+
+    for path in prompt_files {
+        path.hash(&mut hasher);
+        hash_file(&mut hasher, path);
+    }
+
+    format!("{:016x}", hasher.finish())
+}
+
+/// Fold a file's bytes into the hash. An unreadable file contributes a distinct
+/// marker instead of erroring, so deleting a prompt file reads as "changed".
+fn hash_file(hasher: &mut DefaultHasher, path: &Path) {
+    match fs::read(path) {
+        Ok(bytes) => {
+            1u8.hash(hasher);
+            bytes.hash(hasher);
+        }
+        Err(_) => 0u8.hash(hasher),
+    }
+}
+
+/// A single change requested against agents.toml.
+#[derive(Debug, Clone)]
+pub enum AgentMutation {
+    /// Create when `original_name` is None, otherwise update that agent in place.
+    Upsert {
+        original_name: Option<String>,
+        spec: AgentSpec,
+    },
+    Delete {
+        name: String,
+    },
+}
+
+/// Apply a mutation to agents.toml source text, returning the new text.
+/// Pure: no filesystem access. Uses toml_edit so comments, key order, blank lines
+/// and formatting outside the touched keys are preserved exactly.
+pub fn apply_mutation(doc_text: &str, mutation: &AgentMutation) -> Result<String> {
+    let mut doc: DocumentMut = doc_text
+        .parse()
+        .map_err(|e| anyhow!("failed to parse agents.toml: {}", e))?;
+
+    match mutation {
+        AgentMutation::Upsert {
+            original_name: Some(original_name),
+            spec,
+        } => {
+            let index = find_agent(&doc, original_name)
+                .ok_or_else(|| anyhow!("no agent named '{}' in the config", original_name))?;
+            if &spec.name != original_name {
+                return Err(anyhow!(
+                    "renaming an agent is not supported (run history is keyed by name)"
+                ));
+            }
+            update_agent_table(agent_tables_mut(&mut doc)?.get_mut(index).unwrap(), spec);
+        }
+        AgentMutation::Upsert {
+            original_name: None,
+            spec,
+        } => {
+            if find_agent(&doc, &spec.name).is_some() {
+                return Err(anyhow!("an agent named '{}' already exists", spec.name));
+            }
+            let separated = !doc_text.trim().is_empty();
+            let mut table = Table::new();
+            fill_new_agent_table(&mut table, spec);
+            if separated {
+                table.decor_mut().set_prefix("\n");
+            }
+            agent_tables_mut(&mut doc)?.push(table);
+        }
+        AgentMutation::Delete { name } => {
+            let index = find_agent(&doc, name)
+                .ok_or_else(|| anyhow!("no agent named '{}' in the config", name))?;
+
+            // toml_edit hangs the file's leading comments off the first table, so a
+            // plain remove would delete the header along with the agent.
+            let carried = table_prefix(&doc, index)
+                .map(|prefix| detachable_prefix(prefix).to_string())
+                .unwrap_or_default();
+
+            let mut orphaned = String::new();
+            {
+                let tables = agent_tables_mut(&mut doc)?;
+                tables.remove(index);
+                match tables.get_mut(index) {
+                    Some(next) if !carried.is_empty() => {
+                        let existing = next
+                            .decor()
+                            .prefix()
+                            .and_then(|p| p.as_str())
+                            .unwrap_or("")
+                            .trim_start_matches('\n')
+                            .to_string();
+                        next.decor_mut().set_prefix(format!("{}{}", carried, existing));
+                    }
+                    Some(_) => {}
+                    None => orphaned = carried,
+                }
+            }
+
+            if !orphaned.is_empty() {
+                let trailing = doc.trailing().as_str().unwrap_or("").to_string();
+                doc.set_trailing(format!("{}{}", trailing, orphaned));
+            }
+        }
+    }
+
+    Ok(doc.to_string())
+}
+
+/// The `[[agent]]` array-of-tables, created empty when the document has none.
+fn agent_tables_mut(doc: &mut DocumentMut) -> Result<&mut ArrayOfTables> {
+    if doc.get("agent").is_none() {
+        doc.insert("agent", Item::ArrayOfTables(ArrayOfTables::new()));
+    }
+    doc.get_mut("agent")
+        .and_then(Item::as_array_of_tables_mut)
+        .ok_or_else(|| anyhow!("`agent` in agents.toml is not an array of [[agent]] tables"))
+}
+
+fn table_prefix<'a>(doc: &'a DocumentMut, index: usize) -> Option<&'a str> {
+    doc.get("agent")
+        .and_then(Item::as_array_of_tables)?
+        .get(index)?
+        .decor()
+        .prefix()
+        .and_then(|prefix| prefix.as_str())
+}
+
+/// The part of a table's leading decor that belongs to the file rather than to the
+/// table itself: everything up to and including the last blank line. A comment block
+/// sitting directly on top of `[[agent]]` describes that agent and goes with it.
+fn detachable_prefix(prefix: &str) -> &str {
+    match prefix.rfind("\n\n") {
+        Some(at) => &prefix[..at + 2],
+        None => "",
+    }
+}
+
+fn find_agent(doc: &DocumentMut, name: &str) -> Option<usize> {
+    doc.get("agent")
+        .and_then(Item::as_array_of_tables)?
+        .iter()
+        .position(|table| table.get("name").and_then(Item::as_str) == Some(name))
+}
+
+/// Overwrite the keys a spec carries, removing those it leaves unset. Keys that
+/// already exist keep their position; new ones land at the end of the table.
+fn update_agent_table(table: &mut Table, spec: &AgentSpec) {
+    assign(table, "schedule", Value::from(spec.schedule.as_str()));
+    set_or_remove(table, "model", spec.model.as_deref());
+
+    // The prompt of a prompt_file agent lives in that file; writing a `prompt` key
+    // here would break the exactly-one-of rule the loader enforces.
+    if !table.contains_key("prompt_file") {
+        set_or_remove(table, "prompt", spec.prompt.as_deref());
+    }
+
+    assign(table, "enabled", Value::from(spec.enabled));
+    assign(table, "timeout_secs", Value::from(spec.timeout_secs as i64));
+    set_or_remove(table, "working_dir", spec.working_dir.as_deref());
+}
+
+fn set_or_remove(table: &mut Table, key: &str, new_value: Option<&str>) {
+    match new_value {
+        Some(text) => assign(table, key, Value::from(text)),
+        None => {
+            table.remove(key);
+        }
+    }
+}
+
+/// Assign a value, carrying over the decor of the value being replaced so the
+/// spacing and any trailing inline comment on that line survive the edit.
+fn assign(table: &mut Table, key: &str, new_value: Value) {
+    let mut new_value = new_value;
+    if let Some(existing) = table.get(key).and_then(Item::as_value) {
+        *new_value.decor_mut() = existing.decor().clone();
+    }
+    table[key] = Item::Value(new_value);
+}
+
+/// Write a fresh `[[agent]]` table, omitting optional keys left at their default.
+fn fill_new_agent_table(table: &mut Table, spec: &AgentSpec) {
+    table["name"] = value(spec.name.as_str());
+    table["schedule"] = value(spec.schedule.as_str());
+    if let Some(model) = &spec.model {
+        table["model"] = value(model.as_str());
+    }
+    match &spec.prompt_file {
+        Some(prompt_file) => table["prompt_file"] = value(prompt_file.as_str()),
+        None => {
+            if let Some(prompt) = &spec.prompt {
+                table["prompt"] = value(prompt.as_str());
+            }
+        }
+    }
+    if !spec.enabled {
+        table["enabled"] = value(false);
+    }
+    if spec.timeout_secs != default_timeout_secs() {
+        table["timeout_secs"] = value(spec.timeout_secs as i64);
+    }
+    if let Some(working_dir) = &spec.working_dir {
+        table["working_dir"] = value(working_dir.as_str());
+    }
 }
 
 /// First `max_chars` of the prompt, with trailing whitespace trimmed and an
@@ -797,5 +1044,513 @@ prompt = "two"
     #[test]
     fn test_prompt_preview_trims_trailing_space_before_ellipsis() {
         assert_eq!(prompt_preview("summarize the repo now", 10), "summarize…");
+    }
+
+    fn spec(name: &str, schedule: &str, prompt: &str) -> AgentSpec {
+        AgentSpec {
+            name: name.to_string(),
+            schedule: schedule.to_string(),
+            model: None,
+            prompt: Some(prompt.to_string()),
+            prompt_file: None,
+            enabled: true,
+            timeout_secs: 600,
+            working_dir: None,
+        }
+    }
+
+    fn upsert(original_name: Option<&str>, spec: AgentSpec) -> AgentMutation {
+        AgentMutation::Upsert {
+            original_name: original_name.map(str::to_string),
+            spec,
+        }
+    }
+
+    // A hand-written file: comments above, inside and between tables, a trailing
+    // inline comment, blank lines, and keys in a non-canonical order.
+    const HAND_WRITTEN: &str = r#"# Scheduled agents for this box.
+# Edit by hand or from the web UI.
+
+[[agent]]
+# fires before standup
+timeout_secs = 30
+name = "daily-digest"
+prompt = "Summarize yesterday" # keep this short
+schedule = "0 9 * * *"
+
+# the noisy one
+[[agent]]
+name = "repo-watch"
+schedule = "*/30 * * * *"
+prompt = "Watch the repo"
+"#;
+
+    #[test]
+    fn test_apply_mutation_round_trip_preserves_comments_and_key_order() {
+        let updated = apply_mutation(
+            HAND_WRITTEN,
+            &upsert(
+                Some("daily-digest"),
+                AgentSpec {
+                    timeout_secs: 30,
+                    ..spec("daily-digest", "0 10 * * *", "Summarize yesterday")
+                },
+            ),
+        )
+        .unwrap();
+
+        for comment in [
+            "# Scheduled agents for this box.",
+            "# Edit by hand or from the web UI.",
+            "# fires before standup",
+            "# keep this short",
+            "# the noisy one",
+        ] {
+            assert!(updated.contains(comment), "lost {:?}:\n{}", comment, updated);
+        }
+
+        assert!(updated.contains(r#"schedule = "0 10 * * *""#), "{}", updated);
+        assert!(!updated.contains(r#"schedule = "0 9 * * *""#), "{}", updated);
+
+        // The unusual order (timeout_secs before name) is untouched.
+        let timeout_at = updated.find("timeout_secs").unwrap();
+        let name_at = updated.find(r#"name = "daily-digest""#).unwrap();
+        assert!(timeout_at < name_at, "{}", updated);
+
+        // The second table is byte-identical.
+        assert!(
+            updated.contains("# the noisy one\n[[agent]]\nname = \"repo-watch\"\nschedule = \"*/30 * * * *\"\nprompt = \"Watch the repo\"\n"),
+            "{}",
+            updated
+        );
+
+        let dir = TempDir::new().unwrap();
+        let path = write_config(&dir, &updated);
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+        assert_eq!(config.agents[0].schedule_expr, "0 10 * * *");
+        assert_eq!(config.agents[0].timeout_secs, 30);
+    }
+
+    #[test]
+    fn test_apply_mutation_clearing_optional_field_removes_the_key() {
+        let original = "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\nmodel = \"sonnet\"\nworking_dir = \"/tmp\"\n";
+
+        let updated = apply_mutation(
+            original,
+            &upsert(Some("a"), spec("a", "0 9 * * *", "hi")),
+        )
+        .unwrap();
+
+        assert!(!updated.contains("model"), "{}", updated);
+        assert!(!updated.contains("working_dir"), "{}", updated);
+        assert!(updated.contains(r#"prompt = "hi""#), "{}", updated);
+    }
+
+    #[test]
+    fn test_apply_mutation_sets_optional_field_that_was_absent() {
+        let original = "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n";
+
+        let updated = apply_mutation(
+            original,
+            &upsert(
+                Some("a"),
+                AgentSpec {
+                    model: Some("sonnet".to_string()),
+                    ..spec("a", "0 9 * * *", "hi")
+                },
+            ),
+        )
+        .unwrap();
+
+        assert!(updated.contains(r#"model = "sonnet""#), "{}", updated);
+    }
+
+    #[test]
+    fn test_apply_mutation_never_adds_prompt_to_a_prompt_file_agent() {
+        let original = "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt_file = \"prompts/a.md\"\n";
+
+        let updated = apply_mutation(
+            original,
+            &upsert(
+                Some("a"),
+                spec("a", "0 10 * * *", "this text belongs in the prompt file"),
+            ),
+        )
+        .unwrap();
+
+        assert!(!updated.contains("prompt ="), "{}", updated);
+        assert!(!updated.contains("this text belongs"), "{}", updated);
+        assert!(
+            updated.contains(r#"prompt_file = "prompts/a.md""#),
+            "{}",
+            updated
+        );
+        assert!(updated.contains(r#"schedule = "0 10 * * *""#), "{}", updated);
+    }
+
+    #[test]
+    fn test_apply_mutation_create_appends_without_disturbing_existing() {
+        let updated = apply_mutation(
+            HAND_WRITTEN,
+            &upsert(None, spec("new-agent", "0 6 * * 1", "Do the new thing")),
+        )
+        .unwrap();
+
+        assert!(updated.starts_with(HAND_WRITTEN), "{}", updated);
+        assert!(updated.contains(r#"name = "new-agent""#), "{}", updated);
+        assert!(updated.contains(r#"prompt = "Do the new thing""#), "{}", updated);
+
+        // Optional keys left at their defaults are not written out.
+        let appended = &updated[HAND_WRITTEN.len()..];
+        assert!(!appended.contains("enabled"), "{}", appended);
+        assert!(!appended.contains("timeout_secs"), "{}", appended);
+        assert!(!appended.contains("model"), "{}", appended);
+
+        let dir = TempDir::new().unwrap();
+        let path = write_config(&dir, &updated);
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+        assert_eq!(config.agents.len(), 3);
+        assert_eq!(config.agents[2].name, "new-agent");
+        assert!(config.agents[2].enabled);
+        assert_eq!(config.agents[2].timeout_secs, 600);
+    }
+
+    #[test]
+    fn test_apply_mutation_create_writes_non_default_optionals_in_order() {
+        let updated = apply_mutation(
+            "",
+            &upsert(
+                None,
+                AgentSpec {
+                    model: Some("sonnet".to_string()),
+                    enabled: false,
+                    timeout_secs: 120,
+                    working_dir: Some("/tmp".to_string()),
+                    ..spec("fresh", "0 9 * * *", "hi")
+                },
+            ),
+        )
+        .unwrap();
+
+        let order: Vec<&str> = [
+            "name",
+            "schedule",
+            "model",
+            "prompt",
+            "enabled",
+            "timeout_secs",
+            "working_dir",
+        ]
+        .into_iter()
+        .collect();
+
+        let mut last = 0;
+        for key in order {
+            let at = updated
+                .find(&format!("{} =", key))
+                .unwrap_or_else(|| panic!("missing {} in\n{}", key, updated));
+            assert!(at >= last, "{} out of order in\n{}", key, updated);
+            last = at;
+        }
+
+        assert!(updated.starts_with("[[agent]]"), "{:?}", updated);
+    }
+
+    #[test]
+    fn test_apply_mutation_create_uses_prompt_file_when_given() {
+        let updated = apply_mutation(
+            "",
+            &upsert(
+                None,
+                AgentSpec {
+                    prompt: None,
+                    prompt_file: Some("prompts/a.md".to_string()),
+                    ..spec("a", "0 9 * * *", "unused")
+                },
+            ),
+        )
+        .unwrap();
+
+        assert!(updated.contains(r#"prompt_file = "prompts/a.md""#), "{}", updated);
+        assert!(!updated.contains("prompt ="), "{}", updated);
+    }
+
+    #[test]
+    fn test_apply_mutation_create_rejects_duplicate_name() {
+        let err = apply_mutation(
+            HAND_WRITTEN,
+            &upsert(None, spec("repo-watch", "0 9 * * *", "hi")),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(err, "an agent named 'repo-watch' already exists");
+    }
+
+    #[test]
+    fn test_apply_mutation_update_rejects_missing_agent() {
+        let err = apply_mutation(
+            HAND_WRITTEN,
+            &upsert(Some("ghost"), spec("ghost", "0 9 * * *", "hi")),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(err, "no agent named 'ghost' in the config");
+    }
+
+    #[test]
+    fn test_apply_mutation_rejects_rename() {
+        let err = apply_mutation(
+            HAND_WRITTEN,
+            &upsert(Some("repo-watch"), spec("repo-watcher", "0 9 * * *", "hi")),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            err,
+            "renaming an agent is not supported (run history is keyed by name)"
+        );
+    }
+
+    #[test]
+    fn test_apply_mutation_delete_removes_only_the_target() {
+        let updated = apply_mutation(
+            HAND_WRITTEN,
+            &AgentMutation::Delete {
+                name: "daily-digest".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(!updated.contains("daily-digest"), "{}", updated);
+        assert!(updated.contains(r#"name = "repo-watch""#), "{}", updated);
+        assert!(updated.contains("# the noisy one"), "{}", updated);
+        assert!(updated.contains("# Scheduled agents for this box."), "{}", updated);
+
+        let dir = TempDir::new().unwrap();
+        let path = write_config(&dir, &updated);
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+        assert_eq!(config.agents.len(), 1);
+        assert_eq!(config.agents[0].name, "repo-watch");
+    }
+
+    #[test]
+    fn test_apply_mutation_delete_of_the_only_agent_keeps_the_file_header() {
+        let original = "# Scheduled agents for this box.\n\n[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n";
+
+        let updated = apply_mutation(
+            original,
+            &AgentMutation::Delete {
+                name: "a".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert!(
+            updated.contains("# Scheduled agents for this box."),
+            "{:?}",
+            updated
+        );
+        assert!(!updated.contains("[[agent]]"), "{:?}", updated);
+
+        let dir = TempDir::new().unwrap();
+        let path = write_config(&dir, &updated);
+        assert!(load_agents_file(&path, &allow_all_models)
+            .unwrap()
+            .agents
+            .is_empty());
+    }
+
+
+    #[test]
+    fn test_detachable_prefix_keeps_the_agents_own_comment_with_it() {
+        assert_eq!(detachable_prefix("# header\n\n# about this one\n"), "# header\n\n");
+        assert_eq!(detachable_prefix("\n# about this one\n"), "");
+        assert_eq!(detachable_prefix(""), "");
+        assert_eq!(detachable_prefix("# header\n\n"), "# header\n\n");
+    }
+
+    #[test]
+    fn test_apply_mutation_delete_rejects_missing_agent() {
+        let err = apply_mutation(
+            HAND_WRITTEN,
+            &AgentMutation::Delete {
+                name: "ghost".to_string(),
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(err, "no agent named 'ghost' in the config");
+    }
+
+    #[test]
+    fn test_apply_mutation_rejects_unparseable_text() {
+        let err = apply_mutation("[[agent]\n", &AgentMutation::Delete { name: "a".into() })
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("failed to parse agents.toml"), "{}", err);
+    }
+
+    #[test]
+    fn test_validate_text_matches_load_agents_file() {
+        let dir = TempDir::new().unwrap();
+        let body = "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n";
+        let path = write_config(&dir, body);
+
+        let loaded = load_agents_file(&path, &allow_all_models).unwrap();
+        let validated = validate_text(body, &path, &allow_all_models).unwrap();
+
+        assert_eq!(validated.source_path, loaded.source_path);
+        assert_eq!(validated.agents.len(), 1);
+        assert_eq!(validated.agents[0].name, "a");
+    }
+
+    #[test]
+    fn test_validate_text_applies_the_same_rules() {
+        let dir = TempDir::new().unwrap();
+        let path = write_config(&dir, "# placeholder\n");
+
+        let err = validate_text(
+            "[[agent]]\nname = \"Bad\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n",
+            &path,
+            &allow_all_models,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("kebab-case"), "{}", err);
+
+        let err = validate_text(
+            "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n\n[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n",
+            &path,
+            &allow_all_models,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("duplicate agent name 'a'"), "{}", err);
+
+        let err = validate_text(
+            "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\nmodel = \"bogus\"\n",
+            &path,
+            &reject_all_models,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("unknown model 'bogus'"), "{}", err);
+    }
+
+    #[test]
+    fn test_validate_text_does_not_read_the_file_on_disk() {
+        let dir = TempDir::new().unwrap();
+        let path = write_config(&dir, "[[agent]]\nname = \"ondisk\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n");
+
+        let validated = validate_text(
+            "[[agent]]\nname = \"proposed\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n",
+            &path,
+            &allow_all_models,
+        )
+        .unwrap();
+
+        assert_eq!(validated.agents[0].name, "proposed");
+    }
+
+    #[test]
+    fn test_prompt_file_path_is_retained_and_absolute() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("prompts")).unwrap();
+        fs::write(dir.path().join("prompts/a.md"), "Check the repo").unwrap();
+
+        let path = write_config(
+            &dir,
+            "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt_file = \"prompts/a.md\"\n\n[[agent]]\nname = \"b\"\nschedule = \"0 9 * * *\"\nprompt = \"inline\"\n",
+        );
+
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+        let prompt_file = config.agents[0].prompt_file.as_ref().unwrap();
+        assert!(prompt_file.is_absolute(), "{}", prompt_file.display());
+        assert_eq!(
+            prompt_file,
+            &fs::canonicalize(dir.path().join("prompts/a.md")).unwrap()
+        );
+        assert!(config.agents[1].prompt_file.is_none());
+    }
+
+    #[test]
+    fn test_fingerprint_is_stable_across_repeated_calls() {
+        let dir = TempDir::new().unwrap();
+        let path = write_config(
+            &dir,
+            "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n",
+        );
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+
+        let first = fingerprint(&path, &config.agents);
+        assert_eq!(first, fingerprint(&path, &config.agents));
+        assert_eq!(first, fingerprint(&path, &config.agents));
+    }
+
+    #[test]
+    fn test_fingerprint_changes_when_agents_toml_changes() {
+        let dir = TempDir::new().unwrap();
+        let path = write_config(
+            &dir,
+            "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt = \"hi\"\n",
+        );
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+        let before = fingerprint(&path, &config.agents);
+
+        fs::write(
+            &path,
+            "[[agent]]\nname = \"a\"\nschedule = \"0 10 * * *\"\nprompt = \"hi\"\n",
+        )
+        .unwrap();
+
+        assert_ne!(before, fingerprint(&path, &config.agents));
+    }
+
+    #[test]
+    fn test_fingerprint_changes_when_a_prompt_file_changes_or_is_deleted() {
+        let dir = TempDir::new().unwrap();
+        let prompt_path = dir.path().join("a.md");
+        fs::write(&prompt_path, "original prompt").unwrap();
+        let path = write_config(
+            &dir,
+            "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt_file = \"a.md\"\n",
+        );
+
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+        let before = fingerprint(&path, &config.agents);
+
+        fs::write(&prompt_path, "edited prompt").unwrap();
+        let after_edit = fingerprint(&path, &config.agents);
+        assert_ne!(before, after_edit);
+
+        fs::remove_file(&prompt_path).unwrap();
+        let after_delete = fingerprint(&path, &config.agents);
+        assert_ne!(after_edit, after_delete);
+        assert_ne!(before, after_delete);
+    }
+
+    #[test]
+    fn test_fingerprint_is_order_independent() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a.md"), "prompt a").unwrap();
+        fs::write(dir.path().join("b.md"), "prompt b").unwrap();
+        let path = write_config(
+            &dir,
+            "[[agent]]\nname = \"a\"\nschedule = \"0 9 * * *\"\nprompt_file = \"a.md\"\n\n[[agent]]\nname = \"b\"\nschedule = \"0 9 * * *\"\nprompt_file = \"b.md\"\n",
+        );
+
+        let config = load_agents_file(&path, &allow_all_models).unwrap();
+        let forward = fingerprint(&path, &config.agents);
+
+        let mut reversed = config.agents.clone();
+        reversed.reverse();
+        assert_eq!(forward, fingerprint(&path, &reversed));
+    }
+
+    #[test]
+    fn test_fingerprint_of_a_missing_config_does_not_panic() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("gone.toml");
+        assert!(!fingerprint(&missing, &[]).is_empty());
     }
 }

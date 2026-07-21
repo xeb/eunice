@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2021"
 description = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support"
 license = "MIT"
@@ -47,6 +47,9 @@ chrono = "0.4"
 # Scheduled agents: agents.toml parsing + cron expression evaluation
 toml = "0.8"
 cron = "0.12"
+# Rewriting agents.toml in place from the web UI without losing the user's
+# comments, key order, or formatting.
+toml_edit = "0.22"
 
 # UUID for request IDs
 uuid = { version = "1", features = ["v4"] }

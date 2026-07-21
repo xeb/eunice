@@ -103,6 +103,10 @@ pub async fn run_server(
         .route("/api/session/clear", post(handlers::clear_session))
         .route("/api/session/events", post(handlers::session_events))
         .route("/api/agents", get(handlers::agents))
+        .route("/api/agents/get", post(handlers::get_agent))
+        .route("/api/agents/save", post(handlers::save_agent))
+        .route("/api/agents/delete", post(handlers::delete_agent))
+        .route("/api/agents/reload", post(handlers::reload_agents))
         .with_state(state);
 
     let addr = format!("{}:{}", webapp_config.host, webapp_config.port);

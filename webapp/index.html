@@ -488,6 +488,7 @@
             cursor: pointer;
             font-family: inherit;
             font-weight: 600;
+            white-space: nowrap;
         }
 
         .btn-new-session:hover {
@@ -770,6 +771,38 @@
             word-break: break-all;
         }
 
+        /* Overrides .agents-note's break-all, which would split the words of a
+           validation message mid-character. */
+        .agents-warning {
+            color: var(--neon-coral);
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-top: 6px;
+        }
+
+        .agent-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .btn-agent {
+            padding: 4px 10px;
+            font-family: inherit;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            background: var(--bg-card);
+            border: 1px solid var(--border-strong);
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .btn-agent:hover {
+            background: var(--text);
+            color: var(--bg);
+        }
+
         /* Declared after every rule it overrides so equal specificity still wins. */
         .hidden {
             display: none;
@@ -891,6 +924,152 @@
             border: 1px solid var(--border);
             padding: 12px;
             overflow-x: auto;
+        }
+
+        /* Agent editor form */
+
+        /* The session drawer is at z-index 1001 and is still open behind the editor,
+           so this overlay has to outrank it. */
+        #agent-modal {
+            z-index: 1100;
+        }
+
+        .form-field {
+            margin-bottom: 14px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 9px;
+            letter-spacing: 0.2em;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .form-input,
+        .form-textarea {
+            width: 100%;
+            font-family: inherit;
+            font-size: 13px;
+            padding: 8px 10px;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-input);
+            color: var(--text);
+        }
+
+        .form-input:focus,
+        .form-textarea:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px var(--neon-cyan);
+        }
+
+        .form-input[readonly] {
+            border-color: var(--border);
+            color: var(--text-muted);
+        }
+
+        .form-textarea {
+            min-height: 220px;
+            resize: vertical;
+            line-height: 1.5;
+        }
+
+        .form-hint {
+            font-size: 10px;
+            line-height: 1.5;
+            color: var(--text-muted);
+            margin-top: 4px;
+            word-break: break-word;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .form-row .form-field {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .form-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .form-error {
+            border-left: 3px solid var(--neon-coral);
+            background: var(--bg-input);
+            color: var(--neon-coral);
+            font-size: 11px;
+            line-height: 1.5;
+            padding: 8px 10px;
+            margin-bottom: 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .form-error.notice {
+            border-left-color: var(--neon-yellow);
+            color: var(--text);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            border-top: 1px solid var(--border);
+            padding-top: 14px;
+        }
+
+        .modal-actions-spacer {
+            flex: 1;
+        }
+
+        .btn-form {
+            padding: 8px 14px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid var(--border-strong);
+            background: var(--bg);
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .btn-form:hover {
+            background: var(--text);
+            color: var(--bg);
+        }
+
+        .btn-form:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn-form-primary {
+            background: var(--text);
+            color: var(--bg);
+        }
+
+        .btn-form-primary:hover {
+            background: #333;
+            color: var(--bg);
+        }
+
+        .btn-form-danger {
+            border-color: var(--neon-coral);
+            color: var(--neon-coral);
+        }
+
+        .btn-form-danger:hover,
+        .btn-form-danger.armed {
+            background: var(--neon-coral);
+            color: var(--bg);
         }
 
         /* Responsive */
@@ -1034,12 +1213,40 @@
             }
 
             .modal {
-                padding: 10px;
+                width: 94%;
+                max-height: 90vh;
+                padding: 14px;
             }
 
             .modal-content {
                 padding: 16px;
                 max-height: 85vh;
+            }
+
+            .form-input,
+            .form-textarea {
+                font-size: 16px; /* Prevents iOS zoom on focus */
+            }
+
+            .form-textarea {
+                min-height: 150px;
+            }
+
+            .form-row {
+                display: block;
+            }
+
+            .modal-actions {
+                flex-wrap: wrap;
+            }
+
+            .modal-actions-spacer {
+                display: none;
+            }
+
+            .btn-form {
+                flex: 1;
+                padding: 10px 8px;
             }
 
             .modal-title {
@@ -1186,6 +1393,7 @@
                 <button class="drawer-tab hidden" id="tab-agents">AGENTS</button>
             </div>
             <button class="btn-new-session" id="drawer-new-btn">+ NEW</button>
+            <button class="btn-new-session hidden" id="drawer-new-agent-btn">+ NEW AGENT</button>
         </div>
         <div class="session-list" id="session-list">
             <div class="no-sessions">No sessions yet</div>
@@ -1197,6 +1405,62 @@
         <div class="drawer-footer agents-note hidden" id="agents-footer"></div>
     </div>
     <div class="drawer-overlay" id="drawer-overlay"></div>
+
+    <!-- Agent editor -->
+    <div class="modal-overlay" id="agent-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title" id="agent-modal-title">EDIT AGENT</div>
+                <button class="modal-close" id="agent-modal-close" title="Close">&times;</button>
+            </div>
+            <div class="form-field">
+                <label class="form-label" for="agent-form-name">NAME</label>
+                <input class="form-input" id="agent-form-name" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+                <div class="form-hint" id="agent-form-name-hint"></div>
+            </div>
+            <div class="form-field">
+                <label class="form-label" for="agent-form-schedule">SCHEDULE</label>
+                <input class="form-input" id="agent-form-schedule" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="0 9 * * *">
+                <div class="form-hint">5-field cron in the server's local time: minute hour day-of-month month day-of-week. 0 9 * * * runs at 09:00 daily.</div>
+            </div>
+            <div class="form-field">
+                <label class="form-label" for="agent-form-prompt" id="agent-form-prompt-label">PROMPT</label>
+                <textarea class="form-textarea" id="agent-form-prompt" spellcheck="false"></textarea>
+                <div class="form-hint" id="agent-form-prompt-hint"></div>
+            </div>
+            <div class="form-field">
+                <label class="form-label" for="agent-form-model">MODEL</label>
+                <input class="form-input" id="agent-form-model" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+                <div class="form-hint" id="agent-form-model-hint"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-field">
+                    <label class="form-label" for="agent-form-timeout">TIMEOUT (SECONDS)</label>
+                    <input class="form-input" id="agent-form-timeout" type="number" min="1" step="1">
+                    <div class="form-hint">A run that exceeds this is aborted and recorded as failed.</div>
+                </div>
+                <div class="form-field">
+                    <label class="form-label" for="agent-form-working-dir">WORKING DIR</label>
+                    <input class="form-input" id="agent-form-working-dir" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+                    <div class="form-hint">Blank uses the server's working directory.</div>
+                </div>
+            </div>
+            <div class="form-field">
+                <label class="form-check" for="agent-form-enabled">
+                    <input type="checkbox" id="agent-form-enabled">
+                    <span>ENABLED — a disabled agent stays listed but is never scheduled.</span>
+                </label>
+            </div>
+            <div class="form-error hidden" id="agent-form-error"></div>
+            <div class="modal-actions">
+                <button class="btn-form btn-form-danger hidden" id="agent-form-delete">DELETE</button>
+                <div class="modal-actions-spacer"></div>
+                <button class="btn-form hidden" id="agent-form-reload">RELOAD</button>
+                <button class="btn-form" id="agent-form-cancel">CANCEL</button>
+                <button class="btn-form btn-form-primary" id="agent-form-save">SAVE</button>
+            </div>
+        </div>
+    </div>
 
     <div class="container">
         <header>
@@ -1880,6 +2144,7 @@
         const drawerOverlay = document.getElementById('drawer-overlay');
         const sessionList = document.getElementById('session-list');
         const drawerNewBtn = document.getElementById('drawer-new-btn');
+        const drawerNewAgentBtn = document.getElementById('drawer-new-agent-btn');
         const persistenceStatus = document.getElementById('persistence-status');
         const drawerTabs = document.getElementById('drawer-tabs');
         const sessionsTabBtn = document.getElementById('tab-sessions');
@@ -2067,11 +2332,20 @@
         let activeDrawerTab = 'sessions';
         let agentsFile = null;
         let agentsRefreshTimer = null;
+        let agentsEditable = false;
+        let agentsServerModel = '';
+        let agentsReloadError = null;
+        // Set when EDIT or the enable/disable toggle fails before the editor can open;
+        // such a failure has nowhere else to report itself, so it goes in the footer.
+        let agentsActionError = null;
+        // Fingerprint the list was loaded with; every edit is submitted against it so a
+        // change made on disk in the meantime is rejected instead of overwritten.
+        let agentsFingerprint = '';
         const expandedAgents = new Set();
 
         function startAgentsRefresh() {
             stopAgentsRefresh();
-            agentsRefreshTimer = setInterval(loadAgents, AGENTS_REFRESH_MS);
+            agentsRefreshTimer = setInterval(() => loadAgents(), AGENTS_REFRESH_MS);
         }
 
         function stopAgentsRefresh() {
@@ -2094,6 +2368,7 @@
             persistenceStatus.classList.toggle('hidden', onAgents);
             agentsFooter.classList.toggle('hidden', !onAgents);
             drawerNewBtn.classList.toggle('hidden', onAgents);
+            drawerNewAgentBtn.classList.toggle('hidden', !(onAgents && agentsEditable));
 
             if (onAgents) {
                 loadAgents();
@@ -2160,8 +2435,19 @@
             const lastRun = relativePast(agent.last_run_at);
 
             const details = agent.running ? ['<div class="agent-field">running now</div>'] : [];
+            if (agentsEditable) {
+                details.push(`
+                    <div class="agent-actions">
+                        <button class="btn-agent" data-action="edit">EDIT</button>
+                        <button class="btn-agent" data-action="toggle" data-enable="${agent.enabled ? 'false' : 'true'}">${agent.enabled ? 'DISABLE' : 'ENABLE'}</button>
+                    </div>
+                `);
+            }
             details.push('<div class="agent-detail-label">PROMPT</div>');
             details.push(`<div class="agent-prompt">${escapeHtml(agent.prompt_preview || '')}</div>`);
+            if (agent.prompt_file) {
+                details.push(`<div class="agent-field">prompt_file: ${escapeHtml(agent.prompt_file)}</div>`);
+            }
             if (agent.working_dir) {
                 details.push(`<div class="agent-field">working_dir: ${escapeHtml(agent.working_dir)}</div>`);
             }
@@ -2241,9 +2527,42 @@
                     selectSession(el.dataset.id, el.dataset.name);
                 });
             });
+
+            agentList.querySelectorAll('.btn-agent').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const name = el.closest('.agent-card').dataset.name;
+                    if (el.dataset.action === 'edit') {
+                        editAgent(name);
+                    } else {
+                        toggleAgentEnabled(name, el.dataset.enable === 'true');
+                    }
+                });
+            });
         }
 
-        async function loadAgents() {
+        function renderAgentsFooter() {
+            let html = `<div>Agents are configured in ${escapeHtml(agentsFile || '')} — saved edits and changes made to the file directly apply without a restart.</div>`;
+            if (agentsReloadError) {
+                html += `<div class="agents-warning">agents.toml on disk is invalid and was not loaded; the previously loaded config is still running.\n${escapeHtml(agentsReloadError)}</div>`;
+            }
+            if (agentsActionError) {
+                html += `<div class="agents-warning">${escapeHtml(agentsActionError)}</div>`;
+            }
+            agentsFooter.innerHTML = html;
+        }
+
+        function setAgentsActionError(message) {
+            agentsActionError = message || null;
+            renderAgentsFooter();
+        }
+
+        // `force` is for the editor's own refreshes: a background refresh is skipped while
+        // the editor is open so it cannot re-render the list underneath unsaved input or
+        // replace the fingerprint the open form was loaded with.
+        async function loadAgents(force = false) {
+            if (agentEditorOpen && !force) return;
+
             try {
                 const res = await fetch('/api/agents');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -2253,7 +2572,11 @@
                 // before this tab existed, so hide it rather than showing it empty.
                 if (!data.agents_file) {
                     agentsFile = null;
+                    agentsEditable = false;
+                    agentsFingerprint = '';
+                    agentsReloadError = null;
                     agentsTabBtn.classList.add('hidden');
+                    drawerNewAgentBtn.classList.add('hidden');
                     drawerTabs.classList.remove('tabbed');
                     if (activeDrawerTab === 'agents') {
                         switchDrawerTab('sessions');
@@ -2262,10 +2585,15 @@
                 }
 
                 agentsFile = data.agents_file;
+                agentsEditable = !!data.editable;
+                agentsFingerprint = data.fingerprint || '';
+                agentsReloadError = data.reload_error || null;
+                agentsServerModel = data.server_model || '';
                 agentsTabBtn.classList.remove('hidden');
                 drawerTabs.classList.add('tabbed');
-                agentsFooter.textContent = `Agents are configured in ${agentsFile} — restart the service to apply changes.`;
-                renderAgents(Array.isArray(data.agents) ? data.agents : [], data.server_model || '');
+                drawerNewAgentBtn.classList.toggle('hidden', !(agentsEditable && activeDrawerTab === 'agents'));
+                renderAgentsFooter();
+                renderAgents(Array.isArray(data.agents) ? data.agents : [], agentsServerModel);
             } catch (err) {
                 console.error('[webapp] Failed to load agents:', err);
                 if (activeDrawerTab === 'agents') {
@@ -2273,6 +2601,301 @@
                 }
             }
         }
+
+        // ---- Agent editor ----
+
+        const agentModal = document.getElementById('agent-modal');
+        const agentModalTitle = document.getElementById('agent-modal-title');
+        const agentFormName = document.getElementById('agent-form-name');
+        const agentFormNameHint = document.getElementById('agent-form-name-hint');
+        const agentFormSchedule = document.getElementById('agent-form-schedule');
+        const agentFormPromptLabel = document.getElementById('agent-form-prompt-label');
+        const agentFormPrompt = document.getElementById('agent-form-prompt');
+        const agentFormPromptHint = document.getElementById('agent-form-prompt-hint');
+        const agentFormModel = document.getElementById('agent-form-model');
+        const agentFormModelHint = document.getElementById('agent-form-model-hint');
+        const agentFormTimeout = document.getElementById('agent-form-timeout');
+        const agentFormWorkingDir = document.getElementById('agent-form-working-dir');
+        const agentFormEnabled = document.getElementById('agent-form-enabled');
+        const agentFormError = document.getElementById('agent-form-error');
+        const agentFormReloadBtn = document.getElementById('agent-form-reload');
+        const agentFormDeleteBtn = document.getElementById('agent-form-delete');
+        const agentFormCancelBtn = document.getElementById('agent-form-cancel');
+        const agentFormSaveBtn = document.getElementById('agent-form-save');
+        const agentModalCloseBtn = document.getElementById('agent-modal-close');
+
+        const NAME_HINT_EDIT = 'Renaming is not supported: run state and past sessions are keyed to this name. Create a new agent to use a different one.';
+        const NAME_HINT_NEW = 'Lowercase letters, digits and dashes, e.g. daily-digest. It cannot be changed once saved.';
+        const DEFAULT_TIMEOUT_SECS = 600;
+
+        let agentEditorOpen = false;
+        let agentEditorTarget = null;      // null while creating
+        let agentEditorPromptFile = null;  // set when the prompt lives outside agents.toml
+        // The open form submits against the fingerprint it was opened with. A background
+        // refresh that was already in flight can still land on agentsFingerprint, and
+        // submitting that would defeat the conflict check.
+        let agentEditorFingerprint = '';
+        let agentDeleteArmed = false;
+
+        // kind: 'error' (coral), 'conflict' (offers RELOAD), 'notice', or null to clear.
+        function setAgentFormMessage(message, kind) {
+            agentFormError.textContent = message || '';
+            agentFormError.classList.toggle('hidden', !message);
+            agentFormError.classList.toggle('notice', kind === 'conflict' || kind === 'notice');
+            agentFormReloadBtn.classList.toggle('hidden', kind !== 'conflict');
+        }
+
+        function disarmAgentDelete() {
+            agentDeleteArmed = false;
+            agentFormDeleteBtn.textContent = 'DELETE';
+            agentFormDeleteBtn.classList.remove('armed');
+        }
+
+        function setAgentFormBusy(busy) {
+            [agentFormSaveBtn, agentFormDeleteBtn, agentFormCancelBtn, agentFormReloadBtn].forEach(btn => {
+                btn.disabled = busy;
+            });
+        }
+
+        // `detail` is an /api/agents/get payload, or null to open a blank create form.
+        function showAgentEditor(detail) {
+            const creating = !detail;
+
+            agentEditorOpen = true;
+            agentEditorTarget = creating ? null : detail.name;
+            agentEditorPromptFile = creating ? null : (detail.prompt_file || null);
+            agentEditorFingerprint = agentsFingerprint;
+
+            agentModalTitle.textContent = creating ? 'NEW AGENT' : 'EDIT AGENT';
+            agentFormName.value = creating ? '' : detail.name;
+            agentFormName.readOnly = !creating;
+            agentFormNameHint.textContent = creating ? NAME_HINT_NEW : NAME_HINT_EDIT;
+            agentFormSchedule.value = creating ? '' : detail.schedule;
+            agentFormPrompt.value = creating ? '' : detail.prompt;
+            agentFormModel.value = creating ? '' : (detail.model || '');
+            agentFormTimeout.value = creating ? String(DEFAULT_TIMEOUT_SECS) : String(detail.timeout_secs);
+            agentFormWorkingDir.value = creating ? '' : (detail.working_dir || '');
+            agentFormEnabled.checked = creating ? true : detail.enabled;
+
+            if (agentEditorPromptFile) {
+                agentFormPromptLabel.textContent = 'PROMPT FILE';
+                agentFormPromptHint.textContent = `Saving writes ${agentEditorPromptFile}; agents.toml keeps the prompt_file reference.`;
+            } else {
+                agentFormPromptLabel.textContent = 'PROMPT';
+                agentFormPromptHint.textContent = 'Stored inline in agents.toml.';
+            }
+
+            agentFormModelHint.textContent = agentsServerModel
+                ? `Blank uses the server default (${agentsServerModel}).`
+                : 'Blank uses the server default.';
+
+            agentFormDeleteBtn.classList.toggle('hidden', creating);
+            disarmAgentDelete();
+            setAgentFormMessage('', null);
+            setAgentFormBusy(false);
+
+            agentModal.classList.add('visible');
+            (creating ? agentFormName : agentFormSchedule).focus();
+        }
+
+        function closeAgentEditor() {
+            agentEditorOpen = false;
+            agentEditorTarget = null;
+            agentEditorPromptFile = null;
+            agentEditorFingerprint = '';
+            agentModal.classList.remove('visible');
+            disarmAgentDelete();
+            setAgentFormMessage('', null);
+        }
+
+        async function fetchAgentDetail(name) {
+            try {
+                const res = await fetch('/api/agents/get', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const data = await res.json();
+                agentsFingerprint = data.fingerprint || agentsFingerprint;
+
+                if (!data.found || !data.agent) {
+                    // Removed from the file since the list was rendered; the refresh
+                    // makes that plain rather than opening an editor over nothing.
+                    await loadAgents(true);
+                    return null;
+                }
+                return data.agent;
+            } catch (err) {
+                console.error('[webapp] Failed to load agent:', err);
+                setAgentsActionError(`Could not load '${name}': ${err.message}. This also happens when agents.toml on disk is invalid.`);
+                return null;
+            }
+        }
+
+        async function editAgent(name) {
+            setAgentsActionError(null);
+            const detail = await fetchAgentDetail(name);
+            if (detail) showAgentEditor(detail);
+        }
+
+        function agentSavePayload(detail, enabled) {
+            return {
+                original_name: detail.name,
+                fingerprint: agentsFingerprint,
+                name: detail.name,
+                schedule: detail.schedule,
+                prompt: detail.prompt,
+                model: detail.model || '',
+                enabled,
+                timeout_secs: detail.timeout_secs,
+                working_dir: detail.working_dir || ''
+            };
+        }
+
+        // Posts an edit and reports the outcome in the editor. Every failure leaves the
+        // modal open so nothing the user typed is lost.
+        async function submitAgentEdit(url, payload) {
+            setAgentFormBusy(true);
+            disarmAgentDelete();
+
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    setAgentFormMessage(`request failed: HTTP ${res.status}`, 'error');
+                    return;
+                }
+
+                const data = await res.json();
+                if (data.ok) {
+                    agentsFingerprint = data.fingerprint || agentsFingerprint;
+                    closeAgentEditor();
+                    await loadAgents(true);
+                    return;
+                }
+
+                // The server's validation messages are written for humans; show them as-is.
+                setAgentFormMessage(data.error || 'the change was rejected', data.conflict ? 'conflict' : 'error');
+            } catch (err) {
+                setAgentFormMessage(`request failed: ${err.message}`, 'error');
+            } finally {
+                setAgentFormBusy(false);
+            }
+        }
+
+        async function submitAgentForm() {
+            // A blank or non-numeric timeout would fail JSON deserialization server-side
+            // and come back as an unreadable 422, so it is caught here instead. The digits
+            // test is what rejects '1e3' and '12abc', which parseInt would quietly read as
+            // 1 and 12; type=number's min/step do not reject them either.
+            const timeoutRaw = agentFormTimeout.value.trim();
+            const timeoutSecs = /^\d+$/.test(timeoutRaw) ? Number(timeoutRaw) : NaN;
+            if (!Number.isSafeInteger(timeoutSecs) || timeoutSecs <= 0) {
+                setAgentFormMessage('timeout must be a whole number of seconds greater than zero', 'error');
+                return;
+            }
+
+            await submitAgentEdit('/api/agents/save', {
+                original_name: agentEditorTarget,
+                fingerprint: agentEditorFingerprint,
+                name: agentFormName.value.trim(),
+                schedule: agentFormSchedule.value.trim(),
+                prompt: agentFormPrompt.value,
+                model: agentFormModel.value.trim(),
+                enabled: agentFormEnabled.checked,
+                timeout_secs: timeoutSecs,
+                working_dir: agentFormWorkingDir.value.trim()
+            });
+        }
+
+        async function toggleAgentEnabled(name, enable) {
+            setAgentsActionError(null);
+            const detail = await fetchAgentDetail(name);
+            if (!detail) return;
+
+            try {
+                const res = await fetch('/api/agents/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(agentSavePayload(detail, enable))
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const data = await res.json();
+                if (data.ok) {
+                    agentsFingerprint = data.fingerprint || agentsFingerprint;
+                    await loadAgents(true);
+                    return;
+                }
+
+                // A rejected toggle has nowhere to report itself in the list, so hand it
+                // to the editor with the server's message.
+                showAgentEditor(detail);
+                agentFormEnabled.checked = enable;
+                setAgentFormMessage(data.error || 'the change was rejected', data.conflict ? 'conflict' : 'error');
+            } catch (err) {
+                console.error('[webapp] Failed to toggle agent:', err);
+                setAgentsActionError(`Could not ${enable ? 'enable' : 'disable'} '${name}': ${err.message}`);
+            }
+        }
+
+        // Offered after a conflict: picks up whatever is on disk now and hands back a
+        // current fingerprint, without touching what the user has typed.
+        async function reloadAgentsFromDisk() {
+            setAgentFormBusy(true);
+            try {
+                await fetch('/api/agents/reload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                await loadAgents(true);
+                // Adopt the fingerprint just read from disk, otherwise SAVE would still
+                // be submitting the stale one this reload was offered to resolve.
+                agentEditorFingerprint = agentsFingerprint;
+
+                const suffix = agentsReloadError ? `\n\n${agentsReloadError}` : '';
+                setAgentFormMessage(
+                    'Reloaded from disk. Your changes above were kept — press SAVE to write them over the current file.' + suffix,
+                    'notice'
+                );
+            } catch (err) {
+                setAgentFormMessage(`reload failed: ${err.message}`, 'error');
+            } finally {
+                setAgentFormBusy(false);
+            }
+        }
+
+        drawerNewAgentBtn.addEventListener('click', () => showAgentEditor(null));
+        agentFormSaveBtn.addEventListener('click', submitAgentForm);
+        agentFormReloadBtn.addEventListener('click', reloadAgentsFromDisk);
+        agentFormCancelBtn.addEventListener('click', closeAgentEditor);
+        agentModalCloseBtn.addEventListener('click', closeAgentEditor);
+
+        agentFormDeleteBtn.addEventListener('click', () => {
+            if (!agentEditorTarget) return;
+
+            if (!agentDeleteArmed) {
+                agentDeleteArmed = true;
+                agentFormDeleteBtn.textContent = 'CONFIRM DELETE';
+                agentFormDeleteBtn.classList.add('armed');
+                setAgentFormMessage(
+                    `Deleting '${agentEditorTarget}' removes it from agents.toml. Sessions it already ran are kept.`,
+                    'notice'
+                );
+                return;
+            }
+
+            submitAgentEdit('/api/agents/delete', {
+                name: agentEditorTarget,
+                fingerprint: agentEditorFingerprint
+            });
+        });
 
         // Find session by name from server
         async function findSessionByName(name) {
