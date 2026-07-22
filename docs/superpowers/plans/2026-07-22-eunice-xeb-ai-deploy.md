@@ -59,12 +59,15 @@ Run these commands and capture their output:
 4. systemctl --user is-active gemmad cloudflared eunice authd
 5. systemctl --user --failed --no-legend
 6. curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18082/v1/models
+   (gemmad requires auth, so 200 OR 400 both mean it is UP and answering; an empty
+   response or 000 means it is DOWN — do not treat 400 as a failure.)
 7. nvidia-smi --query-gpu=memory.used,memory.total,temperature.gpu --format=csv,noheader ; echo "(skip if nvidia-smi missing)"
 
 Then compose the report:
 - First line: an overall verdict — "OK" if every service in step 4 is "active", there
-  are no failed units in step 5, the step-6 HTTP code is 200, and disk use on both
-  filesystems is under 90%. Otherwise "ATTENTION" followed by the specific problems.
+  are no failed units in step 5, the step-6 HTTP code is 200 or 400 (gemmad up), and
+  disk use on both filesystems is under 90%. Otherwise "ATTENTION" followed by the
+  specific problems.
 - Below the verdict, a short labeled section for each of: Host (hostname + uptime),
   Disk, Memory, Services, Failed units, gemmad (the HTTP code, 200 = healthy), GPU.
 - Keep it scannable. Plain text, no markdown tables.
@@ -102,10 +105,26 @@ _No commit — this file lives outside the repo (machine-specific runtime config
 - Consumes: `/home/xeb/.eunice/webapp/agents.toml` (Task 1).
 - Produces: a running webapp on `127.0.0.1:8812` backed by gemmad; consumed by Tasks 4–6.
 
+- [ ] **Step 0: Ensure the installed binary matches the repo (do NOT assume it does)**
+
+The systemd unit runs `~/.cargo/bin/eunice`, which may be a stale `cargo install` older
+than the repo — serving an outdated webapp UI. Check and refresh:
+```bash
+/home/xeb/.cargo/bin/eunice --version    # installed
+( cd /media/xeb/GreyArea/projects/eunice && grep '^version' Cargo.toml )   # repo
+```
+If they differ, rebuild+install before continuing (release build ~2–3 min):
+```bash
+cd /media/xeb/GreyArea/projects/eunice && cargo install --path . --force
+/home/xeb/.cargo/bin/eunice --version    # must now match the repo
+```
+(Observed during execution: installed was `1.0.6`, repo `1.0.8` — the pre-full-page agent
+editor UI. Reinstalling fixed it; if the service is already running, restart it after.)
+
 - [ ] **Step 1: Confirm gemmad is up (needed so the webapp resolves its model at startup)**
 
 Run: `systemctl --user is-active gemmad && curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18082/v1/models`
-Expected: `active` then `200`.
+Expected: `active` then `400` (gemmad rejects the unauthenticated probe with 400 — that response confirms it is up; `000`/connection-refused would mean down). Authenticated requests from eunice (which resolves the `dev` token) get `200`.
 
 - [ ] **Step 2: Run the installer (bootstraps unit + env snapshot + enable + linger)**
 
@@ -115,19 +134,14 @@ eunice --webapp --host 127.0.0.1 --port 8812 --agents /home/xeb/.eunice/webapp/a
 ```
 Expected: prints `Validated agents file: …`, `Wrote unit file: …/eunice.service`, `enabled`, `Started`/`Restarted …`, `Install complete!`. (The snapshot captures PATH incl. `~/.local/bin` + `~/.cargo/bin` — verified present — so the agent's Bash tool will find `gmail-cli`.)
 
-- [ ] **Step 3: Append gemmad connection env to eunice.env**
+- [ ] **Step 3: gemmad connection env — NOT NEEDED (verified during execution)**
 
-The interactive shell had no `GEMMAD_*` set, so add them (absolute path — EnvironmentFile values are literal, no `%h`). eunice resolves the Bearer token itself from the keys file (the `dev` key), so no secret is written here.
-
-Run:
-```bash
-cat >> /home/xeb/.eunice/eunice.env <<'EOF'
-GEMMAD_HOST=127.0.0.1
-GEMMAD_PORT=18082
-GEMMAD_KEYS_FILE=/home/xeb/.config/gemmad/keys.toml
-EOF
-```
-Expected: no output. Verify: `grep GEMMAD /home/xeb/.eunice/eunice.env` prints the three lines.
+`GEMMAD_HOST`/`GEMMAD_PORT` already default to `127.0.0.1`/`18082`, and `resolve_token()`
+falls back to the default keys path `~/.config/gemmad/keys.toml` (the `dev` key) when
+`GEMMAD_KEYS_FILE` is unset. Confirmed at runtime: the service log printed
+`Using local gemmad (gemma-4-26b-a4b) at 127.0.0.1:18082` with no env set — retrieving the
+real model id requires a successful authenticated call, so the token resolves. **Skip this
+step.** (Adding the vars would be redundant; omitted per YAGNI.)
 
 - [ ] **Step 4: Rewrite the unit with --gemmad, gemmad ordering, and the stable WorkingDirectory**
 
@@ -400,6 +414,7 @@ git -C /media/xeb/GreyArea/projects/eunice commit -m "Add implementation plan fo
 
 ## Final verification checklist (all must pass)
 
+- [ ] `curl -s http://127.0.0.1:8812/api/status` reports the current repo `version` (not a stale one) → served UI is up to date.
 - [ ] `ss -tlnp | grep 8812` → `127.0.0.1:8812` only (no `0.0.0.0`).
 - [ ] `curl -sI https://eunice.xeb.ai` → `302` to `kockerbeck.cloudflareaccess.com`.
 - [ ] Browser login as `xebxeb@gmail.com` → app loads, gemma reply.
