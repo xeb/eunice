@@ -1760,14 +1760,25 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             currentSessionName = name;
             localStorage.setItem(SESSION_KEY, sessionId);
             localStorage.setItem(SESSION_NAME_KEY, name);
+            // Picking a session always lands on the Chat view. Route there through the
+            // hash so the hashchange runs applyRoute -> showView('chat') and the tab
+            // actually switches. The old non-editor path called updateSessionUrl, which
+            // replaceState's the URL (no hashchange) AND bails when the current view
+            // isn't 'chat' — so a pick from the Sessions tab left Sessions on screen
+            // while the chat restored invisibly behind it.
             if (leavingEditor) {
                 // Tear the editor down before touching the hash: the hashchange this
                 // fires runs the guard again, and it must not ask a second time.
-                // updateSessionUrl deliberately will not write over an '#/agent/...' URL.
                 closeAgentEditor();
-                window.location.hash = '#/' + name;
+            }
+            const targetHash = '#/' + name;
+            if (window.location.hash === targetHash) {
+                // Same hash fires no hashchange; show the chat view directly.
+                currentRouteView = 'chat';
+                showView('chat');
+                appliedRouteHash = window.location.hash;
             } else {
-                updateSessionUrl(name);
+                window.location.hash = targetHash;
             }
 
             // Clear messages, restore history, then attach to the live stream so a
@@ -1775,6 +1786,13 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             messagesEl.innerHTML = '';
             await restoreSessionHistory();
             reconnectToEvents();
+
+            // Land on the latest output with the composer focused, so the user can just
+            // start typing. Deferred a frame so the now-visible chat view has laid out.
+            requestAnimationFrame(() => {
+                window.scrollTo(0, document.documentElement.scrollHeight);
+                queryInput.focus();
+            });
         }
 
         async function deleteSession(id) {
