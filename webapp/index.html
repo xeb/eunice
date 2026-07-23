@@ -141,6 +141,8 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 .row:last-child{border-bottom:0}
 .row::before{content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--accent); transform:scaleY(0); transition:transform .16s}
 .row:hover{background:var(--panel-2)} .row:hover::before{transform:scaleY(1)}
+.row.active{background:var(--panel-2)}
+.row.active::before{transform:scaleY(1)}
 .dot{width:9px; height:9px; border-radius:50%; background:var(--ink-2)}
 .dot.agent{border-radius:2px; background:var(--warn)}
 .r-main{min-width:0}
@@ -238,6 +240,15 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 .msg .body pre{background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; overflow:auto; font-family:var(--mono); font-size:12.5px}
 .msg .body code{font-family:var(--mono); font-size:.92em}
 .msg .body a{color:var(--accent-ink); text-decoration:underline}
+.msg .body ul,.msg .body ol{margin:0 0 10px; padding-left:1.4em}
+.msg .body li{margin:2px 0}
+.msg .body h1,.msg .body h2,.msg .body h3{margin:14px 0 8px; line-height:1.25; font-weight:600}
+.msg .body h1{font-size:1.3em} .msg .body h2{font-size:1.15em} .msg .body h3{font-size:1.05em}
+.msg .body blockquote{margin:0 0 10px; padding:2px 0 2px 12px; border-left:2px solid var(--line); color:var(--ink-2)}
+.msg .body table{border-collapse:collapse; margin:0 0 10px; font-size:.95em}
+.msg .body th,.msg .body td{border:1px solid var(--line); padding:4px 8px; text-align:left}
+.msg .body th{background:var(--panel-2)}
+.msg .body hr{border:0; border-top:1px solid var(--line); margin:12px 0}
 .status-bar{padding:6px 20px; border-top:1px solid var(--line); color:var(--muted); font-family:var(--mono); font-size:11px; text-align:right}
 /* ===== end chat ===== */
         :root {
@@ -304,19 +315,24 @@ main{flex:1; width:100%; animation:rise .4s ease both}
            "sessions list" block in the shell CSS above). .btn-new-session survives:
            the agent index page's "+ NEW AGENT" button still uses it. */
         .btn-new-session {
-            padding: 4px 10px;
-            font-size: 11px;
-            background: var(--neon-mint);
-            color: var(--bg);
-            border: none;
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            color: var(--btn-fg);
+            background: var(--btn-bg);
+            border: 1px solid var(--btn-bg);
+            padding: 8px 14px;
+            border-radius: 8px;
             cursor: pointer;
-            font-family: inherit;
-            font-weight: 600;
             white-space: nowrap;
         }
 
         .btn-new-session:hover {
-            opacity: 0.8;
+            background: var(--btn-bg-hover);
+            border-color: var(--btn-bg-hover);
+            color: var(--btn-fg);
         }
 
         /* The old drawer's AGENTS tab (.agent-list, .agent-card*, .agent-dot*,
@@ -374,7 +390,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             gap: 14px;
             padding: 24px 0 16px;
             margin-bottom: 4px;
-            border-bottom: 1px solid var(--border-strong);
+            border-bottom: 1px solid var(--line);
         }
 
         /* Absorbs the slack so '+ NEW AGENT' sits at the far edge without the title
@@ -389,7 +405,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
            (the empty-state and loading placeholder). */
         .agent-index-empty {
             padding: 32px 10px;
-            color: var(--text-muted);
+            color: var(--muted);
             font-size: 12px;
         }
 
@@ -3389,6 +3405,11 @@ main{flex:1; width:100%; animation:rise .4s ease both}
         // Initialize - check URL for session name first
         async function init() {
             await fetchStatus();
+
+            // Fire-and-forget: resolves the Agents tab's visibility (and, on a server
+            // with --agents, its index data) before first paint settles, instead of
+            // leaving it shown-by-default until the user clicks it.
+            loadAgents();
 
             // Check if there's a session name in URL
             const urlSessionName = getSessionFromUrl();

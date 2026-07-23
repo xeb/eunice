@@ -1529,7 +1529,15 @@ pub(super) async fn run_agent_with_events(
                             Ok(c) => c.messages,
                             Err(compact_err) => {
                                 log(&format!("[{}] Compaction failed: {:#}", log_prefix, compact_err));
-                                conversation_history.clone()
+                                // Match agent.rs: surface the original error and stop
+                                // rather than retrying unchanged (and guaranteed-failing)
+                                // history.
+                                let message = format!("API error: {:#}", e);
+                                event_sender.send(SseEvent::Error {
+                                    message: message.clone(),
+                                }).await;
+                                run_error = Some(message);
+                                break;
                             }
                         }
                     };
