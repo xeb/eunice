@@ -297,6 +297,22 @@ pub async fn run_agent_cancellable(
                 {
                     let config = compaction_config.as_ref().unwrap();
                     if config.enabled {
+                        // Compact to fit the model's real window when the error
+                        // reveals it (e.g. llama.cpp/gemmad's "n_ctx is N"),
+                        // trimming without a model round-trip. Otherwise fall
+                        // back to the existing (model-assisted) strategy.
+                        let target = crate::compact::parse_context_window(&error_msg)
+                            .map(|n| ((n as f64) * 0.6) as usize)
+                            .unwrap_or(0);
+                        if target >= 2000 {
+                            let compacted = crate::compact::trim_to_token_budget(conversation_history, target);
+                            conversation_history.clear();
+                            conversation_history.extend(compacted);
+
+                            compaction_attempted = true;
+                            continue; // Retry with compacted context
+                        }
+
                         // Attempt compaction
                         match compact_context(client, model, conversation_history, config).await {
                             Ok(compacted) => {

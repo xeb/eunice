@@ -1517,18 +1517,26 @@ pub(super) async fn run_agent_with_events(
 
                 // Try compaction if context exhausted
                 if is_context_exhausted_error(&error_msg) && !compaction_attempted {
-                    log(&format!("[{}] Context exhausted, attempting compaction...", log_prefix));
-                    match compact_context(client, &provider_info.resolved_model, &conversation_history, &compaction_config).await {
-                        Ok(compacted) => {
-                            log(&format!("[{}] Compaction successful (ratio: {:.2})", log_prefix, compacted.compaction_ratio));
-                            conversation_history = compacted.messages;
-                            compaction_attempted = true;
-                            continue; // Retry with compacted context
+                    log(&format!("[{}] Context exhausted, compacting to fit window...", log_prefix));
+                    let target = crate::compact::parse_context_window(&error_msg)
+                        .map(|n| ((n as f64) * 0.6) as usize)
+                        .unwrap_or(0);
+                    let compacted_msgs = if target >= 2000 {
+                        crate::compact::trim_to_token_budget(&conversation_history, target)
+                    } else {
+                        // Unknown window: fall back to the existing strategy.
+                        match compact_context(client, &provider_info.resolved_model, &conversation_history, &compaction_config).await {
+                            Ok(c) => c.messages,
+                            Err(compact_err) => {
+                                log(&format!("[{}] Compaction failed: {:#}", log_prefix, compact_err));
+                                conversation_history.clone()
+                            }
                         }
-                        Err(compact_err) => {
-                            log(&format!("[{}] Compaction failed: {:#}", log_prefix, compact_err));
-                        }
-                    }
+                    };
+                    conversation_history = compacted_msgs;
+                    compaction_attempted = true;
+                    log(&format!("[{}] Compacted to ~{} tokens", log_prefix, crate::compact::estimate_tokens(&conversation_history)));
+                    continue; // retry with the fitting context
                 }
 
                 let message = format!("API error: {:#}", e);

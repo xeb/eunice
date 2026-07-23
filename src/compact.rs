@@ -353,6 +353,49 @@ pub fn is_context_exhausted_error(error_msg: &str) -> bool {
         || (error_lower.contains("token") && error_lower.contains("limit"))
         || (error_lower.contains("token") && error_lower.contains("exceed"))
         || (error_lower.contains("context") && error_lower.contains("exceed"))
+        // llama.cpp / gemmad errors
+        || error_lower.contains("does not fit the context window")
+        || error_lower.contains("context window")
+        || error_lower.contains("n_ctx")
+}
+
+/// Extract the model's context window from a llama.cpp/gemmad overflow error,
+/// e.g. "... n_ctx is 32768. ...". Returns None if not present.
+pub fn parse_context_window(error_msg: &str) -> Option<usize> {
+    let idx = error_msg.find("n_ctx is ")?;
+    let after = &error_msg[idx + "n_ctx is ".len()..];
+    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse::<usize>().ok().filter(|&n| n > 0)
+}
+
+/// Trim history to fit a hard token budget WITHOUT calling the model.
+/// Keeps the most recent messages that fit under `target_tokens` (after
+/// lightweight tool-output truncation) and prepends a note. Guarantees the
+/// result estimates at or under `target_tokens` (or a single note+message
+/// when even one message is too large).
+pub fn trim_to_token_budget(messages: &[Message], target_tokens: usize) -> Vec<Message> {
+    let cfg = CompactionConfig::default();
+    let light = lightweight_compact(messages, &cfg);
+    let note = Message::User {
+        content: "## Context Note\n\n[Earlier conversation was trimmed to fit the model's context window.]".to_string(),
+    };
+    let note_tokens = estimate_tokens(std::slice::from_ref(&note));
+    let budget = target_tokens.saturating_sub(note_tokens);
+
+    let mut kept: Vec<Message> = Vec::new();
+    let mut used = 0usize;
+    for msg in light.iter().rev() {
+        let t = estimate_tokens(std::slice::from_ref(msg));
+        if used + t > budget && !kept.is_empty() {
+            break;
+        }
+        used += t;
+        kept.push(msg.clone());
+    }
+    kept.reverse();
+    let mut out = vec![note];
+    out.extend(kept);
+    out
 }
 
 #[cfg(test)]
@@ -481,6 +524,37 @@ mod tests {
         // Should not match random errors
         assert!(!is_context_exhausted_error("Connection timeout"));
         assert!(!is_context_exhausted_error("Invalid API key"));
+    }
+
+    #[test]
+    fn test_gemmad_context_window_error_is_detected() {
+        let msg = "API request failed with status 400: {\"error\":{\"code\":null,\"message\":\"request does not fit the context window: prompt is 1209570 tokens + 0 reasoning budget; n_ctx is 32768. Shorten the prompt or lower reasoning_effort.\",\"param\":null,\"type\":\"invalid_request_error\"}}";
+        assert!(is_context_exhausted_error(msg));
+        assert!(!is_rate_limit_error(msg));
+    }
+
+    #[test]
+    fn test_parse_context_window_from_error() {
+        let msg = "request does not fit the context window: prompt is 1209570 tokens + 0 reasoning budget; n_ctx is 32768. Shorten the prompt";
+        assert_eq!(parse_context_window(msg), Some(32768));
+        assert_eq!(parse_context_window("some unrelated error"), None);
+    }
+
+    #[test]
+    fn test_trim_to_token_budget_fits() {
+        // 200 messages of ~1000 tokens each (~200k tokens) trimmed to a 32768 window.
+        let big = "x".repeat(4000); // ~1000 tokens at 4 chars/token
+        let mut messages = Vec::new();
+        for _ in 0..200 {
+            messages.push(Message::User { content: big.clone() });
+            messages.push(Message::Assistant { content: Some(big.clone()), tool_calls: None });
+        }
+        let target = (32768.0 * 0.6) as usize; // ~19660
+        let trimmed = trim_to_token_budget(&messages, target);
+        assert!(estimate_tokens(&trimmed) <= target, "trimmed still exceeds target");
+        assert!(!trimmed.is_empty());
+        // The most recent message is preserved.
+        assert!(matches!(trimmed.last(), Some(Message::Assistant { .. })));
     }
 
     #[test]
