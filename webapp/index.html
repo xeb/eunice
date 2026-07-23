@@ -319,196 +319,12 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             opacity: 0.8;
         }
 
-        /* Agents Tab */
-        .agent-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 8px 0;
-        }
-
-        .agent-card {
-            padding: 12px 16px;
-            border-left: 3px solid transparent;
-        }
-
-        .agent-card:hover {
-            background: var(--bg-input);
-        }
-
-        .agent-card.expanded {
-            border-left-color: var(--neon-cyan);
-            background: var(--bg-input);
-        }
-
-        .agent-card.disabled {
-            opacity: 0.45;
-        }
-
-        .agent-card-summary {
-            cursor: pointer;
-        }
-
-        .agent-card-head {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .agent-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--text-muted);
-            flex-shrink: 0;
-        }
-
-        .agent-dot.success {
-            background: var(--neon-mint);
-        }
-
-        .agent-dot.failed {
-            background: var(--neon-coral);
-        }
-
-        .agent-dot.skipped {
-            background: var(--neon-yellow);
-        }
-
-        .agent-dot.running {
-            background: var(--neon-cyan);
-            animation: pulse 1s infinite;
-        }
-
-        .agent-card-name {
-            flex: 1;
-            min-width: 0;
-            font-weight: 600;
-            font-size: 13px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .agent-disabled-label {
-            font-size: 9px;
-            letter-spacing: 0.1em;
-            font-weight: 600;
-            color: var(--text-muted);
-            border: 1px solid var(--border);
-            padding: 1px 4px;
-        }
-
-        .agent-card-meta {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 4px;
-            word-break: break-word;
-        }
-
-        .agent-cron {
-            color: var(--text);
-        }
-
-        .agent-detail {
-            margin-top: 10px;
-            padding-top: 10px;
-            border-top: 1px solid var(--border);
-        }
-
-        .agent-detail-label {
-            font-size: 9px;
-            letter-spacing: 0.2em;
-            color: var(--text-muted);
-            margin-bottom: 4px;
-        }
-
-        .agent-prompt {
-            font-size: 11px;
-            white-space: pre-wrap;
-            word-break: break-word;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            padding: 8px;
-            margin-bottom: 10px;
-        }
-
-        .agent-field {
-            font-size: 11px;
-            color: var(--text-muted);
-            word-break: break-all;
-            margin-bottom: 4px;
-        }
-
-        .agent-error {
-            font-size: 11px;
-            color: var(--neon-coral);
-            white-space: pre-wrap;
-            word-break: break-word;
-            margin-bottom: 10px;
-        }
-
-        .agent-session {
-            display: flex;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 6px 8px;
-            font-size: 11px;
-            cursor: pointer;
-            border-left: 2px solid transparent;
-        }
-
-        .agent-session:hover {
-            background: var(--bg-card);
-            border-left-color: var(--neon-cyan);
-        }
-
-        .agent-session-name {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .agent-session-meta {
-            color: var(--text-muted);
-            flex-shrink: 0;
-        }
-
-        .agents-note {
-            line-height: 1.5;
-            word-break: break-all;
-        }
-
-        /* Overrides .agents-note's break-all, which would split the words of a
-           validation message mid-character. */
-        .agents-warning {
-            color: var(--neon-coral);
-            white-space: pre-wrap;
-            word-break: break-word;
-            margin-top: 6px;
-        }
-
-        .agent-actions {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 10px;
-        }
-
-        .btn-agent {
-            padding: 4px 10px;
-            font-family: inherit;
-            font-size: 10px;
-            font-weight: 600;
-            letter-spacing: 0.1em;
-            background: var(--bg-card);
-            border: 1px solid var(--border-strong);
-            color: var(--text);
-            cursor: pointer;
-        }
-
-        .btn-agent:hover {
-            background: var(--text);
-            color: var(--bg);
-        }
+        /* The old drawer's AGENTS tab (.agent-list, .agent-card*, .agent-dot*,
+           .agent-detail*, .agent-prompt, .agent-session*, .btn-agent, .agent-cron,
+           and their old-theme .agents-note/.agents-warning) styled a 300px stacked
+           list that no longer exists — Task 1 removed the drawer and Task 4 replaced
+           the full-page index's rows with the gilt .card/.strip below. Nothing in
+           this file emits those classes any more. */
 
         /* Agent editor page
 
@@ -615,62 +431,10 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             flex: 1;
         }
 
-        .agent-index-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(0, 200px) minmax(0, 170px);
-            gap: 4px 16px;
-            align-items: center;
-            padding: 12px 10px;
-            border-bottom: 1px solid var(--border);
-            border-left: 3px solid transparent;
-        }
-
-        .agent-index-row.clickable {
-            cursor: pointer;
-        }
-
-        .agent-index-row.clickable:hover {
-            background: var(--bg-input);
-            border-left-color: var(--neon-cyan);
-        }
-
-        .agent-index-row.disabled {
-            opacity: 0.45;
-        }
-
-        .agent-index-name {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 600;
-            font-size: 13px;
-        }
-
-        .agent-index-name-text {
-            min-width: 0;
-            word-break: break-all;
-        }
-
-        .agent-index-schedule {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 4px;
-            word-break: break-word;
-        }
-
-        /* The plain English leads and the raw expression trails it, so the row reads
-           without decoding cron but still shows what is actually in agents.toml. */
-        .agent-index-desc {
-            color: var(--text);
-        }
-
-        .agent-index-model,
-        .agent-index-runs {
-            font-size: 11px;
-            color: var(--text-muted);
-            word-break: break-word;
-        }
-
+        /* .agent-index-row/-name/-schedule/-desc/-model/-runs styled the old table-row
+           layout. Task 4 replaced renderAgentIndexRow's markup with the .card/.strip
+           below, so those rows no longer exist; only .agent-index-empty still paints
+           (the empty-state and loading placeholder). */
         .agent-index-empty {
             padding: 32px 10px;
             color: var(--text-muted);
@@ -1067,22 +831,6 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 padding: 10px 12px 4px;
             }
 
-            .agent-card {
-                padding: 10px 12px;
-            }
-
-            .agent-card-name {
-                font-size: 12px;
-            }
-
-            .agent-card-meta,
-            .agent-prompt,
-            .agent-field,
-            .agent-error,
-            .agent-session {
-                font-size: 10px;
-            }
-
             /* .query-input kept: real class on the composer's textarea (Task 2), and
                this iOS-zoom-on-focus fix is still worth having. */
             .query-input {
@@ -1129,13 +877,6 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 /* Three items do not fit on a phone; the button drops to its own line
                    rather than pushing the title into a horizontal scroll. */
                 flex-wrap: wrap;
-            }
-
-            /* One column: the run and model columns become extra lines under the name
-               instead of squeezing every field into an unreadable width. */
-            .agent-index-row {
-                grid-template-columns: minmax(0, 1fr);
-                gap: 4px;
             }
 
             .form-input,
@@ -1252,6 +993,46 @@ main{flex:1; width:100%; animation:rise .4s ease both}
           box-shadow:0 1px 2px rgba(0,0,0,.16)}
         .btn-primary:hover{background:var(--btn-bg-hover); border-color:var(--btn-bg-hover); color:var(--btn-fg)}
         .btn-primary:disabled{opacity:.55; cursor:not-allowed}
+
+        /* ---------- agents (UI v2 Task 4, mock 178-204) — declared last so it wins
+           over the old .agent-index-header/.agent-page-title/.agent-index-note rules
+           above (same selectors, equal specificity: see the "declared last" note). */
+        .agents{display:grid; gap:16px}
+        .card{border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:16px 18px; box-shadow:var(--shadow); cursor:pointer}
+        .card:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+        .card-top{display:flex; align-items:center; gap:10px}
+        .a-name{font-family:var(--mono); font-size:15px; font-weight:600; color:var(--ink)}
+        .chip{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; border-radius:999px; padding:2px 8px; border:1px solid}
+        .chip.on{color:var(--ok); border-color:color-mix(in srgb,var(--ok) 45%,transparent); background:color-mix(in srgb,var(--ok) 10%,transparent)}
+        .chip.off{color:var(--muted); border-color:var(--line)}
+        .chip.err{color:var(--err); border-color:color-mix(in srgb,var(--err) 45%,transparent)}
+        .a-desc{color:var(--muted); font-size:13.5px; margin:8px 0 14px; max-width:62ch}
+        .a-foot{display:flex; align-items:center; gap:18px; flex-wrap:wrap; font-family:var(--mono); font-size:11.5px; color:var(--muted)}
+        .a-foot .cron{color:var(--ink-2)} .a-foot .next b{color:var(--accent-ink)}
+        .a-foot .last.ok{color:var(--ok)} .a-foot .last.err{color:var(--err)}
+        .a-foot .a-model{color:var(--cool)}
+
+        /* signature: 24h cron tick-strip */
+        .strip{position:relative; height:34px; margin:12px 0 4px; border:1px solid var(--line); border-radius:8px;
+          background:repeating-linear-gradient(90deg,transparent,transparent calc(100%/24 - 1px),var(--line-2) calc(100%/24 - 1px),var(--line-2) calc(100%/24));
+          overflow:hidden}
+        .strip .q{position:absolute; top:0; bottom:0; width:1px; background:var(--line)}
+        .strip .lbl{position:absolute; bottom:3px; font-family:var(--mono); font-size:9px; color:var(--muted); transform:translateX(-50%)}
+        .strip .mark{position:absolute; top:0; bottom:0; width:2px; background:var(--accent);
+          box-shadow:0 0 0 3px var(--accent-wash)}
+        .strip .mark::before{content:""; position:absolute; top:4px; left:50%; width:7px; height:7px; border-radius:50%;
+          background:var(--gilt); box-shadow:0 0 0 2px var(--accent-wash); transform:translateX(-50%)}
+        .strip .mark .t{position:absolute; top:-1px; left:6px; font-family:var(--mono); font-size:9.5px; color:var(--accent-ink); white-space:nowrap}
+        .strip .now{position:absolute; top:0; bottom:0; width:1px; background:var(--ink-2); opacity:.5}
+
+        .card.disabled{opacity:.72}
+        .agent-index-header{display:flex; align-items:center; gap:14px; max-width:960px; margin:0 auto; padding:26px 20px 6px}
+        .agent-page-title{font-family:var(--mono); font-size:22px; letter-spacing:.18em; text-transform:uppercase}
+        .agent-index-note,.agent-index-header-spacer{flex:1}
+        .agent-index-note{max-width:960px; margin:8px auto; padding:0 20px; color:var(--muted); font-family:var(--mono); font-size:12px}
+        .agents-warning{color:var(--warn); white-space:pre-wrap; margin-top:6px}
+        #agent-index-list{max-width:960px; margin:0 auto; padding:8px 20px 40px; display:grid; gap:16px}
+        /* ===== end agents (Task 4) ===== */
     </style>
     <!-- Markdown-it library for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
@@ -2344,7 +2125,6 @@ main{flex:1; width:100%; animation:rise .4s ease both}
         // Fingerprint the list was loaded with; every edit is submitted against it so a
         // change made on disk in the meantime is rejected instead of overwritten.
         let agentsFingerprint = '';
-        const expandedAgents = new Set();
 
         function startAgentsRefresh() {
             stopAgentsRefresh();
@@ -2389,21 +2169,9 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             return delta < 5 ? 'just now' : `${formatDuration(delta)} ago`;
         }
 
-        function agentDotClass(agent) {
-            // `running` is a run in flight right now; last_status describes the previous run.
-            if (agent.running || agent.last_status === 'running') return 'agent-dot running';
-            if (!agent.enabled) return 'agent-dot';
-
-            switch (agent.last_status) {
-                case 'success': return 'agent-dot success';
-                case 'failed': return 'agent-dot failed';
-                case 'skipped': return 'agent-dot skipped';
-                default: return 'agent-dot';
-            }
-        }
-
-        // The drawer's stacked agent-card renderer was removed with the drawer.
-        // The agents surface is now the full-width index painted by renderAgentIndex.
+        // The agents surface is the full-width index painted by renderAgentIndex, whose
+        // .card carries status via the enabled/disabled chip and the "check" error chip
+        // rather than a status dot, so there is no agentDotClass equivalent to keep.
 
         // setAgentsActionError just records the error now; the drawer footer that used to
         // render it is gone. Task 4 surfaces action errors on the agents index.
@@ -3491,11 +3259,8 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 
         // ---- Agent index page ----
         //
-        // The same data as the drawer's AGENTS tab, at full width and with the schedule
-        // spelled out. It is a separate renderer rather than a shared one because the
-        // drawer is a 300px column of stacked cards and this is a table of rows; the two
-        // share the helpers that compute values (agentDotClass, relativeFuture,
-        // relativePast) and nothing that lays them out.
+        // Full-width cards, one per agent, each carrying a 24h cron strip (agentStrip
+        // below) so the schedule reads visually instead of only as text.
 
         const agentIndexPage = document.getElementById('agent-index-page');
         const agentIndexList = document.getElementById('agent-index-list');
@@ -3517,37 +3282,53 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             }
         }
 
+        // The 24h tick-strip. The mark is the agent's next fire, mapped to its local
+        // hour-of-day; disabled or unparseable agents render the strip without a mark.
+        function agentStrip(agent) {
+            let ticks = '';
+            for (let h = 0; h <= 24; h += 6) {
+                const left = (h / 24 * 100).toFixed(2);
+                ticks += `<span class="q" style="left:${left}%"></span><span class="lbl" style="left:${left}%">${String(h).padStart(2,'0')}</span>`;
+            }
+            const now = new Date();
+            const nowPos = ((now.getHours() + now.getMinutes()/60) / 24 * 100).toFixed(2);
+            let mark = '';
+            if (agent.enabled) {
+                const zone = agentsServerTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+                const res = nextRuns(agent.schedule, Date.now(), zone, 1);
+                if (res.ok && res.runs && res.runs.length) {
+                    const parts = cronWallParts(res.runs[0], cronZone(zone));
+                    const pos = ((parts.hour + parts.minute/60) / 24 * 100).toFixed(2);
+                    const hhmm = `${String(parts.hour).padStart(2,'0')}:${String(parts.minute).padStart(2,'0')}`;
+                    mark = `<span class="mark" style="left:${pos}%"><span class="t">${hhmm}</span></span>`;
+                }
+            }
+            return `<div class="strip">${ticks}<span class="now" style="left:${nowPos}%"></span>${mark}</div>`;
+        }
+
         function renderAgentIndexRow(agent, serverModel) {
-            const description = agentScheduleDescription(agent.schedule);
-            const cron = `<span class="agent-cron">${escapeHtml(agent.schedule || '')}</span>`;
-            const schedule = description
-                ? `<span class="agent-index-desc">${escapeHtml(description)}</span> &middot; ${cron}`
-                : cron;
-
-            const model = agent.model
-                ? escapeHtml(agent.model)
-                : `${escapeHtml(serverModel)} (default)`;
-
-            const nextRun = agent.enabled ? relativeFuture(agent.next_run_at) : null;
-            const lastRun = relativePast(agent.last_run_at);
-
+            const model = agent.model ? escapeHtml(agent.model) : `${escapeHtml(serverModel)} (default)`;
+            const nextRun = agent.enabled ? (relativeFuture(agent.next_run_at) || '—') : 'disabled';
+            const last = relativePast(agent.last_run_at);
+            const lastCls = agent.last_error ? 'err' : 'ok';
+            const lastTxt = agent.last_error ? `error · ${last || 'recently'}` : (last ? `ok · ${last}` : 'never run');
+            const human = agentScheduleDescription(agent.schedule);
             return `
-                <div class="agent-index-row${agentsEditable ? ' clickable' : ''}${agent.enabled ? '' : ' disabled'}" data-name="${escapeAttr(agent.name)}">
-                    <div>
-                        <div class="agent-index-name">
-                            <span class="${agentDotClass(agent)}"></span>
-                            <span class="agent-index-name-text">${escapeHtml(agent.name)}</span>
-                            ${agent.enabled ? '' : '<span class="agent-disabled-label">DISABLED</span>'}
-                        </div>
-                        <div class="agent-index-schedule">${schedule}</div>
+                <div class="card${agent.enabled ? '' : ' disabled'}" data-name="${escapeAttr(agent.name)}">
+                    <div class="card-top">
+                        <span class="a-name">${escapeHtml(agent.name)}</span>
+                        <span class="chip ${agent.enabled ? 'on' : 'off'}">${agent.enabled ? 'enabled' : 'disabled'}</span>
+                        ${agent.last_error ? '<span class="chip err">check</span>' : ''}
                     </div>
-                    <div class="agent-index-model">${model}</div>
-                    <div class="agent-index-runs">
-                        <div>next run ${nextRun ? escapeHtml(nextRun) : '&mdash;'}</div>
-                        <div>${lastRun ? `last run ${escapeHtml(lastRun)}` : 'never run'}</div>
+                    <div class="a-desc">${escapeHtml(agent.prompt_preview || '')}</div>
+                    ${agentStrip(agent)}
+                    <div class="a-foot">
+                        <span class="cron">${escapeHtml(agent.schedule)} · ${escapeHtml(human || '')}</span>
+                        <span class="next">next run <b>${escapeHtml(nextRun)}</b></span>
+                        <span class="last ${lastCls}">last: ${escapeHtml(lastTxt)}</span>
+                        <span class="a-model">${model}</span>
                     </div>
-                </div>
-            `;
+                </div>`;
         }
 
         function renderAgentIndex(agents, serverModel) {
@@ -3561,10 +3342,10 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 
                 // Only editable configs get click targets: the editor route bounces
                 // straight back out when the server says the file is read-only, so a
-                // clickable row there would just flicker.
+                // clickable card there would just flicker.
                 if (agentsEditable) {
-                    agentIndexList.querySelectorAll('.agent-index-row').forEach(el => {
-                        el.addEventListener('click', () => navigateToAgent(el.dataset.name));
+                    agentIndexList.querySelectorAll('.card').forEach(c => {
+                        c.addEventListener('click', () => navigateToAgent(c.dataset.name));
                     });
                 }
             }
