@@ -1895,6 +1895,22 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             max-height: 400px;
             overflow-y: auto;
         }
+
+        /* Shell theme, declared last so legacy equal-specificity rules don't win (see .hidden above). */
+        body{
+          background:var(--paper);
+          background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+          background-size:23px 23px;
+          color:var(--ink); font-family:var(--sans); font-size:15px; line-height:1.55;
+          display:flex; flex-direction:column; min-height:100%;
+          overflow-x:hidden;
+        }
+        .status{display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12px;
+          color:color-mix(in srgb,var(--nav-ink) 78%,transparent)}
+        .btn-primary{font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+          color:var(--btn-fg); background:var(--btn-bg); border:1px solid var(--btn-bg); padding:8px 14px; border-radius:8px;
+          box-shadow:0 1px 2px rgba(0,0,0,.16)}
+        .btn-primary:hover{background:var(--btn-bg-hover); border-color:var(--btn-bg-hover); color:var(--btn-fg)}
     </style>
     <!-- Markdown-it library for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js"></script>
@@ -4259,8 +4275,8 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 
         let currentRouteView = null;
 
-        function parseRoute() {
-            const hash = window.location.hash;
+        function parseRoute(hash) {
+            hash = (hash === undefined) ? window.location.hash : hash;
             const path = hash.startsWith('#/') ? hash.substring(2) : '';
             const segments = path.split('/').filter(s => s.length > 0);
             if (segments.length === 2 && segments[0] === 'agent') {
@@ -4504,6 +4520,12 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 // the user went, so history.go() cannot be aimed. The cost is one extra
                 // entry — a back press from here lands on the editor route rather than
                 // skipping past it — in exchange for the URL always telling the truth.
+                //
+                // Paint the destination synchronously; the hash assignment fires
+                // applyRoute asynchronously, and without this the gap shows no
+                // surface at all (main is display:none from the editor route).
+                const dest = parseRoute(replay).view;
+                showView(dest === 'agent' ? 'editor' : (dest === 'agentIndex' ? 'agents' : dest));
                 window.location.hash = replay;
             }
         }
