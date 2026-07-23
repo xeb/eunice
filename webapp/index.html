@@ -133,6 +133,31 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 .search:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-wash)}
 .eyebrow{font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.16em; text-transform:uppercase; color:var(--muted)}
 
+/* ---------- sessions list (mock 159-176) ---------- */
+.list{border:1px solid var(--line); border-radius:12px; background:var(--panel); overflow:hidden; box-shadow:var(--shadow)}
+.row{display:grid; grid-template-columns:14px 1fr auto; gap:14px; align-items:center;
+  padding:14px 16px; border-bottom:1px solid var(--line-2); position:relative; cursor:pointer; text-align:left; width:100%;
+  background:none; border-left:0; border-right:0; border-top:0}
+.row:last-child{border-bottom:0}
+.row::before{content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--accent); transform:scaleY(0); transition:transform .16s}
+.row:hover{background:var(--panel-2)} .row:hover::before{transform:scaleY(1)}
+.dot{width:9px; height:9px; border-radius:50%; background:var(--ink-2)}
+.dot.agent{border-radius:2px; background:var(--warn)}
+.r-main{min-width:0}
+.r-name{font-family:var(--mono); font-size:13.5px; font-weight:600; color:var(--ink); display:flex; align-items:center; gap:8px}
+.r-tag{font-family:var(--mono); font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--warn);
+  border:1px solid color-mix(in srgb,var(--warn) 45%,transparent); border-radius:999px; padding:1px 6px}
+.r-prev{color:var(--muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px}
+.r-meta{display:flex; align-items:center; gap:14px; font-family:var(--mono); font-size:11.5px; color:var(--muted); white-space:nowrap}
+.r-meta .m-model{color:var(--cool)}
+.r-meta .m-turns b{color:var(--ink-2)}
+.row-del{color:var(--muted); padding:0 2px}
+.row-del:hover{color:var(--err)}
+.session-section{font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); padding:12px 16px 4px}
+.run-status{font-family:var(--mono); margin-right:6px}
+.run-status.success{color:var(--ok)} .run-status.failed{color:var(--err)} .run-status.running{color:var(--accent-ink)} .run-status.interrupted{color:var(--warn)}
+.no-sessions{padding:18px 16px; color:var(--muted); font-family:var(--mono); font-size:13px}
+
 @media (max-width:760px){
   /* top bar: row 1 = brand … theme + new; row 2 = its OWN solid gold nav strip */
   .topbar{flex-wrap:wrap; height:auto; min-height:52px; padding:8px 14px 0;
@@ -274,48 +299,10 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             font-size: 12px;
         }
 
-        /* Session Drawer */
-        .session-drawer {
-            position: fixed;
-            top: 0;
-            left: -320px;
-            width: 300px;
-            height: 100vh;
-            background: var(--bg-card);
-            border-right: 1px solid var(--border-strong);
-            z-index: 1001;
-            transition: left 0.2s ease-out;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .session-drawer.open {
-            left: 0;
-        }
-
-        .drawer-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-            display: none;
-        }
-
-        .drawer-overlay.visible {
-            display: block;
-        }
-
-        .drawer-header {
-            padding: 16px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
+        /* The session drawer, its tabs, and the old .session-item/.session-list rows
+           were removed in Task 3 — the Sessions view now uses .list/.row (see the
+           "sessions list" block in the shell CSS above). .btn-new-session survives:
+           the agent index page's "+ NEW AGENT" button still uses it. */
         .btn-new-session {
             padding: 4px 10px;
             font-size: 11px;
@@ -330,164 +317,6 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 
         .btn-new-session:hover {
             opacity: 0.8;
-        }
-
-        .session-list {
-            flex: 1;
-            overflow-y: auto;
-            padding: 8px 0;
-        }
-
-        .session-item {
-            padding: 12px 16px;
-            cursor: pointer;
-            border-left: 3px solid transparent;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .session-item:hover {
-            background: var(--bg-input);
-        }
-
-        /* Declared ahead of .active so an agent run that is also the open session
-           still shows the selection colour — selection outranks provenance. */
-        .session-item.agent-run {
-            border-left-color: var(--neon-magenta);
-        }
-
-        .session-item.active {
-            border-left-color: var(--neon-cyan);
-            background: var(--bg-input);
-        }
-
-        .session-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .session-name {
-            font-weight: 600;
-            font-size: 13px;
-            margin-bottom: 4px;
-        }
-
-        .session-meta {
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-
-        /* Only rendered when the list holds both chats and agent runs, so a list of
-           one kind keeps exactly the metrics it had before grouping existed. */
-        .session-section {
-            padding: 12px 16px 4px;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.2em;
-            color: var(--text-muted);
-        }
-
-        .session-section:first-child {
-            padding-top: 4px;
-        }
-
-        /* Shape-distinct glyphs, not just colour-distinct, so a run's outcome is
-           readable without relying on colour. Fixed width keeps the names aligned. */
-        .run-status {
-            display: inline-block;
-            width: 1em;
-            margin-right: 6px;
-            font-size: 11px;
-        }
-
-        .run-status.success {
-            color: var(--neon-mint);
-        }
-
-        .run-status.failed {
-            color: var(--neon-coral);
-        }
-
-        .run-status.interrupted {
-            color: var(--neon-yellow);
-        }
-
-        .run-status.running {
-            color: var(--neon-cyan);
-            animation: pulse 1s infinite;
-        }
-
-        .session-delete {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 4px 8px;
-            font-size: 16px;
-            line-height: 1;
-        }
-
-        .session-delete:hover {
-            color: var(--neon-coral);
-        }
-
-        .drawer-footer {
-            padding: 12px 16px;
-            border-top: 1px solid var(--border);
-            font-size: 10px;
-            color: var(--text-muted);
-        }
-
-        .persistence-badge {
-            background: var(--neon-mint);
-            color: var(--bg);
-            padding: 2px 6px;
-            font-weight: 600;
-        }
-
-        .persistence-badge.memory {
-            background: var(--neon-yellow);
-        }
-
-        .no-sessions {
-            padding: 20px 16px;
-            color: var(--text-muted);
-            font-size: 12px;
-            text-align: center;
-        }
-
-        /* Drawer Tabs */
-        .drawer-tabs {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-
-        /* Without the AGENTS tab this must render identically to the plain
-           SESSIONS title it replaced, so the untabbed state carries no affordance. */
-        .drawer-tab {
-            font-family: inherit;
-            font-weight: 700;
-            letter-spacing: 0.2em;
-            font-size: 12px;
-            background: none;
-            border: none;
-            padding: 0;
-            color: var(--text);
-            cursor: default;
-        }
-
-        .drawer-tabs.tabbed .drawer-tab {
-            cursor: pointer;
-            color: var(--text-muted);
-            padding-bottom: 2px;
-            border-bottom: 2px solid transparent;
-        }
-
-        .drawer-tabs.tabbed .drawer-tab.active {
-            color: var(--text);
-            border-bottom-color: var(--neon-cyan);
         }
 
         /* Agents Tab */
@@ -1231,42 +1060,9 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 overflow-x: hidden;
             }
 
-            /* Session drawer mobile */
-            .session-drawer {
-                width: 85vw;
-                max-width: 320px;
-                left: -85vw;
-            }
-
-            .session-drawer.open {
-                left: 0;
-            }
-
-            .drawer-header {
-                padding: 12px;
-            }
-
-            .drawer-tabs {
-                gap: 10px;
-            }
-
-            .drawer-tab {
-                font-size: 11px;
-                letter-spacing: 0.15em;
-            }
-
-            .session-item {
-                padding: 10px 12px;
-            }
-
-            .session-name {
-                font-size: 12px;
-            }
-
-            .session-meta {
-                font-size: 10px;
-            }
-
+            /* .session-section survives mobile: still a real class on the Sessions
+               view's group headers (see .list/.row in the shell CSS above). The
+               drawer/.session-item rules that used to sit here are gone with Task 3. */
             .session-section {
                 padding: 10px 12px 4px;
             }
@@ -2316,10 +2112,11 @@ main{flex:1; width:100%; animation:rise .4s ease both}
         }
 
         // Sessions list (now the Sessions view). The drawer and its agents tab are gone.
-        const sessionList = document.getElementById('session-list');
-
         let currentSessionName = null;
         let persistenceEnabled = false;
+        // Cache of the last /api/sessions payload so the filter box can re-render
+        // client-side without a round trip on every keystroke.
+        let allSessions = [];
 
         function runStatusMark(status) {
             // A switch rather than a lookup table: run_status arrives off the wire, and an
@@ -2350,79 +2147,83 @@ main{flex:1; width:100%; animation:rise .4s ease both}
         function renderSessionItem(session) {
             // Agent runs lead with the agent name: a scheduled agent opens a fresh session
             // per run, so the generated session name says nothing about what ran. It drops
-            // to the meta line, where it is still available for identifying a specific run.
+            // to the subline, where it is still available for identifying a specific run.
             const isAgentRun = !!session.agent_name;
-            const turnsAndTime = `${escapeHtml(String(session.turn_count))} turns | ${escapeHtml(session.relative_time || '')}`;
             const primary = isAgentRun ? session.agent_name : session.name;
-            const meta = isAgentRun
-                ? `${escapeHtml(session.name)} | ${turnsAndTime}`
-                : turnsAndTime;
-
+            const model = session.model ? escapeHtml(session.model) : '';
+            const turns = escapeHtml(String(session.turn_count));
+            const time = escapeHtml(session.relative_time || '');
+            // session.preview may not be sent by /api/sessions yet — the em-dash keeps
+            // the subline from collapsing to nothing when it isn't.
+            const sub = isAgentRun ? `${escapeHtml(session.name)}` : (escapeHtml(session.preview || '') || '—');
+            const activeCls = session.id === sessionId ? ' active' : '';
             return `
-                <div class="session-item${isAgentRun ? ' agent-run' : ''}${session.id === sessionId ? ' active' : ''}" data-id="${escapeAttr(session.id)}" data-name="${escapeAttr(session.name)}">
-                    <div class="session-info">
-                        <div class="session-name">${runStatusMark(session.run_status)}${escapeHtml(primary)}</div>
-                        <div class="session-meta">
-                            ${meta}
-                        </div>
-                    </div>
-                    <button class="session-delete" data-id="${escapeAttr(session.id)}" title="Delete session">&times;</button>
-                </div>
-            `;
+                <button class="row${activeCls}" data-id="${escapeAttr(session.id)}" data-name="${escapeAttr(session.name)}">
+                    <span class="dot ${isAgentRun ? 'agent' : ''}"></span>
+                    <span class="r-main">
+                        <span class="r-name">${runStatusMark(session.run_status)}${escapeHtml(primary)}${isAgentRun ? '<span class="r-tag">agent</span>' : ''}</span>
+                        <span class="r-prev">${sub}</span>
+                    </span>
+                    <span class="r-meta">
+                        ${model ? `<span class="m-model">${model}</span>` : ''}
+                        <span class="m-turns"><b>${turns}</b> turns</span>
+                        <span>${time}</span>
+                        <span class="row-del" data-del="${escapeAttr(session.id)}" title="Delete" role="button">✕</span>
+                    </span>
+                </button>`;
         }
 
         async function loadSessions() {
             try {
                 const res = await fetch('/api/sessions');
                 const data = await res.json();
-
                 persistenceEnabled = data.persistent;
-
-                // Render session list
-                if (data.sessions.length === 0) {
-                    sessionList.innerHTML = '<div class="no-sessions">No sessions yet</div>';
-                } else {
-                    // /api/sessions already comes back ordered by updated_at DESC, and
-                    // filter() preserves that order, so each group is sorted for free.
-                    const chats = data.sessions.filter(s => !s.agent_name);
-                    const runs = data.sessions.filter(s => s.agent_name);
-
-                    // Headers earn their space only when there are two kinds of thing to
-                    // tell apart. With no agents configured the list must render exactly
-                    // as it did before grouping — the same principle as the drawer tabs,
-                    // where the untabbed state carries no affordance.
-                    const grouped = chats.length > 0 && runs.length > 0;
-
-                    sessionList.innerHTML =
-                        (grouped ? '<div class="session-section">CHATS</div>' : '') +
-                        chats.map(renderSessionItem).join('') +
-                        (grouped ? '<div class="session-section">AGENT RUNS</div>' : '') +
-                        runs.map(renderSessionItem).join('');
-
-                    // Add click handlers
-                    sessionList.querySelectorAll('.session-info').forEach(el => {
-                        el.addEventListener('click', () => {
-                            const item = el.closest('.session-item');
-                            selectSession(item.dataset.id, item.dataset.name);
-                        });
-                    });
-
-                    sessionList.querySelectorAll('.session-delete').forEach(el => {
-                        el.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            deleteSession(el.dataset.id);
-                        });
-                    });
-                }
+                allSessions = Array.isArray(data.sessions) ? data.sessions : [];
+                paintSessions(allSessions);
             } catch (err) {
                 console.error('[webapp] Failed to load sessions:', err);
-                sessionList.innerHTML = '<div class="no-sessions">Failed to load sessions</div>';
+                document.getElementById('session-list').innerHTML = '<div class="no-sessions">Failed to load sessions</div>';
             }
         }
 
+        // Shared by loadSessions and renderSessionFilter so a live filter and a fresh
+        // load render identically — one painter, two callers.
+        function paintSessions(list) {
+            const box = document.getElementById('session-list');
+            const countEl = document.getElementById('session-count');
+            const chats = list.filter(s => !s.agent_name);
+            const runs = list.filter(s => s.agent_name);
+            if (countEl) countEl.textContent = `${list.length} total${runs.length ? ` · ${runs.length} agent runs` : ''}`;
+            if (list.length === 0) { box.innerHTML = '<div class="no-sessions">No sessions yet</div>'; return; }
+            // Headers earn their space only when there are two kinds of thing to tell
+            // apart. With no agents configured the list renders exactly as it did
+            // before grouping existed — the untabbed state carries no affordance.
+            const grouped = chats.length > 0 && runs.length > 0;
+            box.innerHTML =
+                (grouped ? '<div class="session-section">Chats</div>' : '') +
+                chats.map(renderSessionItem).join('') +
+                (grouped ? '<div class="session-section">Agent runs</div>' : '') +
+                runs.map(renderSessionItem).join('');
+            box.querySelectorAll('.row').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    if (e.target.closest('.row-del')) { e.stopPropagation(); deleteSession(e.target.closest('.row-del').dataset.del); return; }
+                    selectSession(row.dataset.id, row.dataset.name);
+                });
+            });
+        }
+
+        // Bound to #session-filter's input listener below; filters the cached list
+        // client-side rather than re-fetching on every keystroke.
+        function renderSessionFilter(term) {
+            const t = (term || '').toLowerCase();
+            const filtered = allSessions.filter(s => ((s.name || '') + (s.agent_name || '') + (s.preview || '')).toLowerCase().includes(t));
+            paintSessions(filtered);
+        }
+
         async function selectSession(id, name) {
-            // The drawer stays open over the editor page, so a session can be picked from
-            // there. That is an exit from the editor and clears the same guard as CANCEL.
+            // A row is only clickable from the routed Sessions view, but the hash can
+            // still say '#/agent/...' if this fires mid-navigation; picking a session
+            // is an exit from the editor and clears the same guard as CANCEL.
             const leavingEditor = parseRoute().view === 'agent';
             if (leavingEditor && !await confirmLeaveAgentEditor()) return;
 
@@ -4133,8 +3934,6 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                          : r === 'sessions' ? '#/sessions' : '#/agents';
             if (window.location.hash === target) applyRoute(); else window.location.hash = target;
         }));
-        // renderSessionFilter is implemented in Task 3; this stub only lets the input bind.
-        function renderSessionFilter(){}
         document.getElementById('session-filter').addEventListener('input', e => renderSessionFilter(e.target.value));
 
         // The router owns which view is showing and runs ahead of init's network work, so
