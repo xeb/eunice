@@ -326,48 +326,16 @@ main{flex:1; width:100%; animation:rise .4s ease both}
            the full-page index's rows with the gilt .card/.strip below. Nothing in
            this file emits those classes any more. */
 
-        /* Agent editor page
+        /* Agent editor page (UI v2 Task 5, gilt re-theme)
 
            A sibling of .container that replaces it rather than an overlay on top of it,
-           so the editor has a URL of its own and the PROMPT box can take the height the
-           400px-capped modal never had. Nothing here scrolls internally; the page grows
-           and the body scrolls, which keeps the flex-grown textarea predictable. */
-        .agent-page {
-            max-width: 900px;
-            width: 100%;
-            margin: 0 auto;
-            padding: 0 20px 20px;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-        }
-
-        .agent-page-header {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 24px 0 16px;
-            margin-bottom: 20px;
-            border-bottom: 1px solid var(--border-strong);
-        }
-
-        .agent-page-back {
-            font-family: inherit;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 0.1em;
-            background: none;
-            border: none;
-            padding: 0;
-            color: var(--text-muted);
-            cursor: pointer;
-            white-space: nowrap;
-        }
-
-        .agent-page-back:hover {
-            color: var(--text);
-        }
+           so the editor has a URL of its own. The page is a normal block now (no
+           flex/min-height:0 chain) — PROMPT gets a fixed generous min-height instead of
+           growing to fill the viewport, so the page just grows and the body scrolls. */
+        .agent-page{max-width:860px; margin:0 auto; padding:26px 20px 60px; animation:rise .4s ease both}
+        .agent-page-header{display:flex; align-items:center; gap:14px; margin-bottom:18px}
+        .agent-page-back{font-family:var(--mono); font-size:12px; letter-spacing:.06em; color:var(--accent-ink); background:none; border:1px solid var(--line); border-radius:8px; padding:7px 12px}
+        .agent-page-back:hover{border-color:var(--accent)}
 
         .agent-page-title {
             font-size: 16px;
@@ -376,27 +344,11 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             word-break: break-all;
         }
 
-        .agent-page-form {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-        }
+        .agent-page-form{display:flex; flex-direction:column; gap:18px}
 
-        /* The whole point of the page: PROMPT takes every pixel the other fields leave,
-           and never less than 40vh — below that the page just scrolls. */
-        .form-field-prompt {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-        }
-
-        .form-field-prompt .form-textarea {
-            flex: 1;
-            min-height: 40vh;
-            resize: none;
-        }
+        /* PROMPT just gets a taller fixed min-height than other textareas (.form-field
+           already gives .form-field-prompt its column layout — no override needed). */
+        .form-field-prompt .form-textarea{min-height:300px}
 
         /* Agent index page
 
@@ -453,78 +405,18 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             display: none;
         }
 
-        /* Modal */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            /* The session drawer is at z-index 1001 and can still be open behind a
-               modal, so this overlay has to outrank it. */
-            z-index: 1100;
-        }
-
-        .modal-overlay.visible {
-            display: flex;
-        }
-
-        .modal {
-            background: var(--bg-card);
-            border: 1px solid var(--border-strong);
-            max-width: 700px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            padding: 24px;
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .modal-title {
-            font-size: 16px;
-            font-weight: 700;
-            letter-spacing: 0.1em;
-        }
-
-        .modal-close {
-            background: none;
-            border: none;
-            font-size: 24px;
-            cursor: pointer;
-            color: var(--text-muted);
-            font-family: inherit;
-        }
-
-        .modal-close:hover {
-            color: var(--text);
-        }
-
-        /* The confirm dialog is a couple of lines of prose, so 700px reads as a lot of
-           empty card; it gets its own narrower width. */
-        .modal-confirm {
-            max-width: 420px;
-        }
-
-        .confirm-message {
-            font-size: 12px;
-            line-height: 1.6;
-            color: var(--text-muted);
-            margin-bottom: 20px;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
+        /* Modal (UI v2 Task 5, gilt re-theme) — the only surviving instance is the
+           generic confirm dialog (#confirm-dialog); the old bigger API-docs modal is
+           gone, so .modal-header/.modal-close/.modal-confirm's close-button and
+           narrower-variant styling no longer have anything to do — .modal-title and
+           .modal already size correctly for confirm-only content on their own. The
+           .modal-header/.modal-confirm classes stay in the DOM (harmless unstyled
+           wrapper/no-op) since nothing here needs a JS change to drop them. */
+        .modal-overlay{position:fixed; inset:0; z-index:70; display:none; align-items:center; justify-content:center; background:rgba(20,17,11,.5); backdrop-filter:blur(2px)}
+        .modal-overlay.visible{display:flex}
+        .modal{background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); width:min(440px,92vw); padding:20px}
+        .modal-title{font-family:var(--mono); font-size:14px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink); margin-bottom:10px}
+        .confirm-message{color:var(--ink-2); font-size:14px; margin-bottom:16px; word-break:break-word}
 
         .api-endpoint {
             margin-bottom: 24px;
@@ -589,219 +481,58 @@ main{flex:1; width:100%; animation:rise .4s ease both}
         }
 
         /* Agent editor form */
-        .form-field {
-            margin-bottom: 14px;
-        }
+        .form-field{display:flex; flex-direction:column; gap:6px}
+        .form-label{font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--muted)}
+        .form-input,.form-textarea{font-family:var(--mono); font-size:13.5px; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px; width:100%}
+        .form-input:focus,.form-textarea:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-wash)}
+        .form-input[readonly]{color:var(--muted); background:var(--panel-2)}
+        .form-textarea{min-height:220px; resize:vertical; line-height:1.5}
+        .form-hint{font-family:var(--mono); font-size:11px; color:var(--muted); word-break:break-word}
 
-        .form-label {
-            display: block;
-            font-size: 9px;
-            letter-spacing: 0.2em;
-            color: var(--text-muted);
-            margin-bottom: 4px;
-        }
+        /* Live cron feedback under the SCHEDULE field — classes are emitted by
+           renderCronPreview(), not chosen here. */
+        .cron-preview{font-family:var(--mono); font-size:12px; border:1px solid var(--line); border-radius:8px; padding:8px 12px; background:var(--panel-2); display:flex; flex-direction:column; gap:3px}
+        .cron-line{display:flex; gap:7px; align-items:baseline; word-break:break-word}
+        .cron-mark{font-weight:700; flex-shrink:0}
+        .cron-good{color:var(--ok)} .cron-good .cron-mark{color:var(--ok)}
+        .cron-bad{color:var(--err)} .cron-bad .cron-mark{color:var(--err)}
+        .cron-warn{color:var(--warn)} .cron-warn .cron-mark{color:var(--warn)}
+        .cron-detail{color:var(--muted)}
+        /* .cron-preview also carries .hidden while the field is empty/untouched, and
+           it sets its own display:flex above — this compound selector has to win over
+           that regardless of source order (the lone .hidden{display:none} above still
+           covers every other .hidden use). */
+        .form-error.hidden,.cron-preview.hidden{display:none}
 
-        .form-input,
-        .form-textarea {
-            width: 100%;
-            font-family: inherit;
-            font-size: 13px;
-            padding: 8px 10px;
-            border: 1px solid var(--border-strong);
-            background: var(--bg-input);
-            color: var(--text);
-        }
+        .form-row{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+        .form-row .form-field{min-width:0}
 
-        .form-input:focus,
-        .form-textarea:focus {
-            outline: none;
-            box-shadow: 0 0 0 2px var(--neon-cyan);
-        }
+        .form-check{display:flex; align-items:center; gap:9px; font-family:var(--mono); font-size:12.5px; color:var(--ink-2); cursor:pointer}
 
-        .form-input[readonly] {
-            border-color: var(--border);
-            color: var(--text-muted);
-        }
+        .form-error{font-family:var(--mono); font-size:12.5px; color:var(--err); border:1px solid color-mix(in srgb,var(--err) 40%,transparent); border-radius:8px; padding:9px 12px; word-break:break-word}
+        /* kind:'notice'/'conflict' — same element, softer warn treatment instead of red. */
+        .form-error.notice{color:var(--ink-2); border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
 
-        .form-textarea {
-            min-height: 220px;
-            resize: vertical;
-            line-height: 1.5;
-        }
+        .modal-actions{display:flex; align-items:center; gap:10px; margin-top:6px}
+        .modal-actions-spacer{flex:1}
 
-        .form-hint {
-            font-size: 10px;
-            line-height: 1.5;
-            color: var(--text-muted);
-            margin-top: 4px;
-            word-break: break-word;
-        }
+        .btn-form{font-family:var(--mono); font-size:12px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 15px; cursor:pointer}
+        .btn-form:hover{border-color:var(--ink-2)}
+        .btn-form:disabled{opacity:.5; cursor:not-allowed}
+        .btn-form-primary{color:var(--btn-fg); background:var(--btn-bg); border-color:var(--btn-bg)}
+        .btn-form-primary:hover{background:var(--btn-bg-hover); border-color:var(--btn-bg-hover)}
+        .btn-form-danger{color:var(--err); border-color:color-mix(in srgb,var(--err) 45%,transparent)}
+        .btn-form-danger:hover,.btn-form-danger.armed{color:var(--btn-fg); background:var(--err); border-color:var(--err)}
 
-        /* Live cron feedback under the SCHEDULE field. */
-        .cron-preview {
-            font-size: 10px;
-            line-height: 1.6;
-            margin-top: 6px;
-        }
-
-        .cron-line {
-            display: flex;
-            gap: 6px;
-            word-break: break-word;
-        }
-
-        .cron-mark {
-            flex-shrink: 0;
-            width: 8px;
-        }
-
-        .cron-good {
-            color: var(--text);
-        }
-
-        .cron-good .cron-mark {
-            color: var(--neon-magenta);
-        }
-
-        .cron-bad {
-            color: var(--neon-coral);
-        }
-
-        .cron-warn .cron-mark {
-            color: var(--neon-coral);
-        }
-
-        /* Continuation lines hang under the text of the line above, not its glyph. */
-        .cron-detail {
-            color: var(--text-muted);
-            padding-left: 14px;
-        }
-
-        .form-row {
-            display: flex;
-            gap: 12px;
-        }
-
-        .form-row .form-field {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .form-check {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 11px;
-            color: var(--text-muted);
-            cursor: pointer;
-        }
-
-        .form-error {
-            border-left: 3px solid var(--neon-coral);
-            background: var(--bg-input);
-            color: var(--neon-coral);
-            font-size: 11px;
-            line-height: 1.5;
-            padding: 8px 10px;
-            margin-bottom: 14px;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-
-        .form-error.notice {
-            border-left-color: var(--neon-yellow);
-            color: var(--text);
-        }
-
-        .modal-actions {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            border-top: 1px solid var(--border);
-            padding-top: 14px;
-        }
-
-        .modal-actions-spacer {
-            flex: 1;
-        }
-
-        .btn-form {
-            padding: 8px 14px;
-            font-family: inherit;
-            font-size: 12px;
-            font-weight: 600;
-            border: 1px solid var(--border-strong);
-            background: var(--bg);
-            color: var(--text);
-            cursor: pointer;
-        }
-
-        .btn-form:hover {
-            background: var(--text);
-            color: var(--bg);
-        }
-
-        .btn-form:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        .btn-form-primary {
-            background: var(--text);
-            color: var(--bg);
-        }
-
-        .btn-form-primary:hover {
-            background: #333;
-            color: var(--bg);
-        }
-
-        .btn-form-danger {
-            border-color: var(--neon-coral);
-            color: var(--neon-coral);
-        }
-
-        .btn-form-danger:hover,
-        .btn-form-danger.armed {
-            background: var(--neon-coral);
-            color: var(--bg);
-        }
-
-        /* Toast — a confirmation for an action whose own page is gone by the time it
-           succeeds, so there is nowhere on screen left to report it. */
-        .toast {
-            position: fixed;
-            left: 50%;
-            bottom: 24px;
-            transform: translateX(-50%);
-            /* Bounded against the viewport rather than a fixed width, so a long agent
-               name wraps on a phone instead of running off the side. */
-            max-width: min(420px, calc(100vw - 32px));
-            padding: 10px 16px;
-            background: var(--text);
-            color: var(--bg);
-            border: 1px solid var(--border-strong);
-            font-size: 12px;
-            font-weight: 600;
-            line-height: 1.4;
-            text-align: center;
-            word-break: break-word;
-            /* Above the drawer (1001) and the modal overlay (1100): a confirmation that
-               lands behind something has not confirmed anything. */
-            z-index: 1200;
-            /* Fixed and inert: the toast must neither move the page it is confirming nor
-               swallow a click aimed at what is underneath it. */
-            pointer-events: none;
-            /* Faded rather than display:none so the element stays in the accessibility
-               tree the whole time — a live region that appears and fills in at once is
-               unreliably announced. showToast() empties the text on the way out instead. */
-            opacity: 0;
-            transition: opacity 0.25s ease-out;
-        }
-
-        .toast.visible {
-            opacity: 1;
-        }
+        /* Toast (UI v2 Task 5) — a confirmation for an action whose own page is gone by
+           the time it succeeds, so there is nowhere on screen left to report it. Faded
+           rather than display:none so the element stays in the accessibility tree the
+           whole time; showToast() empties the text on the way out instead. */
+        .toast{position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(8px); z-index:80; font-family:var(--mono); font-size:12px; color:var(--btn-fg); background:var(--btn-bg); padding:9px 14px; border-radius:8px; box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:opacity .2s, transform .2s;
+          /* Bounded against the viewport rather than a fixed width, so a long agent
+             name wraps on a phone instead of running off the side. */
+          max-width:min(420px, calc(100vw - 32px)); text-align:center; word-break:break-word}
+        .toast.visible{opacity:1; transform:translateX(-50%) translateY(0)}
 
         /* The fade is decoration; the message is not. With motion reduced the toast
            appears and leaves instantly, and still dismisses itself on the same timer. */
@@ -850,13 +581,12 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             }
 
             .agent-page {
-                padding: 0 12px 12px;
+                padding: 16px 14px 40px;
                 max-width: 100%;
                 overflow-x: hidden;
             }
 
             .agent-page-header {
-                padding: 16px 0 12px;
                 margin-bottom: 14px;
                 gap: 10px;
             }
@@ -888,7 +618,8 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 min-height: 150px;
             }
 
-            /* 40vh of a phone screen is most of it once the on-screen keyboard is up. */
+            /* The fixed 300px min-height is a lot of a phone screen once the on-screen
+               keyboard is up; scale it down like every other textarea does above. */
             .form-field-prompt .form-textarea {
                 min-height: 30vh;
             }
