@@ -22,6 +22,7 @@
   --nav:#f4c22e; --nav-ink:#2b2410; --nav-border:rgba(43,36,16,.22);
   --accent:#e0a200; --accent-ink:#a97400; --accent-wash:rgba(224,162,0,.15);
   --gilt:#f4c22e;
+  --you-bg:#e8f1fc; --you-line:rgba(40,86,150,.20); --you-ink:#2a5a9a; --you-panel:#dbe9fa;
   --btn-bg:#1b1a15; --btn-fg:#f4c22e; --btn-bg-hover:#000000;
   --ok:#3f7a4b; --warn:#b5771a; --err:#a4302a; --cool:#2f6c62;
   --grid:rgba(27,26,21,.035);
@@ -37,6 +38,7 @@
   --nav:#e2bd3f; --nav-ink:#20190a; --nav-border:rgba(0,0,0,.34);
   --accent:#efc850; --accent-ink:#f0d072; --accent-wash:rgba(239,200,80,.16);
   --gilt:#f4d778;
+  --you-bg:#182231; --you-line:rgba(150,190,240,.22); --you-ink:#9dc2f0; --you-panel:#1f2c3f;
   --btn-bg:#efc850; --btn-fg:#241b06; --btn-bg-hover:#f4d778;
   --ok:#5fae6c; --warn:#cf9a38; --err:#d1544e; --cool:#7cb8ad;
   --grid:rgba(244,236,214,.05);
@@ -50,6 +52,7 @@
     --nav:#e2bd3f; --nav-ink:#20190a; --nav-border:rgba(0,0,0,.34);
     --accent:#efc850; --accent-ink:#f0d072; --accent-wash:rgba(239,200,80,.16);
     --gilt:#f4d778;
+    --you-bg:#182231; --you-line:rgba(150,190,240,.22); --you-ink:#9dc2f0; --you-panel:#1f2c3f;
     --btn-bg:#efc850; --btn-fg:#241b06; --btn-bg-hover:#f4d778;
     --ok:#5fae6c; --warn:#cf9a38; --err:#d1544e; --cool:#7cb8ad;
     --grid:rgba(244,236,214,.05);
@@ -200,10 +203,16 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 /* ---------- chat (UI v2 Task 2) ---------- */
 .thread{display:flex; flex-direction:column; gap:22px}
 .msg .role{font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; margin-bottom:6px}
-.msg.you .role{color:var(--ink-2)}
+.msg.you{background:var(--you-bg); border:1px solid var(--you-line); border-radius:12px; padding:12px 14px}
+.msg.you .role{color:var(--you-ink)}
 .msg.eunice .role{color:var(--accent-ink)}
 .msg .body{color:var(--ink-2)}
 .msg.you .body{color:var(--ink)}
+/* keep nested blocks tinted with the card, not the warm page panel */
+.msg.you .body pre,.msg.you .body th{background:var(--you-panel); border-color:var(--you-line)}
+.msg.you .body blockquote{border-left-color:var(--you-line)}
+.msg.you .body td{border-color:var(--you-line)}
+.msg.you .body a{color:var(--you-ink)}
 .tool{margin:12px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden}
 .tool-head{display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line-2);
   font-family:var(--mono); font-size:12px}
