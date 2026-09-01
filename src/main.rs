@@ -1,3 +1,4 @@
+mod abliteration;
 mod agent;
 mod agents;
 mod client;
@@ -33,7 +34,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LLMS_FULL_TXT: &str = include_str!("../llms-full.txt");
 
 #[derive(Parser)]
-#[command(name = "eunice", about = "Agentic CLI runner with OpenAI, Gemini, Claude, and Ollama support", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
+#[command(name = "eunice", about = "Agentic CLI runner with Abliteration AI, OpenAI, Gemini, Claude, and Ollama support", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 struct Args {
     /// AI model to use
     #[arg(long)]

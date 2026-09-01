@@ -1,6 +1,6 @@
-# Eunice v1.0.1
+# Eunice v1.0.11
 
-An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
+An agentic CLI runner in Rust with unified support for Abliteration AI, OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
 
 ## Overview
 
@@ -29,6 +29,8 @@ export GEMINI_API_KEY=your_key_here
 export OPENAI_API_KEY=your_key_here
 # or
 export ANTHROPIC_API_KEY=your_key_here
+# or
+export ABLIT_KEY=your_key_here
 
 # Run with a prompt
 eunice "List all files in the current directory"
@@ -40,6 +42,7 @@ eunice --chat
 eunice --model flash "Hello"
 eunice --model sonnet "Explain this code"
 eunice --model azure:gpt-4o-mini "Hello from Azure"
+eunice --model abliterated-model-large-v2 "Inspect this project and run the tests"
 ```
 
 ## Built-in Tools
@@ -85,6 +88,10 @@ EOF
 ```
 
 ## Supported Providers
+
+### Abliteration AI
+Set `ABLIT_KEY`, or save the key in `~/.config/ablit/key` with mode 0600.
+Model: `abliterated-model-large-v2`. `ABLIT_BASE_URL` overrides the API base URL.
 
 ### Google Gemini (Default)
 Set `GEMINI_API_KEY`. Default model: `gemini-3-flash-preview`
@@ -146,6 +153,8 @@ No configuration files required. Eunice uses environment variables for API keys 
 ### Environment Variables
 
 - `GEMINI_API_KEY` - Google AI Studio API key
+- `ABLIT_KEY` - Abliteration AI API key (optional when the secure key file exists)
+- `ABLIT_BASE_URL` - Abliteration AI API base URL (optional)
 - `OPENAI_API_KEY` - OpenAI API key
 - `ANTHROPIC_API_KEY` - Anthropic API key
 - `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL
@@ -167,7 +176,7 @@ For high-volume usage, place multiple Gemini API keys in `~/.eunice/gemini-api-k
 
 ## Version
 
-v1.0.1
+v1.0.11
 
 ## License
 

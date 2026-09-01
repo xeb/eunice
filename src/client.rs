@@ -179,6 +179,11 @@ impl Client {
             messages,
             tools: tools.map(|t| t.to_vec()),
             tool_choice: tools.map(|_| "auto".to_string()),
+            reasoning_effort: matches!(self.provider, Provider::Abliteration)
+                .then(|| crate::abliteration::REASONING_EFFORT.to_string()),
+            include_reasoning: matches!(self.provider, Provider::Abliteration).then_some(false),
+            max_completion_tokens: matches!(self.provider, Provider::Abliteration)
+                .then_some(crate::abliteration::MAX_COMPLETION_TOKENS),
         };
 
         let mut attempt = 0u32;
@@ -668,6 +673,9 @@ impl Client {
             messages,
             tools: None,
             tool_choice: None,
+            reasoning_effort: None,
+            include_reasoning: None,
+            max_completion_tokens: None,
         };
 
         let response = self

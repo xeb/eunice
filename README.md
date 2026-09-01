@@ -2,9 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An agentic CLI runner in Rust with unified support for OpenAI, Gemini, Claude, and Ollama.
+An agentic CLI runner in Rust with unified support for Abliteration AI, OpenAI, Gemini, Claude, and Ollama.
 
-**12,822 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
+**13,001 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -14,7 +14,7 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 
 ## Features
 
-- **Multi-Provider Support**: OpenAI, Google Gemini, Anthropic Claude, and local Ollama models
+- **Multi-Provider Support**: Abliteration AI, OpenAI, Google Gemini, Anthropic Claude, and local Ollama models
 - **4 Built-in Tools**: Bash, Read, Write, and Skill - always available, no configuration needed
 - **Skills System**: User-defined prompts in `~/.eunice/skills/` for reusable capabilities
 - **Smart Defaults**: Automatically selects the best available model (prefers Gemini)
@@ -47,6 +47,8 @@ export GEMINI_API_KEY=your_key_here
 export OPENAI_API_KEY=your_key_here
 # or
 export ANTHROPIC_API_KEY=your_key_here
+# or
+export ABLIT_KEY=your_key_here
 
 # Run with a prompt
 eunice "List all Rust files in this directory"
@@ -57,6 +59,7 @@ eunice --chat
 # Use a specific model
 eunice --model gpt-4o "Explain this code"
 eunice --model sonnet "Review main.rs"
+eunice --model abliterated-model-large-v2 "Inspect this project and run the tests"
 
 # Start webapp
 eunice --webapp
@@ -105,11 +108,25 @@ The Skill tool searches these directories to find relevant skills for a task.
 
 | Provider | API Key Variable | Default Model |
 |----------|------------------|---------------|
+| Abliteration AI | `ABLIT_KEY` or `~/.config/ablit/key` | abliterated-model-large-v2 |
 | Google Gemini | `GEMINI_API_KEY` | gemini-3.6-flash |
 | OpenAI | `OPENAI_API_KEY` | gpt-4o |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4 |
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` | (deployment-specific) |
 | Ollama | (no key needed) | llama3.1, glm-4, qwen3, deepseek-r1 |
+
+### Abliteration AI
+
+`abliterated-model-large-v2` uses Abliteration AI's OpenAI-compatible API with Eunice's full
+Bash, Read, Write, and Skill tool loop. Set `ABLIT_KEY`, or save the key in
+`~/.config/ablit/key` with mode `0600`:
+
+```bash
+chmod 600 ~/.config/ablit/key
+eunice --model abliterated-model-large-v2 "Inspect this project and run its tests"
+```
+
+Set `ABLIT_BASE_URL` to override the default `https://api.abliteration.ai/v1` endpoint.
 
 ### Model Aliases
 
@@ -286,8 +303,9 @@ This validates the agents file, writes `~/.config/systemd/user/eunice.service` b
 chose, enables and starts it, and turns on lingering so it survives logout and starts at boot.
 
 Because systemd user services do not inherit your shell environment, the installer snapshots your
-API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OLLAMA_HOST`)
-into `~/.eunice/eunice.env` with mode `0600`. Re-run `--install` after rotating a key.
+API keys and provider settings (`ABLIT_KEY`, `ABLIT_BASE_URL`, `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OLLAMA_HOST`, and others) into
+`~/.eunice/eunice.env` with mode `0600`. Re-run `--install` after rotating a key.
 
 ```bash
 systemctl --user status eunice      # check it
@@ -299,7 +317,7 @@ eunice --uninstall-service          # stop, disable, and remove the unit
 
 ## Architecture
 
-Eunice v1.0.0 follows a "sophisticated simplicity" design:
+Eunice v1.0.11 follows a "sophisticated simplicity" design:
 
 1. **No configuration files** - just environment variables for API keys
 2. **No external MCP servers** - 4 built-in tools cover most use cases
@@ -318,6 +336,7 @@ MIT License
 
 ## Version History
 
+- **v1.0.11**: Abliteration AI `abliterated-model-large-v2` provider with full tool calling
 - **v1.0.1**: Azure OpenAI support, GLM model support, --debug flag
 - **v1.0.0**: Major simplification - 4 built-in tools, skills system, no MCP/orchestrator
 - **v0.3.x**: Full-featured with MCP servers, multi-agent, DMN mode, research mode

@@ -5,6 +5,9 @@ use std::env;
 /// Check if a model supports function/tool calling
 pub fn supports_tools(provider: &Provider, model: &str) -> bool {
     match provider {
+        // Abliteration's OpenAI-compatible API supports standard tool calling.
+        Provider::Abliteration => true,
+
         // All modern OpenAI models support tools
         Provider::OpenAI => true,
 
@@ -103,6 +106,19 @@ fn resolve_gemini_alias(model: &str) -> &str {
 /// Detect the provider based on model name
 pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
+
+    // Abliteration AI's published model ids all share this prefix. Detect this
+    // before probing Ollama so an identically named local model cannot hijack it.
+    if crate::abliteration::is_model(model) {
+        return Ok(ProviderInfo {
+            provider: Provider::Abliteration,
+            base_url: crate::abliteration::base_url(),
+            api_key: crate::abliteration::resolve_key()?,
+            resolved_model: model.to_string(),
+            use_native_gemini_api: false,
+            azure_api_version: None,
+        });
+    }
 
     // 0. gemmad daemon — the local OpenAI-compatible server (Gemma 4 on :18082).
     // Bearer-auth; no local server is started (the running daemon handles it).
@@ -333,6 +349,12 @@ pub fn get_smart_default_model() -> Result<String> {
 pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
     let mut result = Vec::new();
 
+    result.push((
+        Provider::Abliteration,
+        vec![crate::abliteration::DEFAULT_MODEL.to_string()],
+        crate::abliteration::is_configured(),
+    ));
+
     // OpenAI
     let openai_models = vec![
         "gpt-5.1".to_string(),
@@ -439,6 +461,14 @@ mod tests {
     #[test]
     fn test_gemmad_supports_tools() {
         assert!(supports_tools(&Provider::Gemmad, "gemma-4-26b-a4b"));
+    }
+
+    #[test]
+    fn test_abliteration_supports_tools() {
+        assert!(supports_tools(
+            &Provider::Abliteration,
+            crate::abliteration::DEFAULT_MODEL
+        ));
     }
 
     #[test]

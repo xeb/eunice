@@ -14,6 +14,8 @@ pub struct InstallOptions {
 /// because systemd user services get a minimal PATH and the Bash tool spawns $SHELL -c
 /// with the service environment, so agent commands would not find ~/.cargo/bin etc.
 pub const SNAPSHOT_ENV_VARS: &[&str] = &[
+    "ABLIT_KEY",
+    "ABLIT_BASE_URL",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
@@ -536,6 +538,8 @@ mod tests {
 
     #[test]
     fn test_snapshot_env_vars_covers_expected_keys() {
+        assert!(SNAPSHOT_ENV_VARS.contains(&"ABLIT_KEY"));
+        assert!(SNAPSHOT_ENV_VARS.contains(&"ABLIT_BASE_URL"));
         assert!(SNAPSHOT_ENV_VARS.contains(&"OPENAI_API_KEY"));
         assert!(SNAPSHOT_ENV_VARS.contains(&"ANTHROPIC_API_KEY"));
         assert!(SNAPSHOT_ENV_VARS.contains(&"GEMINI_API_KEY"));

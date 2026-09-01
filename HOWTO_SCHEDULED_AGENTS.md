@@ -498,6 +498,7 @@ which works, but is easy to get wrong later.
    never briefly world-readable. The variables captured, when set and non-empty, are:
 
    ```
+   ABLIT_KEY   ABLIT_BASE_URL
    OPENAI_API_KEY   ANTHROPIC_API_KEY   GEMINI_API_KEY   GOOGLE_API_KEY   OLLAMA_HOST
    AZURE_OPENAI_ENDPOINT   AZURE_OPENAI_API_KEY   AZURE_OPENAI_API_VERSION
    GEMMAD_HOST   GEMMAD_PORT   GEMMAD_MODEL_ID   GEMMAD_API_KEY   GEMMAD_KEYS_FILE

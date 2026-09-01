@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Provider types supported by eunice
 #[derive(Debug, Clone, PartialEq)]
 pub enum Provider {
+    Abliteration,
     OpenAI,
     Gemini,
     Anthropic,
@@ -15,6 +16,7 @@ pub enum Provider {
 impl std::fmt::Display for Provider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Provider::Abliteration => write!(f, "Abliteration AI"),
             Provider::OpenAI => write!(f, "OpenAI"),
             Provider::Gemini => write!(f, "Gemini"),
             Provider::Anthropic => write!(f, "Anthropic"),
@@ -29,6 +31,7 @@ impl std::fmt::Display for Provider {
 impl Provider {
     pub fn get_icon(&self) -> &'static str {
         match self {
+            Provider::Abliteration => "🧬",
             Provider::OpenAI => "🤖",
             Provider::Gemini => "💎",
             Provider::Anthropic => "🧠",
@@ -112,6 +115,12 @@ pub struct ChatCompletionRequest {
     pub tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_reasoning: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
 }
 
 /// Chat completion response

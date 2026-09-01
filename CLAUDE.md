@@ -1,8 +1,8 @@
-# Eunice v1.0.0 - Development Guide
+# Eunice v1.0.11 - Development Guide
 
 ## About
 
-Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" - minimal configuration with maximum capability.
+Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (Abliteration AI, OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" - minimal configuration with maximum capability.
 
 ## Architecture
 
@@ -248,6 +248,7 @@ println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
 ## Version History
 
+- **v1.0.11**: Abliteration AI `abliterated-model-large-v2` provider with OpenAI-compatible tool calling
 - **v1.0.0**: Major simplification
   - 4 built-in tools (Bash, Read, Write, Skill)
   - Skills system for extensibility

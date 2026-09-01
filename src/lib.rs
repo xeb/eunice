@@ -1,3 +1,4 @@
+pub mod abliteration;
 pub mod agent;
 pub mod agents;
 pub mod client;

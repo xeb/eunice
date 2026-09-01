@@ -71,6 +71,10 @@ impl SessionUsage {
 /// Get pricing per 1M tokens (input, output) for a model
 fn get_pricing(model: &str, provider: &Provider) -> (f64, f64) {
     match provider {
+        Provider::Abliteration => {
+            // Published large-model rate; input and output have the same price.
+            (5.00, 5.00)
+        }
         Provider::Gemini => {
             // Gemini pricing as of 2025
             if model.contains("flash") {

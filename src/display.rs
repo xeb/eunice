@@ -36,7 +36,14 @@ pub fn print_model_list() {
         let key_status = get_key_status(&provider, available);
 
         // Check if all models in this provider support tools
-        let all_support_tools = matches!(provider, Provider::OpenAI | Provider::Gemini | Provider::Anthropic | Provider::AzureOpenAI);
+        let all_support_tools = matches!(
+            provider,
+            Provider::Abliteration
+                | Provider::OpenAI
+                | Provider::Gemini
+                | Provider::Anthropic
+                | Provider::AzureOpenAI
+        );
         let tools_note = if all_support_tools { " ✓" } else { "" };
 
         println!(
@@ -74,6 +81,21 @@ pub fn print_model_list() {
 /// Get the status of the API key for a given provider
 fn get_key_status(provider: &Provider, available: bool) -> String {
     match provider {
+        Provider::Abliteration => {
+            if env::var("ABLIT_KEY")
+                .map(|key| !key.trim().is_empty())
+                .unwrap_or(false)
+            {
+                "ABLIT_KEY set".to_string()
+            } else if crate::abliteration::key_file_path()
+                .map(|path| path.is_file())
+                .unwrap_or(false)
+            {
+                "key file".to_string()
+            } else {
+                "not set".to_string()
+            }
+        }
         Provider::Ollama => {
             if available {
                 "running".to_string()
@@ -91,6 +113,20 @@ fn get_key_status(provider: &Provider, available: bool) -> String {
                 }
             } else {
                 "not set".to_string()
+            }
+        }
+        Provider::Local => {
+            if available {
+                "installed".to_string()
+            } else {
+                "not installed".to_string()
+            }
+        }
+        Provider::Gemmad => {
+            if available {
+                "running".to_string()
+            } else {
+                "not running".to_string()
             }
         }
         _ => {
