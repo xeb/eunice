@@ -1,7 +1,7 @@
 //! gemmad daemon integration.
 //!
 //! `gemmad` is a separate, already-running OpenAI-compatible server (local
-//! gemma-4-12b on :18082, Bearer-auth). When it is reachable it becomes the
+//! Gemma 4 model on :18082, Bearer-auth). When it is reachable it becomes the
 //! global default model for eunice. This module owns detection, token
 //! resolution, and the model-selection precedence.
 

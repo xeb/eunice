@@ -51,7 +51,7 @@ pub struct ProviderInfo {
     pub api_key: String,
     pub resolved_model: String,
     pub use_native_gemini_api: bool,
-    /// Azure OpenAI API version (e.g., "2024-02-01")
+    /// Explicit legacy Azure OpenAI API version, if requested
     pub azure_api_version: Option<String>,
 }
 

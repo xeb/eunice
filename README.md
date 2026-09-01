@@ -2,9 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An agentic CLI runner in Rust with unified support for Abliteration AI, OpenAI, Gemini, Claude, and Ollama.
+An agentic CLI runner in Rust with unified support for Abliteration AI, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**13,001 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
+**13,030 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -14,7 +14,7 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 
 ## Features
 
-- **Multi-Provider Support**: Abliteration AI, OpenAI, Google Gemini, Anthropic Claude, and local Ollama models
+- **Multi-Provider Support**: Abliteration AI, OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, Ollama, and local models
 - **4 Built-in Tools**: Bash, Read, Write, and Skill - always available, no configuration needed
 - **Skills System**: User-defined prompts in `~/.eunice/skills/` for reusable capabilities
 - **Smart Defaults**: Automatically selects the best available model (prefers Gemini)
@@ -57,7 +57,7 @@ eunice "List all Rust files in this directory"
 eunice --chat
 
 # Use a specific model
-eunice --model gpt-4o "Explain this code"
+eunice --model gpt-5.6-terra "Explain this code"
 eunice --model sonnet "Review main.rs"
 eunice --model abliterated-model-large-v2 "Inspect this project and run the tests"
 
@@ -82,10 +82,11 @@ Skills are reusable prompts stored in `~/.eunice/skills/<skill-name>/SKILL.md`.
 
 ### Default Skills
 
-Three skills are auto-installed on first run:
+Four skills are auto-installed on first run:
 - **image_analysis**: Analyze images using multimodal AI
 - **web_search**: Search the web for information
 - **git_helper**: Git operations and best practices
+- **pdf_analysis**: Extract and analyze PDF content
 
 ### Creating Custom Skills
 
@@ -109,15 +110,17 @@ The Skill tool searches these directories to find relevant skills for a task.
 | Provider | API Key Variable | Default Model |
 |----------|------------------|---------------|
 | Abliteration AI | `ABLIT_KEY` or `~/.config/ablit/key` | abliterated-model-large-v2 |
-| Google Gemini | `GEMINI_API_KEY` | gemini-3.6-flash |
-| OpenAI | `OPENAI_API_KEY` | gpt-4o |
-| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4 |
+| Google Gemini | `GEMINI_API_KEY` | gemini-3.7-flash |
+| OpenAI | `OPENAI_API_KEY` | gpt-5.6 |
+| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-5 |
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` | (deployment-specific) |
-| Ollama | (no key needed) | llama3.1, glm-4, qwen3, deepseek-r1 |
+| Ollama | (no key needed) | live models from the local Ollama server |
 
 ### Abliteration AI
 
-`abliterated-model-large-v2` uses Abliteration AI's OpenAI-compatible API with Eunice's full
+`abliterated-model-large-v2` is the default; the API also currently serves
+`abliterated-model-large` and `abliterated-model`. All use Abliteration AI's
+OpenAI-compatible API with Eunice's full
 Bash, Read, Write, and Skill tool loop. Set `ABLIT_KEY`, or save the key in
 `~/.config/ablit/key` with mode `0600`:
 
@@ -133,11 +136,19 @@ Set `ABLIT_BASE_URL` to override the default `https://api.abliteration.ai/v1` en
 For convenience, these aliases work:
 
 ```bash
-eunice --model sonnet "..."    # claude-sonnet-4-...
-eunice --model opus "..."      # claude-opus-4-...
-eunice --model flash "..."     # gemini-3.6-flash (default)
+eunice --model fable "..."     # claude-fable-5-1
+eunice --model sonnet "..."    # claude-sonnet-5
+eunice --model opus "..."      # claude-opus-5
+eunice --model haiku "..."     # claude-haiku-4-5-20251001
+eunice --model flash "..."     # gemini-3.7-flash (default)
 eunice --model pro "..."       # gemini-3.1-pro-preview
 ```
+
+`eunice --list-models` shows Eunice's current cloud-model tiers and the models
+reported live by Ollama. The curated cloud list tracks the provider catalogs:
+[OpenAI](https://developers.openai.com/api/docs/models),
+[Gemini](https://ai.google.dev/gemini-api/docs/models), and
+[Claude](https://platform.claude.com/docs/en/models/overview).
 
 ### Azure OpenAI
 
@@ -147,26 +158,28 @@ Azure OpenAI uses the `azure:<deployment-name>` format:
 # Set up Azure OpenAI environment
 export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
 export AZURE_OPENAI_API_KEY="your-api-key"
-export AZURE_OPENAI_API_VERSION="2024-02-01"  # optional, defaults to 2024-02-01
 
 # Use your deployment name after azure:
-eunice --model azure:gpt-4o-mini "Hello"
+eunice --model azure:gpt-5.6-terra "Hello"
 eunice --model azure:my-custom-deployment "Explain this code"
 ```
+
+Eunice uses Azure's current `/openai/v1/` route with implicit versioning. Set
+`AZURE_OPENAI_API_VERSION` only for a legacy dated deployment endpoint.
 
 ## CLI Reference
 
 ```
-eunice [OPTIONS] [PROMPT]
+eunice [OPTIONS] [PROMPT_POSITIONAL]
 
 Arguments:
-  [PROMPT]  The prompt to send to the AI
+  [PROMPT_POSITIONAL]  Positional prompt argument
 
 Options:
       --model <MODEL>          AI model to use
-      --gemma                  Shorthand for --model=gemma4:31b (auto-built local 31B + MTP)
-      --gemmad                 Use the already-running gemmad daemon (local Gemma 4)
-      --no-gemmad              No-op; kept for compatibility (gemmad is never implicit)
+      --gemma                  Shorthand for --model=gemma4:31b (local Gemma 4 31B + MTP)
+      --gemmad                 Use the already-running gemmad daemon and its live model
+      --no-gemmad              No-op; kept for compatibility (gemmad is never used implicitly)
       --prompt <TEXT>          System prompt (inline text or file path)
       --chat                   Interactive chat mode
       --webapp                 Start web server interface
@@ -198,10 +211,10 @@ Options:
 A [`gemmad`](https://github.com/xeb/gemma) daemon (an OpenAI-compatible server for
 Gemma 4 — `gemma-4-26b-a4b` by default — on `127.0.0.1:18082`) is selected with
 `--gemmad`. A running daemon is **not** picked up automatically; the smart default
-(`gemini-3.6-flash`) stays the default even when it is reachable:
+(`gemini-3.7-flash`) stays the default even when it is reachable:
 
 ```bash
-eunice "Summarize this file"     # smart-default (gemini-3.6-flash), daemon or not
+eunice "Summarize this file"     # smart-default (gemini-3.7-flash), daemon or not
 eunice --gemmad "..."            # use the daemon; errors if it is not reachable
 eunice --no-gemmad "..."         # accepted but now a no-op; gemmad is never implicit
 ```
@@ -317,7 +330,7 @@ eunice --uninstall-service          # stop, disable, and remove the unit
 
 ## Architecture
 
-Eunice v1.0.11 follows a "sophisticated simplicity" design:
+Eunice v1.0.12 follows a "sophisticated simplicity" design:
 
 1. **No configuration files** - just environment variables for API keys
 2. **No external MCP servers** - 4 built-in tools cover most use cases
@@ -336,6 +349,7 @@ MIT License
 
 ## Version History
 
+- **v1.0.12**: Current model catalogs/defaults for every provider and Azure OpenAI v1 endpoint support
 - **v1.0.11**: Abliteration AI `abliterated-model-large-v2` provider with full tool calling
 - **v1.0.1**: Azure OpenAI support, GLM model support, --debug flag
 - **v1.0.0**: Major simplification - 4 built-in tools, skills system, no MCP/orchestrator

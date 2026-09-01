@@ -1,4 +1,4 @@
-# Eunice v1.0.11
+# Eunice v1.0.12
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
 
@@ -41,7 +41,7 @@ eunice --chat
 # Use a specific model
 eunice --model flash "Hello"
 eunice --model sonnet "Explain this code"
-eunice --model azure:gpt-4o-mini "Hello from Azure"
+eunice --model azure:gpt-5.6-terra "Hello from Azure"
 eunice --model abliterated-model-large-v2 "Inspect this project and run the tests"
 ```
 
@@ -94,23 +94,29 @@ Set `ABLIT_KEY`, or save the key in `~/.config/ablit/key` with mode 0600.
 Model: `abliterated-model-large-v2`. `ABLIT_BASE_URL` overrides the API base URL.
 
 ### Google Gemini (Default)
-Set `GEMINI_API_KEY`. Default model: `gemini-3-flash-preview`
-Aliases: `flash` -> gemini-3-flash-preview, `pro` -> gemini-3-pro-preview
+Set `GEMINI_API_KEY`. Current tiers: `gemini-3.7-flash` (default),
+`gemini-3.1-pro-preview`, and `gemini-3.5-flash-lite`.
+Aliases: `flash` -> gemini-3.7-flash, `pro` -> gemini-3.1-pro-preview
 
 ### OpenAI
-Set `OPENAI_API_KEY`. Models: gpt-4o, gpt-4o-mini, o1, o3, etc.
+Set `OPENAI_API_KEY`. Current tiers: `gpt-5.6`/`gpt-5.6-sol`,
+`gpt-5.6-terra`, `gpt-5.6-luna`, and `gpt-5.3-codex`.
 
 ### Anthropic Claude
-Set `ANTHROPIC_API_KEY`. Models: claude-sonnet-4, claude-opus-4, etc.
-Aliases: `sonnet`, `opus`, `haiku`
+Set `ANTHROPIC_API_KEY`. Current models: `claude-fable-5-1`,
+`claude-opus-5`, `claude-sonnet-5`, and `claude-haiku-4-5-20251001`.
+Aliases: `fable`, `opus`, `sonnet`, `haiku`
 
 ### Azure OpenAI
 Set `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`.
-Optional: `AZURE_OPENAI_API_VERSION` (default: 2024-02-01)
-Usage: `--model azure:<deployment-name>`
+Usage: `--model azure:<deployment-name>`. Eunice uses the current `/openai/v1/`
+route with implicit versioning; `AZURE_OPENAI_API_VERSION` opts into the legacy
+dated deployment route.
 
 ### Ollama (Local)
-Runs against localhost:11434. Tool-capable models: llama3.1, llama3.2, qwen2.5, qwen3, glm, deepseek, mistral-nemo, etc.
+Runs against localhost:11434. `--list-models` reports live tags dynamically.
+Current tool-capable families include Gemma 4, Qwen 3/4, GLM 5, DeepSeek V4,
+Granite 4, Mistral 3, GPT-OSS, and Nemotron.
 
 ## CLI Reference
 
@@ -176,7 +182,7 @@ For high-volume usage, place multiple Gemini API keys in `~/.eunice/gemini-api-k
 
 ## Version
 
-v1.0.11
+v1.0.12
 
 ## License
 

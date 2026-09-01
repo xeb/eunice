@@ -1,8 +1,8 @@
 [package]
 name = "eunice"
-version = "1.0.11"
+version = "1.0.12"
 edition = "2021"
-description = "Agentic CLI runner with Abliteration AI, OpenAI, Gemini, Claude, and Ollama support"
+description = "Agentic CLI runner with Abliteration AI, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local model support"
 license = "MIT"
 authors = ["Mark Kockerbeck <xeb@hey.com>"]
 repository = "https://github.com/xeb/eunice"

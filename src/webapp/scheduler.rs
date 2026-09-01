@@ -1438,7 +1438,7 @@ mod tests {
     fn test_agents_response_serializes_contract_field_names() {
         let response = AgentsResponse {
             agents_file: Some("/home/xeb/agents/agents.toml".to_string()),
-            server_model: "claude-sonnet-4-5".to_string(),
+            server_model: "claude-sonnet-5".to_string(),
             editable: true,
             fingerprint: "0123456789abcdef".to_string(),
             loaded_at: 1784534400,
@@ -1476,7 +1476,7 @@ mod tests {
             json["agents_file"],
             "/home/xeb/agents/agents.toml"
         );
-        assert_eq!(json["server_model"], "claude-sonnet-4-5");
+        assert_eq!(json["server_model"], "claude-sonnet-5");
         assert_eq!(json["editable"], true);
         assert_eq!(json["fingerprint"], "0123456789abcdef");
         assert_eq!(json["loaded_at"], 1784534400);

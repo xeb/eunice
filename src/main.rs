@@ -34,7 +34,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const LLMS_FULL_TXT: &str = include_str!("../llms-full.txt");
 
 #[derive(Parser)]
-#[command(name = "eunice", about = "Agentic CLI runner with Abliteration AI, OpenAI, Gemini, Claude, and Ollama support", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
+#[command(name = "eunice", about = "Agentic CLI runner with Abliteration AI, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local model support", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 struct Args {
     /// AI model to use
     #[arg(long)]
@@ -44,7 +44,7 @@ struct Args {
     #[arg(long)]
     gemma: bool,
 
-    /// Use the already-running gemmad daemon (local gemma-4-12b); error if unreachable
+    /// Use the already-running gemmad daemon and its live model; error if unreachable
     #[arg(long)]
     gemmad: bool,
 
@@ -499,7 +499,7 @@ async fn main() -> Result<()> {
     if !supports_tools(&provider_info.provider, &model) {
         eprintln!("Warning: Model '{}' may not support function calling.", model);
         eprintln!("Running in text-only mode (no Bash/Read/Write/Skill tools available).");
-        eprintln!("Tip: For full tool support, try: llama3.1, qwen2.5, or mistral-nemo\n");
+        eprintln!("Tip: For full tool support, try: gemma4, qwen3.6, or glm-5.3\n");
     }
 
     // Create client

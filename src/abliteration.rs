@@ -9,6 +9,11 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_BASE_URL: &str = "https://api.abliteration.ai/v1";
 pub const DEFAULT_MODEL: &str = "abliterated-model-large-v2";
+pub const AVAILABLE_MODELS: &[&str] = &[
+    DEFAULT_MODEL,
+    "abliterated-model-large",
+    "abliterated-model",
+];
 pub const REASONING_EFFORT: &str = "high";
 pub const MAX_COMPLETION_TOKENS: u32 = 4096;
 
@@ -100,10 +105,10 @@ mod tests {
 
     #[test]
     fn recognizes_published_model_ids() {
-        assert!(is_model("abliterated-model"));
-        assert!(is_model("abliterated-model-large"));
-        assert!(is_model(DEFAULT_MODEL));
-        assert!(!is_model("gpt-4o"));
+        for model in AVAILABLE_MODELS {
+            assert!(is_model(model));
+        }
+        assert!(!is_model("gpt-5.6-sol"));
     }
 
     #[test]

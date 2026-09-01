@@ -1,4 +1,4 @@
-# Eunice v1.0.11 - Development Guide
+# Eunice v1.0.12 - Development Guide
 
 ## About
 
@@ -16,13 +16,13 @@ User Input -> Provider Detection -> Client -> API Request -> Response
 
 **Special Case: Gemini API Dual Support**
 - Gemini 1.x/2.x models: Use OpenAI-compatible API (`/v1beta/openai/`)
-- Gemini 3.x models (`gemini-3*`, e.g. `gemini-3.6-flash` (the default), `gemini-3.1-pro-preview`): Use native Gemini API (`/v1beta/models/{model}:generateContent`) — required because Gemini 3 thought signatures must be round-tripped on function calls
+- Gemini 3.x models (`gemini-3*`, e.g. `gemini-3.7-flash` (the default), `gemini-3.1-pro-preview`): Use native Gemini API (`/v1beta/models/{model}:generateContent`) — required because Gemini 3 thought signatures must be round-tripped on function calls
 
 ### Key Components
 
 1. **Provider Detection** (`src/provider.rs`)
    - Detects model -> provider mapping
-   - Handles model aliases (e.g., `sonnet` -> `claude-sonnet-4-...`)
+   - Handles model aliases (e.g., `sonnet` -> `claude-sonnet-5`)
    - Sets `use_native_gemini_api` flag for special models
    - `supports_tools()` function for Ollama model capability detection
 
@@ -248,6 +248,7 @@ println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
 ## Version History
 
+- **v1.0.12**: Current provider model catalogs/defaults, pricing, bundled skill models, and Azure OpenAI v1 route
 - **v1.0.11**: Abliteration AI `abliterated-model-large-v2` provider with OpenAI-compatible tool calling
 - **v1.0.0**: Major simplification
   - 4 built-in tools (Bash, Read, Write, Skill)

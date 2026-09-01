@@ -76,64 +76,56 @@ fn get_pricing(model: &str, provider: &Provider) -> (f64, f64) {
             (5.00, 5.00)
         }
         Provider::Gemini => {
-            // Gemini pricing as of 2025
-            if model.contains("flash") {
-                (0.075, 0.30)  // gemini-2.0-flash, gemini-2.5-flash
-            } else if model.contains("pro-preview") || model.contains("3-pro") {
-                (1.25, 10.00)  // gemini-3-pro-preview
-            } else if model.contains("pro") {
-                (1.25, 5.00)   // gemini-2.5-pro
+            // Standard Gemini Developer API pricing as of 2026-09-01.
+            if model.contains("3.1-pro") {
+                (2.00, 12.00)
+            } else if model.contains("3.5-flash-lite") {
+                (0.30, 2.50)
+            } else if model.contains("3.1-flash-lite") {
+                (0.25, 1.50)
+            } else if model.contains("3.7-flash") || model.contains("3.6-flash") {
+                // Promotional rate through 2026-12-31.
+                (0.75, 3.75)
+            } else if model.contains("3.5-flash") {
+                (1.50, 9.00)
+            } else if model.contains("3-flash") {
+                (0.50, 3.00)
             } else {
-                (0.10, 0.40)   // Default/unknown Gemini
+                (0.75, 3.75) // Default to the current Flash tier
             }
         }
         Provider::Anthropic => {
-            // Anthropic pricing as of 2025
-            if model.contains("opus") {
-                (15.00, 75.00)
+            // Claude API pricing as of 2026-09-01.
+            if model.contains("fable") {
+                (10.00, 50.00)
+            } else if model.contains("opus") {
+                (5.00, 25.00)
             } else if model.contains("sonnet") {
-                (3.00, 15.00)
+                (2.00, 10.00)
             } else if model.contains("haiku") {
-                (0.25, 1.25)
+                (1.00, 5.00)
             } else {
-                (3.00, 15.00)  // Default to sonnet pricing
+                (2.00, 10.00) // Default to Sonnet 5 pricing
             }
         }
-        Provider::OpenAI => {
-            // OpenAI pricing as of 2025
-            if model.contains("gpt-4o-mini") {
-                (0.15, 0.60)
-            } else if model.contains("gpt-4o") {
-                (2.50, 10.00)
-            } else if model.contains("gpt-4-turbo") {
-                (10.00, 30.00)
-            } else if model.contains("gpt-3.5") {
-                (0.50, 1.50)
-            } else if model.contains("o1-preview") {
-                (15.00, 60.00)
-            } else if model.contains("o1-mini") {
-                (3.00, 12.00)
+        Provider::OpenAI | Provider::AzureOpenAI => {
+            // OpenAI standard pricing as of 2026-09-01. Azure prices vary by
+            // deployment and region, so these are estimates for Azure.
+            if model.contains("gpt-5.6-luna") {
+                (0.20, 1.20)
+            } else if model.contains("gpt-5.6-terra") {
+                (2.00, 12.00)
+            } else if model.contains("gpt-5.3-codex") {
+                (1.75, 14.00)
+            } else if model == "gpt-5.6" || model.contains("gpt-5.6-sol") {
+                (4.00, 20.00)
             } else {
-                (2.50, 10.00)  // Default to gpt-4o pricing
+                (4.00, 20.00) // Default to GPT-5.6 Sol pricing
             }
         }
         Provider::Ollama => {
             // Ollama is free (local)
             (0.0, 0.0)
-        }
-        Provider::AzureOpenAI => {
-            // Azure OpenAI pricing varies by deployment, use similar to OpenAI
-            if model.contains("gpt-4o-mini") {
-                (0.15, 0.60)
-            } else if model.contains("gpt-4o") {
-                (2.50, 10.00)
-            } else if model.contains("gpt-4") {
-                (10.00, 30.00)
-            } else if model.contains("gpt-35") || model.contains("gpt-3.5") {
-                (0.50, 1.50)
-            } else {
-                (2.50, 10.00)  // Default to gpt-4o pricing
-            }
         }
         Provider::Local => {
             // Local inference is free
@@ -204,9 +196,9 @@ mod tests {
             cached_tokens: 0,
         });
 
-        let cost = session.estimate_cost("gemini-2.5-flash", &Provider::Gemini);
-        // $0.075/1M input + $0.30/1M output = $0.375
-        assert!((cost - 0.375).abs() < 0.001);
+        let cost = session.estimate_cost("gemini-3.7-flash", &Provider::Gemini);
+        // $0.75/1M input + $3.75/1M output = $4.50
+        assert!((cost - 4.50).abs() < 0.001);
     }
 
     #[test]
@@ -219,9 +211,20 @@ mod tests {
             cached_tokens: 0,
         });
 
-        let cost = session.estimate_cost("claude-sonnet-4", &Provider::Anthropic);
-        // $3.00/1M input + $15.00/1M output = $18.00
-        assert!((cost - 18.0).abs() < 0.001);
+        let cost = session.estimate_cost("claude-sonnet-5", &Provider::Anthropic);
+        // $2.00/1M input + $10.00/1M output = $12.00
+        assert!((cost - 12.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_current_model_pricing() {
+        assert_eq!(get_pricing("gpt-5.6-sol", &Provider::OpenAI), (4.0, 20.0));
+        assert_eq!(get_pricing("gpt-5.6-terra", &Provider::OpenAI), (2.0, 12.0));
+        assert_eq!(get_pricing("gpt-5.6-luna", &Provider::OpenAI), (0.2, 1.2));
+        assert_eq!(get_pricing("gpt-5.3-codex", &Provider::OpenAI), (1.75, 14.0));
+        assert_eq!(get_pricing("claude-fable-5-1", &Provider::Anthropic), (10.0, 50.0));
+        assert_eq!(get_pricing("claude-opus-5", &Provider::Anthropic), (5.0, 25.0));
+        assert_eq!(get_pricing("claude-haiku-4-5-20251001", &Provider::Anthropic), (1.0, 5.0));
     }
 
     #[test]
@@ -243,7 +246,7 @@ mod tests {
             cached_tokens: 1000,
         });
 
-        let summary = session.format_summary("gemini-2.5-flash", &Provider::Gemini);
+        let summary = session.format_summary("gemini-3.7-flash", &Provider::Gemini);
         assert!(summary.contains("12,345 in"));
         assert!(summary.contains("6,789 out"));
         assert!(summary.contains("1,000 cached"));
@@ -260,7 +263,7 @@ mod tests {
             cached_tokens: 0,
         });
 
-        let cost = session.estimate_cost("llama3", &Provider::Ollama);
+        let cost = session.estimate_cost("gemma4", &Provider::Ollama);
         assert_eq!(cost, 0.0);
     }
 }

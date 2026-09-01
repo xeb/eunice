@@ -35,7 +35,7 @@ pub struct Client {
     provider: Provider,
     use_native_gemini_api: bool,
     retry_config: RetryConfig,
-    /// Azure OpenAI API version (e.g., "2024-02-01")
+    /// Explicit legacy Azure OpenAI API version, if requested
     azure_api_version: Option<String>,
     /// Enable debug output
     debug: bool,
@@ -167,9 +167,15 @@ impl Client {
 
         // Standard OpenAI-compatible API
         let url = if let Provider::AzureOpenAI = self.provider {
-            // Azure OpenAI: {base_url}{deployment}/chat/completions?api-version={version}
-            let api_version = self.azure_api_version.as_deref().unwrap_or("2024-02-01");
-            format!("{}{}/chat/completions?api-version={}", self.base_url, model, api_version)
+            if let Some(api_version) = self.azure_api_version.as_deref() {
+                // Legacy deployment route, selected explicitly with
+                // AZURE_OPENAI_API_VERSION.
+                format!("{}{}/chat/completions?api-version={}", self.base_url, model, api_version)
+            } else {
+                // Current Azure OpenAI v1 route; deployment name is sent as
+                // the request's model and versioning is implicit.
+                format!("{}chat/completions", self.base_url)
+            }
         } else {
             format!("{}chat/completions", self.base_url)
         };
@@ -1069,7 +1075,7 @@ mod tests {
             provider: Provider::Gemini,
             base_url: "https://test.com/".to_string(),
             api_key: "test-key".to_string(),
-            resolved_model: "gemini-3-pro-preview".to_string(),
+            resolved_model: "gemini-3.1-pro-preview".to_string(),
             use_native_gemini_api: true,
             azure_api_version: None,
         };

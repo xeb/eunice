@@ -34,14 +34,19 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
             // Known tool-supporting model families
             let tool_families = [
                 "llama3.1", "llama3.2", "llama3.3",
-                "qwen2", "qwen2.5", "qwen3",
-                "mistral-nemo", "mistral-large",
+                "llama4",
+                "qwen2", "qwen2.5", "qwen3", "qwen4",
+                "mistral-nemo", "mistral-large", "mistral-small", "mistral-medium",
+                "devstral", "magistral",
                 "command-r",
                 "granite",
                 "hermes",
                 "deepseek",
                 "glm",
-                "gemma4",
+                "gemma3", "gemma4",
+                "gpt-oss",
+                "nemotron",
+                "phi4",
             ];
 
             tool_families.iter().any(|f| model_lower.contains(f))
@@ -53,39 +58,47 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
 pub fn check_ollama_available(model: Option<&str>) -> Result<Vec<String>> {
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let url = format!("{}/api/tags", ollama_host);
+    let target_model = model.map(str::to_string);
 
-    let response = reqwest::blocking::get(&url);
-    match response {
-        Ok(resp) => {
-            if resp.status().is_success() {
-                let tags: OllamaTagsResponse = resp.json()?;
-                let models: Vec<String> = tags.models.into_iter().map(|m| m.name).collect();
+    // reqwest's blocking client owns a small Tokio runtime. Creating and
+    // dropping it directly inside Eunice's async runtime can panic, so keep
+    // the blocking probe on a plain OS thread.
+    std::thread::spawn(move || {
+        let response = reqwest::blocking::get(&url);
+        match response {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    let tags: OllamaTagsResponse = resp.json()?;
+                    let models: Vec<String> = tags.models.into_iter().map(|m| m.name).collect();
 
-                if let Some(target_model) = model {
-                    if models.iter().any(|m| m == target_model || m.starts_with(&format!("{}:", target_model))) {
-                        Ok(models)
+                    if let Some(target_model) = target_model {
+                        if models.iter().any(|m| {
+                            m == &target_model || m.starts_with(&format!("{}:", target_model))
+                        }) {
+                            Ok(models)
+                        } else {
+                            Err(anyhow!("Model '{}' not found in Ollama", target_model))
+                        }
                     } else {
-                        Err(anyhow!("Model '{}' not found in Ollama", target_model))
+                        Ok(models)
                     }
                 } else {
-                    Ok(models)
+                    Err(anyhow!("Ollama returned error status: {}", resp.status()))
                 }
-            } else {
-                Err(anyhow!("Ollama returned error status: {}", resp.status()))
             }
+            Err(_) => Err(anyhow!("Ollama not available at {}", ollama_host)),
         }
-        Err(_) => Err(anyhow!("Ollama not available at {}", ollama_host)),
-    }
+    })
+    .join()
+    .map_err(|_| anyhow!("Ollama availability probe panicked"))?
 }
 
 /// Resolve Anthropic model aliases to full model names
 fn resolve_anthropic_alias(model: &str) -> &str {
     match model {
-        "sonnet" | "claude-sonnet" => "claude-sonnet-4-20250514",
-        "sonnet-4.5" => "claude-sonnet-4-5-20250929",
-        "opus" | "claude-opus" => "claude-opus-4-5-20251101", // Updated to Opus 4.5
-        "opus-4.5" => "claude-opus-4-5-20251101",
-        "opus-4.1" => "claude-opus-4-1-20250805",
+        "fable" | "claude-fable" | "fable-5.1" => "claude-fable-5-1",
+        "sonnet" | "claude-sonnet" | "sonnet-5" | "sonnet-4.5" => "claude-sonnet-5",
+        "opus" | "claude-opus" | "opus-5" | "opus-4.5" | "opus-4.1" => "claude-opus-5",
         "haiku" | "claude-haiku" => "claude-haiku-4-5-20251001",
         "haiku-4.5" => "claude-haiku-4-5-20251001",
         _ => model,
@@ -95,10 +108,9 @@ fn resolve_anthropic_alias(model: &str) -> &str {
 /// Resolve Gemini model aliases to full model names
 fn resolve_gemini_alias(model: &str) -> &str {
     match model {
-        "flash" => "gemini-3.6-flash",
+        "flash" => "gemini-3.7-flash",
         "gemini-3-flash" => "gemini-3-flash-preview",
-        "pro" | "gemini-3.1-pro" => "gemini-3.1-pro-preview",
-        "gemini-3-pro" => "gemini-3-pro-preview",
+        "pro" | "gemini-3-pro" | "gemini-3.1-pro" => "gemini-3.1-pro-preview",
         _ => model,
     }
 }
@@ -172,12 +184,16 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     // 2. Check for Anthropic/Claude models (explicit prefix/names)
     if model.starts_with("claude")
         || model == "sonnet"
+        || model == "sonnet-5"
         || model == "sonnet-4.5"
         || model == "opus"
+        || model == "opus-5"
         || model == "opus-4.5"
         || model == "opus-4.1"
         || model == "haiku"
         || model == "haiku-4.5"
+        || model == "fable"
+        || model == "fable-5.1"
     {
         let api_key = env::var("ANTHROPIC_API_KEY")
             .map_err(|_| anyhow!("ANTHROPIC_API_KEY required for model '{}'", model))?;
@@ -200,19 +216,25 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             .map_err(|_| anyhow!("AZURE_OPENAI_ENDPOINT required for Azure OpenAI models"))?;
         let api_key = env::var("AZURE_OPENAI_API_KEY")
             .map_err(|_| anyhow!("AZURE_OPENAI_API_KEY required for Azure OpenAI models"))?;
-        let api_version = env::var("AZURE_OPENAI_API_VERSION")
-            .unwrap_or_else(|_| "2024-02-01".to_string());
-
         // Normalize endpoint (remove trailing slash if present)
         let endpoint = endpoint.trim_end_matches('/');
+        // Azure's current OpenAI v1 route uses implicit versioning. Preserve
+        // the dated deployment route only when a caller explicitly requests a
+        // legacy API version.
+        let api_version = env::var("AZURE_OPENAI_API_VERSION").ok();
+        let base_url = if api_version.is_some() {
+            format!("{}/openai/deployments/", endpoint)
+        } else {
+            format!("{}/openai/v1/", endpoint)
+        };
 
         return Ok(ProviderInfo {
             provider: Provider::AzureOpenAI,
-            base_url: format!("{}/openai/deployments/", endpoint),
+            base_url,
             api_key,
             resolved_model: deployment.to_string(),
             use_native_gemini_api: false,
-            azure_api_version: Some(api_version),
+            azure_api_version: api_version,
         });
     }
 
@@ -303,9 +325,9 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
 
 /// Get the smart default model based on available providers
 pub fn get_smart_default_model() -> Result<String> {
-    // 1. Try Gemini first (preferred default) - use gemini-3.6-flash
+    // 1. Try Gemini first (preferred default) - use the latest stable Flash
     if env::var("GEMINI_API_KEY").is_ok() {
-        return Ok("gemini-3.6-flash".to_string());
+        return Ok("gemini-3.7-flash".to_string());
     }
 
     // 2. Try Anthropic
@@ -315,13 +337,21 @@ pub fn get_smart_default_model() -> Result<String> {
 
     // 3. Try OpenAI
     if env::var("OPENAI_API_KEY").is_ok() {
-        return Ok("gpt-5.1".to_string());
+        return Ok("gpt-5.6".to_string());
     }
 
     // 4. Try Ollama (local models)
     if let Ok(models) = check_ollama_available(None) {
         // Preferred Ollama models in order
-        let preferred = ["llama3.1:latest", "deepseek-r1:latest", "gpt-oss:latest"];
+        let preferred = [
+            "gemma4:latest",
+            "qwen3.6:latest",
+            "glm-5.3-flash:latest",
+            "qwen3.5:latest",
+            "glm-4.7-flash:latest",
+            "gpt-oss:latest",
+            "deepseek-r1:latest",
+        ];
 
         for pref in &preferred {
             if models.iter().any(|m| m == *pref) {
@@ -351,47 +381,43 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 
     result.push((
         Provider::Abliteration,
-        vec![crate::abliteration::DEFAULT_MODEL.to_string()],
+        crate::abliteration::AVAILABLE_MODELS
+            .iter()
+            .map(|model| {
+                if *model == crate::abliteration::DEFAULT_MODEL {
+                    format!("{} (default)", model)
+                } else {
+                    (*model).to_string()
+                }
+            })
+            .collect(),
         crate::abliteration::is_configured(),
     ));
 
     // OpenAI
     let openai_models = vec![
-        "gpt-5.1".to_string(),
-        "gpt-5.1-codex".to_string(),
-        "gpt-5.1-codex-mini".to_string(),
-        "gpt-5.1-codex-max".to_string(),
-        "gpt-4o".to_string(),
-        "gpt-4-turbo".to_string(),
-        "o1".to_string(),
-        "o3".to_string(),
-        "o3-mini".to_string(),
+        "gpt-5.6, gpt-5.6-sol (default/flagship)".to_string(),
+        "gpt-5.6-terra (balanced)".to_string(),
+        "gpt-5.6-luna (fast/economical)".to_string(),
+        "gpt-5.3-codex (agentic coding)".to_string(),
     ];
     let openai_available = env::var("OPENAI_API_KEY").is_ok();
     result.push((Provider::OpenAI, openai_models, openai_available));
 
     // Gemini
     let gemini_models = vec![
-        "gemini-3.6-flash, flash (default)".to_string(),
-        "gemini-3.1-pro, gemini-3.1-pro-preview".to_string(),
-        "gemini-3.5-flash".to_string(),
-        "gemini-3-flash, gemini-3-flash-preview".to_string(),
-        "gemini-3-pro, gemini-3-pro-preview".to_string(),
-        "gemini-2.5-flash".to_string(),
-        "gemini-2.5-flash-lite".to_string(),
-        "gemini-2.5-pro".to_string(),
-        "gemini-1.5-flash".to_string(),
-        "gemini-1.5-pro".to_string(),
+        "gemini-3.7-flash, flash (default)".to_string(),
+        "gemini-3.1-pro-preview, pro (latest Pro)".to_string(),
+        "gemini-3.5-flash-lite (latest Flash-Lite)".to_string(),
     ];
     let gemini_available = env::var("GEMINI_API_KEY").is_ok();
     result.push((Provider::Gemini, gemini_models, gemini_available));
 
     // Anthropic
     let anthropic_models = vec![
-        "opus, opus-4.5 (claude-opus-4-5-20251101)".to_string(),
-        "sonnet (claude-sonnet-4-20250514)".to_string(),
-        "sonnet-4.5 (claude-sonnet-4-5-20250929)".to_string(),
-        "opus-4.1 (claude-opus-4-1-20250805)".to_string(),
+        "fable, fable-5.1 (claude-fable-5-1)".to_string(),
+        "opus, opus-5 (claude-opus-5)".to_string(),
+        "sonnet, sonnet-5 (claude-sonnet-5)".to_string(),
         "haiku, haiku-4.5 (claude-haiku-4-5-20251001)".to_string(),
     ];
     let anthropic_available = env::var("ANTHROPIC_API_KEY").is_ok();
@@ -435,6 +461,13 @@ mod tests {
     // Tests that set/remove shared env vars (GEMINI_API_KEY etc.) must not run
     // in parallel — one test's remove_var would race another's set_var.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[tokio::test]
+    async fn test_ollama_probe_is_safe_inside_async_runtime() {
+        // The result depends on whether Ollama is running, but the blocking
+        // HTTP client must never panic when called from Eunice's Tokio runtime.
+        let _ = check_ollama_available(None);
+    }
 
     #[test]
     fn test_gemma4_31b_routes_local() {
@@ -488,33 +521,36 @@ mod tests {
 
     #[test]
     fn test_anthropic_alias_resolution() {
-        assert_eq!(resolve_anthropic_alias("sonnet"), "claude-sonnet-4-20250514");
-        assert_eq!(resolve_anthropic_alias("opus"), "claude-opus-4-5-20251101");
-        assert_eq!(resolve_anthropic_alias("opus-4.5"), "claude-opus-4-5-20251101");
-        assert_eq!(resolve_anthropic_alias("opus-4.1"), "claude-opus-4-1-20250805");
+        assert_eq!(resolve_anthropic_alias("fable"), "claude-fable-5-1");
+        assert_eq!(resolve_anthropic_alias("fable-5.1"), "claude-fable-5-1");
+        assert_eq!(resolve_anthropic_alias("sonnet"), "claude-sonnet-5");
+        assert_eq!(resolve_anthropic_alias("sonnet-5"), "claude-sonnet-5");
+        assert_eq!(resolve_anthropic_alias("opus"), "claude-opus-5");
+        assert_eq!(resolve_anthropic_alias("opus-5"), "claude-opus-5");
+        // Historical short aliases migrate to the current tier.
+        assert_eq!(resolve_anthropic_alias("opus-4.5"), "claude-opus-5");
+        assert_eq!(resolve_anthropic_alias("opus-4.1"), "claude-opus-5");
         assert_eq!(resolve_anthropic_alias("haiku"), "claude-haiku-4-5-20251001");
-        assert_eq!(resolve_anthropic_alias("sonnet-4.5"), "claude-sonnet-4-5-20250929");
+        assert_eq!(resolve_anthropic_alias("sonnet-4.5"), "claude-sonnet-5");
         assert_eq!(resolve_anthropic_alias("haiku-4.5"), "claude-haiku-4-5-20251001");
         // Pass through if not an alias
-        assert_eq!(resolve_anthropic_alias("claude-sonnet-4-20250514"), "claude-sonnet-4-20250514");
+        assert_eq!(resolve_anthropic_alias("claude-fable-5-1"), "claude-fable-5-1");
     }
 
     #[test]
-    fn test_gemini_3_pro_preview_uses_native_api() {
+    fn test_gemini_3_7_flash_uses_native_api() {
         let _lock = ENV_LOCK.lock().unwrap();
-        // Set a dummy API key for testing
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
-        let result = detect_provider("gemini-3-pro-preview");
+        let result = detect_provider("gemini-3.7-flash");
         assert!(result.is_ok());
 
         let provider_info = result.unwrap();
         assert_eq!(provider_info.provider, Provider::Gemini);
         assert!(provider_info.use_native_gemini_api);
         assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
-        assert_eq!(provider_info.resolved_model, "gemini-3-pro-preview");
+        assert_eq!(provider_info.resolved_model, "gemini-3.7-flash");
 
-        // Clean up
         std::env::remove_var("GEMINI_API_KEY");
     }
 
@@ -569,29 +605,29 @@ mod tests {
     }
 
     #[test]
-    fn test_gemini_3_6_flash_uses_native_api() {
+    fn test_gemini_flash_alias_uses_latest_native_api() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
         // Reached through the `gemini-3` prefix rather than an entry in the alias
         // table, so this also guards that a future `gemini-3.x` needs no new match arm.
-        for model in ["gemini-3.6-flash", "flash"] {
+        for model in ["gemini-3.7-flash", "flash"] {
             let provider_info = detect_provider(model).unwrap();
             assert_eq!(provider_info.provider, Provider::Gemini);
             assert!(provider_info.use_native_gemini_api, "{} should use native API", model);
             assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
-            assert_eq!(provider_info.resolved_model, "gemini-3.6-flash");
+            assert_eq!(provider_info.resolved_model, "gemini-3.7-flash");
         }
 
         std::env::remove_var("GEMINI_API_KEY");
     }
 
     #[test]
-    fn test_smart_default_prefers_gemini_3_6_flash() {
+    fn test_smart_default_prefers_gemini_3_7_flash() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
-        assert_eq!(get_smart_default_model().unwrap(), "gemini-3.6-flash");
+        assert_eq!(get_smart_default_model().unwrap(), "gemini-3.7-flash");
 
         std::env::remove_var("GEMINI_API_KEY");
     }
@@ -599,15 +635,14 @@ mod tests {
     #[test]
     fn test_gemini_alias_resolution() {
         assert_eq!(resolve_gemini_alias("gemini-3-flash"), "gemini-3-flash-preview");
-        assert_eq!(resolve_gemini_alias("gemini-3-pro"), "gemini-3-pro-preview");
+        assert_eq!(resolve_gemini_alias("gemini-3-pro"), "gemini-3.1-pro-preview");
         assert_eq!(resolve_gemini_alias("gemini-3.1-pro"), "gemini-3.1-pro-preview");
         // Short aliases. `flash` tracks the newest flash model, so it moves with
         // each release; the versioned ids stay pinned.
-        assert_eq!(resolve_gemini_alias("flash"), "gemini-3.6-flash");
+        assert_eq!(resolve_gemini_alias("flash"), "gemini-3.7-flash");
         assert_eq!(resolve_gemini_alias("pro"), "gemini-3.1-pro-preview");
         // Pass through if not an alias
-        assert_eq!(resolve_gemini_alias("gemini-2.5-flash"), "gemini-2.5-flash");
-        assert_eq!(resolve_gemini_alias("gemini-3.5-flash"), "gemini-3.5-flash");
+        assert_eq!(resolve_gemini_alias("gemini-3.5-flash-lite"), "gemini-3.5-flash-lite");
     }
 
     #[test]
@@ -622,12 +657,12 @@ mod tests {
         assert!(provider_info.use_native_gemini_api);
         assert_eq!(provider_info.resolved_model, "gemini-3-flash-preview");
 
-        // Test gemini-3-pro alias
+        // The old major-only Pro alias now tracks the current Pro preview.
         let result = detect_provider("gemini-3-pro");
         assert!(result.is_ok());
         let provider_info = result.unwrap();
         assert!(provider_info.use_native_gemini_api);
-        assert_eq!(provider_info.resolved_model, "gemini-3-pro-preview");
+        assert_eq!(provider_info.resolved_model, "gemini-3.1-pro-preview");
 
         // Test gemini-3.1-pro alias
         let result = detect_provider("gemini-3.1-pro");
@@ -640,11 +675,15 @@ mod tests {
     }
 
     #[test]
-    fn test_other_gemini_models_use_openai_compatible() {
+    fn test_latest_gemini_tiers_use_native_api() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
-        let models = vec!["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
+        let models = vec![
+            "gemini-3.7-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-pro-preview",
+        ];
 
         for model in models {
             let result = detect_provider(model);
@@ -652,8 +691,8 @@ mod tests {
 
             let provider_info = result.unwrap();
             assert_eq!(provider_info.provider, Provider::Gemini);
-            assert!(!provider_info.use_native_gemini_api);
-            assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/openai/");
+            assert!(provider_info.use_native_gemini_api);
+            assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
         }
 
         std::env::remove_var("GEMINI_API_KEY");
@@ -670,7 +709,7 @@ mod tests {
         let provider_info = result.unwrap();
         assert_eq!(provider_info.provider, Provider::Anthropic);
         assert!(!provider_info.use_native_gemini_api);
-        assert_eq!(provider_info.resolved_model, "claude-sonnet-4-20250514");
+        assert_eq!(provider_info.resolved_model, "claude-sonnet-5");
 
         std::env::remove_var("ANTHROPIC_API_KEY");
     }
@@ -680,7 +719,7 @@ mod tests {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("OPENAI_API_KEY", "test-key");
 
-        let models = vec!["gpt-4o", "gpt-4", "o1", "o1-mini"];
+        let models = vec!["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.3-codex"];
 
         for model in models {
             let result = detect_provider(model);
@@ -699,15 +738,16 @@ mod tests {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
         std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
+        std::env::remove_var("AZURE_OPENAI_API_VERSION");
 
-        let result = detect_provider("azure:gpt-4o-mini");
+        let result = detect_provider("azure:gpt-5.6-terra");
         assert!(result.is_ok());
 
         let provider_info = result.unwrap();
         assert_eq!(provider_info.provider, Provider::AzureOpenAI);
-        assert_eq!(provider_info.resolved_model, "gpt-4o-mini");
-        assert_eq!(provider_info.base_url, "https://test.openai.azure.com/openai/deployments/");
-        assert!(provider_info.azure_api_version.is_some());
+        assert_eq!(provider_info.resolved_model, "gpt-5.6-terra");
+        assert_eq!(provider_info.base_url, "https://test.openai.azure.com/openai/v1/");
+        assert!(provider_info.azure_api_version.is_none());
         assert!(!provider_info.use_native_gemini_api);
 
         std::env::remove_var("AZURE_OPENAI_ENDPOINT");
@@ -721,13 +761,13 @@ mod tests {
         std::env::remove_var("AZURE_OPENAI_ENDPOINT");
         std::env::remove_var("AZURE_OPENAI_API_KEY");
 
-        let result = detect_provider("azure:gpt-4o-mini");
+        let result = detect_provider("azure:gpt-5.6-terra");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("AZURE_OPENAI_ENDPOINT"));
     }
 
     #[test]
-    fn test_azure_openai_custom_api_version() {
+    fn test_azure_openai_explicit_legacy_api_version() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
         std::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
@@ -738,6 +778,7 @@ mod tests {
 
         let provider_info = result.unwrap();
         assert_eq!(provider_info.azure_api_version, Some("2024-08-01".to_string()));
+        assert_eq!(provider_info.base_url, "https://test.openai.azure.com/openai/deployments/");
 
         std::env::remove_var("AZURE_OPENAI_ENDPOINT");
         std::env::remove_var("AZURE_OPENAI_API_KEY");
