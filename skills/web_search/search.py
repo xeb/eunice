@@ -88,7 +88,7 @@ def search_news(query: str, max_results: int = 5) -> list[dict]:
             })
     return results
 
-def search_gemini(query: str, model: str = "gemini-3.7-flash") -> dict:
+def search_gemini(query: str, model: str = "gemini-3.8-flash") -> dict:
     """Search using Gemini with Google Search grounding."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -145,8 +145,8 @@ def main():
     parser.add_argument("--fetch", action="store_true", help="Fetch first result's content (DuckDuckGo only)")
     parser.add_argument("--news", action="store_true", help="Search news (DuckDuckGo only)")
     parser.add_argument("--gemini", action="store_true", help="Use Gemini with Google Search grounding")
-    parser.add_argument("--model", default="gemini-3.7-flash",
-                        help="Gemini model (default: gemini-3.7-flash)")
+    parser.add_argument("--model", default="gemini-3.8-flash",
+                        help="Gemini model (default: gemini-3.8-flash)")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()

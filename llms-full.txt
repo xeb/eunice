@@ -94,9 +94,11 @@ Set `ABLIT_KEY`, or save the key in `~/.config/ablit/key` with mode 0600.
 Model: `abliterated-model-large-v2`. `ABLIT_BASE_URL` overrides the API base URL.
 
 ### Google Gemini (Default)
-Set `GEMINI_API_KEY`. Current tiers: `gemini-3.7-flash` (default),
+Set `GEMINI_API_KEY`. Current tiers: `gemini-3.8-flash` (default),
+`gemini-3.8-flash-cyber` (restricted Fairwind access),
 `gemini-3.1-pro-preview`, and `gemini-3.5-flash-lite`.
-Aliases: `flash` -> gemini-3.7-flash, `pro` -> gemini-3.1-pro-preview
+Aliases: `flash` -> gemini-3.8-flash, `cyber` -> gemini-3.8-flash-cyber,
+`pro` -> gemini-3.1-pro-preview
 
 ### OpenAI
 Set `OPENAI_API_KEY`. Current tiers: `gpt-5.6`/`gpt-5.6-sol`,

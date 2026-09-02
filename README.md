@@ -60,6 +60,7 @@ eunice --chat
 eunice --model gpt-5.6-terra "Explain this code"
 eunice --model sonnet "Review main.rs"
 eunice --model abliterated-model-large-v2 "Inspect this project and run the tests"
+eunice --hax "Inspect this project and run the tests"
 
 # Start webapp
 eunice --webapp
@@ -110,7 +111,7 @@ The Skill tool searches these directories to find relevant skills for a task.
 | Provider | API Key Variable | Default Model |
 |----------|------------------|---------------|
 | Abliteration AI | `ABLIT_KEY` or `~/.config/ablit/key` | abliterated-model-large-v2 |
-| Google Gemini | `GEMINI_API_KEY` | gemini-3.7-flash |
+| Google Gemini | `GEMINI_API_KEY` | gemini-3.8-flash |
 | OpenAI | `OPENAI_API_KEY` | gpt-5.6 |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-5 |
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` | (deployment-specific) |
@@ -140,12 +141,15 @@ eunice --model fable "..."     # claude-fable-5-1
 eunice --model sonnet "..."    # claude-sonnet-5
 eunice --model opus "..."      # claude-opus-5
 eunice --model haiku "..."     # claude-haiku-4-5-20251001
-eunice --model flash "..."     # gemini-3.7-flash (default)
+eunice --model flash "..."     # gemini-3.8-flash (default)
+eunice --model cyber "..."     # gemini-3.8-flash-cyber (Fairwind access required)
 eunice --model pro "..."       # gemini-3.1-pro-preview
+eunice --hax "..."             # abliterated-model-large-v2
 ```
 
 `eunice --list-models` shows Eunice's current cloud-model tiers and the models
-reported live by Ollama. The curated cloud list tracks the provider catalogs:
+reported live by Ollama, with providers and models alphabetized. The curated
+cloud list tracks the provider catalogs:
 [OpenAI](https://developers.openai.com/api/docs/models),
 [Gemini](https://ai.google.dev/gemini-api/docs/models), and
 [Claude](https://platform.claude.com/docs/en/models/overview).
@@ -177,6 +181,7 @@ Arguments:
 
 Options:
       --model <MODEL>          AI model to use
+      --hax                    Shorthand for --model=abliterated-model-large-v2
       --gemma                  Shorthand for --model=gemma4:31b (local Gemma 4 31B + MTP)
       --gemmad                 Use the already-running gemmad daemon and its live model
       --no-gemmad              No-op; kept for compatibility (gemmad is never used implicitly)
@@ -211,10 +216,10 @@ Options:
 A [`gemmad`](https://github.com/xeb/gemma) daemon (an OpenAI-compatible server for
 Gemma 4 — `gemma-4-26b-a4b` by default — on `127.0.0.1:18082`) is selected with
 `--gemmad`. A running daemon is **not** picked up automatically; the smart default
-(`gemini-3.7-flash`) stays the default even when it is reachable:
+(`gemini-3.8-flash`) stays the default even when it is reachable:
 
 ```bash
-eunice "Summarize this file"     # smart-default (gemini-3.7-flash), daemon or not
+eunice "Summarize this file"     # smart-default (gemini-3.8-flash), daemon or not
 eunice --gemmad "..."            # use the daemon; errors if it is not reachable
 eunice --no-gemmad "..."         # accepted but now a no-op; gemmad is never implicit
 ```

@@ -2,6 +2,9 @@ use crate::models::{OllamaTagsResponse, Provider, ProviderInfo};
 use anyhow::{anyhow, Result};
 use std::env;
 
+const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
+const GEMINI_CYBER_MODEL: &str = "gemini-3.8-flash-cyber";
+
 /// Check if a model supports function/tool calling
 pub fn supports_tools(provider: &Provider, model: &str) -> bool {
     match provider {
@@ -108,7 +111,8 @@ fn resolve_anthropic_alias(model: &str) -> &str {
 /// Resolve Gemini model aliases to full model names
 fn resolve_gemini_alias(model: &str) -> &str {
     match model {
-        "flash" => "gemini-3.7-flash",
+        "flash" => DEFAULT_GEMINI_MODEL,
+        "cyber" => GEMINI_CYBER_MODEL,
         "gemini-3-flash" => "gemini-3-flash-preview",
         "pro" | "gemini-3-pro" | "gemini-3.1-pro" => "gemini-3.1-pro-preview",
         _ => model,
@@ -153,6 +157,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         || model == "gemini-3-pro"
         || model == "gemini-3.1-pro"
         || model == "flash"
+        || model == "cyber"
         || model == "pro"
     {
         let api_key = env::var("GEMINI_API_KEY")
@@ -327,7 +332,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
 pub fn get_smart_default_model() -> Result<String> {
     // 1. Try Gemini first (preferred default) - use the latest stable Flash
     if env::var("GEMINI_API_KEY").is_ok() {
-        return Ok("gemini-3.7-flash".to_string());
+        return Ok(DEFAULT_GEMINI_MODEL.to_string());
     }
 
     // 2. Try Anthropic
@@ -406,7 +411,8 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 
     // Gemini
     let gemini_models = vec![
-        "gemini-3.7-flash, flash (default)".to_string(),
+        format!("{}, flash (default)", DEFAULT_GEMINI_MODEL),
+        format!("{}, cyber (restricted Fairwind access)", GEMINI_CYBER_MODEL),
         "gemini-3.1-pro-preview, pro (latest Pro)".to_string(),
         "gemini-3.5-flash-lite (latest Flash-Lite)".to_string(),
     ];
@@ -450,7 +456,15 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
         crate::local::find_server_binary().is_some() || crate::local::mtp_server_installed();
     result.push((Provider::Local, local_models, local_available));
 
+    sort_model_catalog(&mut result);
     result
+}
+
+fn sort_model_catalog(catalog: &mut [(Provider, Vec<String>, bool)]) {
+    for (_, models, _) in catalog.iter_mut() {
+        models.sort_by_key(|model| model.to_ascii_lowercase());
+    }
+    catalog.sort_by_key(|(provider, _, _)| provider.to_string().to_ascii_lowercase());
 }
 
 #[cfg(test)]
@@ -467,6 +481,38 @@ mod tests {
         // The result depends on whether Ollama is running, but the blocking
         // HTTP client must never panic when called from Eunice's Tokio runtime.
         let _ = check_ollama_available(None);
+    }
+
+    #[test]
+    fn test_model_catalog_is_alphabetized() {
+        let mut catalog = vec![
+            (
+                Provider::Ollama,
+                vec!["zeta:latest".to_string(), "Alpha:latest".to_string()],
+                true,
+            ),
+            (
+                Provider::Gemini,
+                vec!["pro".to_string(), "Cyber".to_string()],
+                true,
+            ),
+            (
+                Provider::Anthropic,
+                vec!["sonnet".to_string(), "Fable".to_string()],
+                true,
+            ),
+        ];
+
+        sort_model_catalog(&mut catalog);
+
+        let providers: Vec<String> = catalog
+            .iter()
+            .map(|(provider, _, _)| provider.to_string())
+            .collect();
+        assert_eq!(providers, ["Anthropic", "Gemini", "Ollama"]);
+        assert_eq!(catalog[0].1, ["Fable", "sonnet"]);
+        assert_eq!(catalog[1].1, ["Cyber", "pro"]);
+        assert_eq!(catalog[2].1, ["Alpha:latest", "zeta:latest"]);
     }
 
     #[test]
@@ -538,18 +584,18 @@ mod tests {
     }
 
     #[test]
-    fn test_gemini_3_7_flash_uses_native_api() {
+    fn test_gemini_3_8_flash_uses_native_api() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
-        let result = detect_provider("gemini-3.7-flash");
+        let result = detect_provider("gemini-3.8-flash");
         assert!(result.is_ok());
 
         let provider_info = result.unwrap();
         assert_eq!(provider_info.provider, Provider::Gemini);
         assert!(provider_info.use_native_gemini_api);
         assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
-        assert_eq!(provider_info.resolved_model, "gemini-3.7-flash");
+        assert_eq!(provider_info.resolved_model, "gemini-3.8-flash");
 
         std::env::remove_var("GEMINI_API_KEY");
     }
@@ -611,23 +657,38 @@ mod tests {
 
         // Reached through the `gemini-3` prefix rather than an entry in the alias
         // table, so this also guards that a future `gemini-3.x` needs no new match arm.
-        for model in ["gemini-3.7-flash", "flash"] {
+        for model in ["gemini-3.8-flash", "flash"] {
             let provider_info = detect_provider(model).unwrap();
             assert_eq!(provider_info.provider, Provider::Gemini);
             assert!(provider_info.use_native_gemini_api, "{} should use native API", model);
             assert_eq!(provider_info.base_url, "https://generativelanguage.googleapis.com/v1beta/models/");
-            assert_eq!(provider_info.resolved_model, "gemini-3.7-flash");
+            assert_eq!(provider_info.resolved_model, "gemini-3.8-flash");
         }
 
         std::env::remove_var("GEMINI_API_KEY");
     }
 
     #[test]
-    fn test_smart_default_prefers_gemini_3_7_flash() {
+    fn test_gemini_cyber_alias_uses_native_api() {
         let _lock = ENV_LOCK.lock().unwrap();
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
-        assert_eq!(get_smart_default_model().unwrap(), "gemini-3.7-flash");
+        for model in [GEMINI_CYBER_MODEL, "cyber"] {
+            let provider_info = detect_provider(model).unwrap();
+            assert_eq!(provider_info.provider, Provider::Gemini);
+            assert!(provider_info.use_native_gemini_api);
+            assert_eq!(provider_info.resolved_model, GEMINI_CYBER_MODEL);
+        }
+
+        std::env::remove_var("GEMINI_API_KEY");
+    }
+
+    #[test]
+    fn test_smart_default_prefers_gemini_3_8_flash() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        std::env::set_var("GEMINI_API_KEY", "test-key");
+
+        assert_eq!(get_smart_default_model().unwrap(), "gemini-3.8-flash");
 
         std::env::remove_var("GEMINI_API_KEY");
     }
@@ -639,7 +700,8 @@ mod tests {
         assert_eq!(resolve_gemini_alias("gemini-3.1-pro"), "gemini-3.1-pro-preview");
         // Short aliases. `flash` tracks the newest flash model, so it moves with
         // each release; the versioned ids stay pinned.
-        assert_eq!(resolve_gemini_alias("flash"), "gemini-3.7-flash");
+        assert_eq!(resolve_gemini_alias("flash"), "gemini-3.8-flash");
+        assert_eq!(resolve_gemini_alias("cyber"), "gemini-3.8-flash-cyber");
         assert_eq!(resolve_gemini_alias("pro"), "gemini-3.1-pro-preview");
         // Pass through if not an alias
         assert_eq!(resolve_gemini_alias("gemini-3.5-flash-lite"), "gemini-3.5-flash-lite");
@@ -680,7 +742,8 @@ mod tests {
         std::env::set_var("GEMINI_API_KEY", "test-key");
 
         let models = vec![
-            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-3.8-flash-cyber",
             "gemini-3.5-flash-lite",
             "gemini-3.1-pro-preview",
         ];

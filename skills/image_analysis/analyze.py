@@ -86,7 +86,7 @@ def get_mime_type(image_path: str) -> str:
     return mime_types.get(ext, "image/jpeg")
 
 def describe_image(image_path: str, prompt: str = "Describe this image in detail.") -> str:
-    """Use Gemini 3.7 Flash to describe the image."""
+    """Use Gemini 3.8 Flash to describe the image."""
     import os
 
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -102,7 +102,7 @@ def describe_image(image_path: str, prompt: str = "Describe this image in detail
 
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model='gemini-3.7-flash',
+            model='gemini-3.8-flash',
             contents=[
                 types.Part.from_bytes(
                     data=image_bytes,

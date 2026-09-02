@@ -40,6 +40,10 @@ struct Args {
     #[arg(long)]
     model: Option<String>,
 
+    /// Shorthand for --model=abliterated-model-large-v2
+    #[arg(long)]
+    hax: bool,
+
     /// Shorthand for --model=gemma4:31b (local Gemma 4 31B + MTP)
     #[arg(long)]
     gemma: bool,
@@ -142,6 +146,26 @@ struct Args {
     /// Remove the systemd user service installed by --install
     #[arg(long)]
     uninstall_service: bool,
+}
+
+impl Args {
+    fn requested_model(&self) -> Result<Option<&str>> {
+        if !self.hax {
+            return Ok(self.model.as_deref());
+        }
+
+        if let Some(model) = self.model.as_deref() {
+            if model != abliteration::DEFAULT_MODEL {
+                return Err(anyhow!(
+                    "--hax is shorthand for --model={} and cannot be combined with --model={}",
+                    abliteration::DEFAULT_MODEL,
+                    model
+                ));
+            }
+        }
+
+        Ok(Some(abliteration::DEFAULT_MODEL))
+    }
 }
 
 /// Auto-discover prompt files in priority order
@@ -329,7 +353,7 @@ async fn main() -> Result<()> {
             port: args.port,
             host: args.host.clone(),
             agents_file: args.agents.clone(),
-            model: args.model.clone(),
+            model: args.requested_model()?.map(str::to_string),
             prompt: args.prompt.clone(),
             no_persist: args.no_persist,
         });
@@ -463,7 +487,7 @@ async fn main() -> Result<()> {
         args.gemma,
         args.gemmad,
         args.no_gemmad,
-        args.model.as_deref(),
+        args.requested_model()?,
         gemmad_up,
     )?;
     let used_gemmad = matches!(choice, gemmad::ModelChoice::Gemmad);
@@ -644,6 +668,41 @@ mod tests {
     fn test_args_gemma_default_false() {
         let args = Args::try_parse_from(["eunice", "hi"]).unwrap();
         assert!(!args.gemma);
+    }
+
+    #[test]
+    fn test_args_hax_selects_abliterated_large_v2() {
+        let args = Args::try_parse_from(["eunice", "--hax", "hi"]).unwrap();
+        assert!(args.hax);
+        assert_eq!(
+            args.requested_model().unwrap(),
+            Some(abliteration::DEFAULT_MODEL)
+        );
+        assert_eq!(args.prompt_positional.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn test_args_hax_allows_equivalent_model() {
+        let args = Args::try_parse_from([
+            "eunice",
+            "--hax",
+            "--model",
+            abliteration::DEFAULT_MODEL,
+            "hi",
+        ])
+        .unwrap();
+        assert_eq!(
+            args.requested_model().unwrap(),
+            Some(abliteration::DEFAULT_MODEL)
+        );
+    }
+
+    #[test]
+    fn test_args_hax_rejects_different_model() {
+        let args = Args::try_parse_from(["eunice", "--hax", "--model", "flash", "hi"])
+            .unwrap();
+        let error = args.requested_model().unwrap_err().to_string();
+        assert!(error.contains("--hax is shorthand"), "{}", error);
     }
 
     #[test]

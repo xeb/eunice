@@ -75,7 +75,7 @@ uv run ~/.eunice/skills/web_search/search.py "rust programming tutorials" --json
 ### Different Gemini Models
 ```bash
 # Fast responses
-uv run ~/.eunice/skills/web_search/search.py "weather in Tokyo" --gemini --model gemini-3.7-flash
+uv run ~/.eunice/skills/web_search/search.py "weather in Tokyo" --gemini --model gemini-3.8-flash
 
 # More detailed analysis
 uv run ~/.eunice/skills/web_search/search.py "explain quantum computing advances" --gemini --model gemini-3.1-pro-preview
