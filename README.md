@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An agentic CLI runner in Rust with unified support for Abliteration AI, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
+An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
 **13,030 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
@@ -14,7 +14,7 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 
 ## Features
 
-- **Multi-Provider Support**: Abliteration AI, OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, Ollama, and local models
+- **Multi-Provider Support**: Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, Ollama, and local models
 - **4 Built-in Tools**: Bash, Read, Write, and Skill - always available, no configuration needed
 - **Skills System**: User-defined prompts in `~/.eunice/skills/` for reusable capabilities
 - **Smart Defaults**: Automatically selects the best available model (prefers Gemini)
@@ -49,6 +49,8 @@ export OPENAI_API_KEY=your_key_here
 export ANTHROPIC_API_KEY=your_key_here
 # or
 export ABLIT_KEY=your_key_here
+# or
+export CEREBRAS_API_KEY=your_key_here
 
 # Run with a prompt
 eunice "List all Rust files in this directory"
@@ -111,6 +113,7 @@ The Skill tool searches these directories to find relevant skills for a task.
 | Provider | API Key Variable | Default Model |
 |----------|------------------|---------------|
 | Abliteration AI | `ABLIT_KEY` or `~/.config/ablit/key` | abliterated-model-large-v2 |
+| Cerebras | `CEREBRAS_API_KEY` or `~/.config/cerebras.env` | live account catalog |
 | Google Gemini | `GEMINI_API_KEY` | gemini-3.8-flash |
 | OpenAI | `OPENAI_API_KEY` | gpt-5.6 |
 | Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-5 |
@@ -132,6 +135,23 @@ eunice --model abliterated-model-large-v2 "Inspect this project and run its test
 
 Set `ABLIT_BASE_URL` to override the default `https://api.abliteration.ai/v1` endpoint.
 
+### Cerebras
+
+Cerebras uses its OpenAI-compatible API with Eunice's full Bash, Read, Write,
+and Skill tool loop. Model names are explicitly namespaced so they cannot
+collide with identically named Ollama models:
+
+```bash
+eunice --model cerebras:gpt-oss-120b "Inspect this project"
+eunice --model cerebras:gemma-4-31b "Summarize README.md"
+```
+
+Set `CEREBRAS_API_KEY`, or store a shell-style assignment such as
+`CEREBRAS_API_KEY=...` in `~/.config/cerebras.env` with mode `0600`. Eunice
+loads that file automatically. `CEREBRAS_BASE_URL` overrides the default
+`https://api.cerebras.ai/v1` endpoint. `--list-models` queries the authenticated
+catalog so every model enabled for the account appears automatically.
+
 ### Model Aliases
 
 For convenience, these aliases work:
@@ -147,8 +167,9 @@ eunice --model pro "..."       # gemini-3.1-pro-preview
 eunice --hax "..."             # abliterated-model-large-v2
 ```
 
-`eunice --list-models` shows Eunice's current cloud-model tiers and the models
-reported live by Ollama, with providers and models alphabetized. The curated
+`eunice --list-models` shows Eunice's current cloud-model tiers, the live
+Cerebras account catalog, and models reported live by Ollama, with providers
+and models alphabetized. The curated
 cloud list tracks the provider catalogs:
 [OpenAI](https://developers.openai.com/api/docs/models),
 [Gemini](https://ai.google.dev/gemini-api/docs/models), and
@@ -321,7 +342,7 @@ This validates the agents file, writes `~/.config/systemd/user/eunice.service` b
 chose, enables and starts it, and turns on lingering so it survives logout and starts at boot.
 
 Because systemd user services do not inherit your shell environment, the installer snapshots your
-API keys and provider settings (`ABLIT_KEY`, `ABLIT_BASE_URL`, `OPENAI_API_KEY`,
+API keys and provider settings (`ABLIT_KEY`, `ABLIT_BASE_URL`, `CEREBRAS_API_KEY`, `CEREBRAS_BASE_URL`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OLLAMA_HOST`, and others) into
 `~/.eunice/eunice.env` with mode `0600`. Re-run `--install` after rotating a key.
 

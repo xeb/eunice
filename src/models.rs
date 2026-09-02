@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Provider {
     Abliteration,
+    Cerebras,
     OpenAI,
     Gemini,
     Anthropic,
@@ -17,6 +18,7 @@ impl std::fmt::Display for Provider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Provider::Abliteration => write!(f, "Abliteration AI"),
+            Provider::Cerebras => write!(f, "Cerebras"),
             Provider::OpenAI => write!(f, "OpenAI"),
             Provider::Gemini => write!(f, "Gemini"),
             Provider::Anthropic => write!(f, "Anthropic"),
@@ -32,6 +34,7 @@ impl Provider {
     pub fn get_icon(&self) -> &'static str {
         match self {
             Provider::Abliteration => "🧬",
+            Provider::Cerebras => "⚡",
             Provider::OpenAI => "🤖",
             Provider::Gemini => "💎",
             Provider::Anthropic => "🧠",

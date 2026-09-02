@@ -1,6 +1,6 @@
 # Eunice v1.0.12
 
-An agentic CLI runner in Rust with unified support for Abliteration AI, OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
+An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
 
 ## Overview
 
@@ -31,6 +31,8 @@ export OPENAI_API_KEY=your_key_here
 export ANTHROPIC_API_KEY=your_key_here
 # or
 export ABLIT_KEY=your_key_here
+# or
+export CEREBRAS_API_KEY=your_key_here
 
 # Run with a prompt
 eunice "List all files in the current directory"
@@ -92,6 +94,13 @@ EOF
 ### Abliteration AI
 Set `ABLIT_KEY`, or save the key in `~/.config/ablit/key` with mode 0600.
 Model: `abliterated-model-large-v2`. `ABLIT_BASE_URL` overrides the API base URL.
+
+### Cerebras
+Set `CEREBRAS_API_KEY`, or save `CEREBRAS_API_KEY=...` in
+`~/.config/cerebras.env` with mode 0600. Use the explicit
+`cerebras:<model-id>` namespace, for example `cerebras:gpt-oss-120b` or
+`cerebras:gemma-4-31b`. `--list-models` queries the live account catalog.
+`CEREBRAS_BASE_URL` overrides the API base URL.
 
 ### Google Gemini (Default)
 Set `GEMINI_API_KEY`. Current tiers: `gemini-3.8-flash` (default),
@@ -163,6 +172,8 @@ No configuration files required. Eunice uses environment variables for API keys 
 - `GEMINI_API_KEY` - Google AI Studio API key
 - `ABLIT_KEY` - Abliteration AI API key (optional when the secure key file exists)
 - `ABLIT_BASE_URL` - Abliteration AI API base URL (optional)
+- `CEREBRAS_API_KEY` - Cerebras Inference API key (optional when the secure config file exists)
+- `CEREBRAS_BASE_URL` - Cerebras Inference API base URL (optional)
 - `OPENAI_API_KEY` - OpenAI API key
 - `ANTHROPIC_API_KEY` - Anthropic API key
 - `AZURE_OPENAI_ENDPOINT` - Azure OpenAI endpoint URL

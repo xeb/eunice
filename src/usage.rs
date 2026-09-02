@@ -75,6 +75,14 @@ fn get_pricing(model: &str, provider: &Provider) -> (f64, f64) {
             // Published large-model rate; input and output have the same price.
             (5.00, 5.00)
         }
+        Provider::Cerebras => {
+            // Cerebras Inference pricing as reported by its live model catalog.
+            if model.contains("gemma-4-31b") {
+                (0.99, 1.49)
+            } else {
+                (0.35, 0.75) // gpt-oss-120b and the default Cerebras tier
+            }
+        }
         Provider::Gemini => {
             // Standard Gemini Developer API pricing as of 2026-09-01.
             if model.contains("3.1-pro") {
@@ -222,6 +230,8 @@ mod tests {
         assert_eq!(get_pricing("gpt-5.6-terra", &Provider::OpenAI), (2.0, 12.0));
         assert_eq!(get_pricing("gpt-5.6-luna", &Provider::OpenAI), (0.2, 1.2));
         assert_eq!(get_pricing("gpt-5.3-codex", &Provider::OpenAI), (1.75, 14.0));
+        assert_eq!(get_pricing("gemma-4-31b", &Provider::Cerebras), (0.99, 1.49));
+        assert_eq!(get_pricing("gpt-oss-120b", &Provider::Cerebras), (0.35, 0.75));
         assert_eq!(get_pricing("claude-fable-5-1", &Provider::Anthropic), (10.0, 50.0));
         assert_eq!(get_pricing("claude-opus-5", &Provider::Anthropic), (5.0, 25.0));
         assert_eq!(get_pricing("claude-haiku-4-5-20251001", &Provider::Anthropic), (1.0, 5.0));

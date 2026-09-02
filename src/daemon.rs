@@ -16,6 +16,8 @@ pub struct InstallOptions {
 pub const SNAPSHOT_ENV_VARS: &[&str] = &[
     "ABLIT_KEY",
     "ABLIT_BASE_URL",
+    "CEREBRAS_API_KEY",
+    "CEREBRAS_BASE_URL",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
@@ -540,6 +542,8 @@ mod tests {
     fn test_snapshot_env_vars_covers_expected_keys() {
         assert!(SNAPSHOT_ENV_VARS.contains(&"ABLIT_KEY"));
         assert!(SNAPSHOT_ENV_VARS.contains(&"ABLIT_BASE_URL"));
+        assert!(SNAPSHOT_ENV_VARS.contains(&"CEREBRAS_API_KEY"));
+        assert!(SNAPSHOT_ENV_VARS.contains(&"CEREBRAS_BASE_URL"));
         assert!(SNAPSHOT_ENV_VARS.contains(&"OPENAI_API_KEY"));
         assert!(SNAPSHOT_ENV_VARS.contains(&"ANTHROPIC_API_KEY"));
         assert!(SNAPSHOT_ENV_VARS.contains(&"GEMINI_API_KEY"));

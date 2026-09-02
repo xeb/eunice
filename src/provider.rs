@@ -11,6 +11,9 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
         // Abliteration's OpenAI-compatible API supports standard tool calling.
         Provider::Abliteration => true,
 
+        // Cerebras' current inference catalog supports OpenAI-style tools.
+        Provider::Cerebras => true,
+
         // All modern OpenAI models support tools
         Provider::OpenAI => true,
 
@@ -131,6 +134,24 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
             base_url: crate::abliteration::base_url(),
             api_key: crate::abliteration::resolve_key()?,
             resolved_model: model.to_string(),
+            use_native_gemini_api: false,
+            azure_api_version: None,
+        });
+    }
+
+    // Cerebras models use an explicit namespace because ids such as
+    // `gpt-oss-120b` can also exist in Ollama or other providers.
+    if let Some(model_id) = model.strip_prefix("cerebras:") {
+        if model_id.is_empty() {
+            return Err(anyhow!(
+                "Cerebras model id is missing; use --model cerebras:<model-id>"
+            ));
+        }
+        return Ok(ProviderInfo {
+            provider: Provider::Cerebras,
+            base_url: crate::cerebras::base_url(),
+            api_key: crate::cerebras::resolve_key()?,
+            resolved_model: model_id.to_string(),
             use_native_gemini_api: false,
             azure_api_version: None,
         });
@@ -399,6 +420,25 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
         crate::abliteration::is_configured(),
     ));
 
+    // Cerebras publishes a live catalog, and the authenticated endpoint can
+    // expose every model enabled for this account. Prefix ids to keep routing
+    // unambiguous when a model name also exists locally.
+    let cerebras_models = crate::cerebras::available_models()
+        .unwrap_or_else(|_| {
+            crate::cerebras::KNOWN_PUBLIC_MODELS
+                .iter()
+                .map(|model| (*model).to_string())
+                .collect()
+        })
+        .into_iter()
+        .map(|model| format!("cerebras:{}", model))
+        .collect();
+    result.push((
+        Provider::Cerebras,
+        cerebras_models,
+        crate::cerebras::is_configured(),
+    ));
+
     // OpenAI
     let openai_models = vec![
         "gpt-5.6, gpt-5.6-sol (default/flagship)".to_string(),
@@ -548,6 +588,32 @@ mod tests {
             &Provider::Abliteration,
             crate::abliteration::DEFAULT_MODEL
         ));
+    }
+
+    #[test]
+    fn test_cerebras_supports_tools() {
+        assert!(supports_tools(&Provider::Cerebras, "gpt-oss-120b"));
+    }
+
+    #[test]
+    fn test_cerebras_model_routes_to_cerebras_provider() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        std::env::set_var("CEREBRAS_API_KEY", "csk_test");
+
+        let info = detect_provider("cerebras:gpt-oss-120b").expect("Cerebras model resolves");
+        assert_eq!(info.provider, Provider::Cerebras);
+        assert_eq!(info.base_url, "https://api.cerebras.ai/v1/");
+        assert_eq!(info.api_key, "csk_test");
+        assert_eq!(info.resolved_model, "gpt-oss-120b");
+        assert!(!info.use_native_gemini_api);
+
+        std::env::remove_var("CEREBRAS_API_KEY");
+    }
+
+    #[test]
+    fn test_cerebras_requires_model_id() {
+        let error = detect_provider("cerebras:").unwrap_err().to_string();
+        assert!(error.contains("cerebras:<model-id>"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 pub mod abliteration;
 pub mod agent;
 pub mod agents;
+pub mod cerebras;
 pub mod client;
 pub mod compact;
 pub mod display;

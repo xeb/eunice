@@ -2,7 +2,7 @@
 
 ## About
 
-Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (Abliteration AI, OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" - minimal configuration with maximum capability.
+Eunice is an agentic CLI runner written in Rust that provides a unified interface for multiple AI providers (Abliteration AI, Cerebras, OpenAI, Gemini, Anthropic Claude, and Ollama). It emphasizes "sophisticated simplicity" - minimal configuration with maximum capability.
 
 ## Architecture
 
@@ -218,7 +218,7 @@ println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
 1. Update `Provider` enum in `src/models.rs`
 2. Add detection logic in `src/provider.rs::detect_provider()`
-3. Handle authentication in `src/client.rs::new()`
+3. Handle authentication and provider configuration (for example, `src/cerebras.rs`)
 4. Add `supports_tools()` logic if needed
 5. Add tests
 

@@ -39,6 +39,7 @@ pub fn print_model_list() {
         let all_support_tools = matches!(
             provider,
             Provider::Abliteration
+                | Provider::Cerebras
                 | Provider::OpenAI
                 | Provider::Gemini
                 | Provider::Anthropic
@@ -91,6 +92,18 @@ fn get_key_status(provider: &Provider, available: bool) -> String {
                 .map(|path| path.is_file())
                 .unwrap_or(false)
             {
+                "key file".to_string()
+            } else {
+                "not set".to_string()
+            }
+        }
+        Provider::Cerebras => {
+            if env::var("CEREBRAS_API_KEY")
+                .map(|key| !key.trim().is_empty())
+                .unwrap_or(false)
+            {
+                "CEREBRAS_API_KEY set".to_string()
+            } else if available {
                 "key file".to_string()
             } else {
                 "not set".to_string()
