@@ -1,4 +1,4 @@
-# Eunice v1.0.13
+# Eunice v1.0.14
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
 
@@ -186,6 +186,11 @@ No configuration files required. Eunice uses environment variables for API keys 
 
 ### Prompt Files
 
+On every agentic startup, Eunice checks only the current working directory for
+AGENTS.md. If present, its contents become system instructions for single-shot,
+chat, webapp, and scheduled-agent runs. In webapp mode they precede any system
+instructions supplied with --prompt.
+
 Eunice auto-discovers prompt files in the current directory:
 - prompt.txt, prompt.md
 - instruction.txt, instruction.md
@@ -197,7 +202,7 @@ For high-volume usage, place multiple Gemini API keys in `~/.eunice/gemini-api-k
 
 ## Version
 
-v1.0.13
+v1.0.14
 
 ## License
 

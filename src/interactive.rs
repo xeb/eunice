@@ -373,6 +373,16 @@ pub async fn interactive_mode(
     model: &str,
     initial_prompt: Option<&str>,
 ) -> Result<()> {
+    interactive_mode_with_instructions(client, model, initial_prompt, None).await
+}
+
+/// Run interactive mode with project instructions hidden in the first user turn.
+pub async fn interactive_mode_with_instructions(
+    client: &Client,
+    model: &str,
+    initial_prompt: Option<&str>,
+    system_instructions: Option<&str>,
+) -> Result<()> {
     let mut conversation_history: Vec<Message> = Vec::new();
     let mut input_history: Vec<String> = Vec::new();
     let mut output_store = OutputStore::new();
@@ -399,6 +409,7 @@ pub async fn interactive_mode(
             client,
             model,
             prompt,
+            system_instructions,
             &tool_registry,
             &mut conversation_history,
             Some(cancel_rx),
@@ -473,6 +484,7 @@ pub async fn interactive_mode(
             client,
             model,
             input,
+            system_instructions,
             &tool_registry,
             &mut conversation_history,
             Some(cancel_rx),
@@ -514,6 +526,7 @@ async fn run_prompt(
     client: &Client,
     model: &str,
     prompt: &str,
+    system_instructions: Option<&str>,
     tool_registry: &ToolRegistry,
     conversation_history: &mut Vec<Message>,
     cancel_rx: Option<watch::Receiver<bool>>,
@@ -524,10 +537,15 @@ async fn run_prompt(
     let display = create_display_sink();
 
     // Run agent
+    let prompt = crate::instructions::compose_first_user_message(
+        system_instructions,
+        conversation_history.is_empty(),
+        prompt,
+    );
     let result = run_agent_cancellable(
         client,
         model,
-        prompt,
+        &prompt,
         50, // tool_output_limit
         tool_registry,
         display,

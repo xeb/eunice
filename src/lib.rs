@@ -8,6 +8,7 @@ pub mod display;
 pub mod display_sink;
 pub mod gemmad;
 pub mod interactive;
+pub mod instructions;
 pub mod key_rotation;
 pub mod local;
 pub mod models;

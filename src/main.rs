@@ -9,6 +9,7 @@ mod display;
 mod display_sink;
 mod gemmad;
 mod interactive;
+mod instructions;
 mod key_rotation;
 mod local;
 mod models;
@@ -476,6 +477,12 @@ async fn main() -> Result<()> {
     // Resolve prompt
     let prompt = resolve_prompt(&args)?;
 
+    // Load project-level system instructions from the process working directory.
+    // This is deliberately a single-directory lookup: no parent traversal.
+    let working_dir = std::env::current_dir()
+        .map_err(|e| anyhow!("Failed to determine current working directory: {}", e))?;
+    let project_instructions = instructions::load_agents_md(&working_dir)?;
+
     // Determine if we need TUI mode
     let use_tui = args.chat || (prompt.is_none() && atty::is(atty::Stream::Stdin));
 
@@ -547,11 +554,15 @@ async fn main() -> Result<()> {
             Some(ref file) => Some(agents::load_agents(Path::new(file))?),
             None => None,
         };
+        let system_instructions = instructions::combine_system_instructions(
+            project_instructions.as_deref(),
+            prompt.as_deref(),
+        );
         let result = webapp::run_server(
             webapp_config,
             client,
             provider_info,
-            prompt.clone(),
+            system_instructions,
             agents_config,
         ).await;
         if let Some(ref mut child) = _local_server {
@@ -567,6 +578,7 @@ async fn main() -> Result<()> {
             &client,
             &provider_info,
             prompt.as_deref(),
+            project_instructions.as_deref(),
         ).await;
         if let Some(ref mut child) = _local_server {
             let _ = child.kill();
@@ -576,7 +588,11 @@ async fn main() -> Result<()> {
     }
 
     // Single-shot mode
-    let prompt = prompt.unwrap();
+    let prompt = instructions::compose_first_user_message(
+        project_instructions.as_deref(),
+        true,
+        &prompt.unwrap(),
+    );
 
     // Show model info
     display::print_model_info(&provider_info.resolved_model, &provider_info.provider);

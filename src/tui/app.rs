@@ -115,11 +115,12 @@ pub async fn run_tui_mode(
     client: &Client,
     provider_info: &ProviderInfo,
     initial_prompt: Option<&str>,
+    system_instructions: Option<&str>,
 ) -> Result<()> {
     if std::env::var("EUNICE_TUI_CLASSIC").is_ok() {
-        return run_tui_classic(client, provider_info, initial_prompt).await;
+        return run_tui_classic(client, provider_info, initial_prompt, system_instructions).await;
     }
-    run_tui_framed(client, provider_info, initial_prompt).await
+    run_tui_framed(client, provider_info, initial_prompt, system_instructions).await
 }
 
 /// A stdout writer that translates `\n` -> `\r\n` so agent output renders correctly while the
@@ -177,6 +178,7 @@ async fn run_generation(
     client: &Client,
     model: &str,
     prompt: &str,
+    system_instructions: Option<&str>,
     tool_registry: &ToolRegistry,
     conversation_history: &mut Vec<Message>,
     output_store: &mut OutputStore,
@@ -188,10 +190,15 @@ async fn run_generation(
     let display: Arc<dyn crate::display_sink::DisplaySink> =
         Arc::new(TuiDisplaySink::new(RawStdoutWriter));
 
+    let prompt = crate::instructions::compose_first_user_message(
+        system_instructions,
+        conversation_history.is_empty(),
+        prompt,
+    );
     let result = agent::run_agent_cancellable(
         client,
         model,
-        prompt,
+        &prompt,
         50,
         tool_registry,
         display,
@@ -229,6 +236,7 @@ async fn run_tui_framed(
     client: &Client,
     provider_info: &ProviderInfo,
     initial_prompt: Option<&str>,
+    system_instructions: Option<&str>,
 ) -> Result<()> {
     let model = provider_info.resolved_model.clone();
     let tool_registry = ToolRegistry::new();
@@ -252,7 +260,7 @@ async fn run_tui_framed(
     if let Some(p) = initial_prompt {
         raw_print(&format!("\r\n{}\r\n", theme::user_bar(p)));
         run_generation(
-            client, &model, p, &tool_registry,
+            client, &model, p, system_instructions, &tool_registry,
             &mut conversation_history, &mut output_store, &mut session_usage,
         )
         .await;
@@ -301,7 +309,7 @@ async fn run_tui_framed(
             input_history.push(input.clone());
         }
         run_generation(
-            client, &model, &input, &tool_registry,
+            client, &model, &input, system_instructions, &tool_registry,
             &mut conversation_history, &mut output_store, &mut session_usage,
         )
         .await;
@@ -325,6 +333,7 @@ async fn run_tui_classic(
     client: &Client,
     provider_info: &ProviderInfo,
     initial_prompt: Option<&str>,
+    system_instructions: Option<&str>,
 ) -> Result<()> {
     // Create readline context with custom prompt
     let prompt = format!("{PURPLE}›{RESET} ");
@@ -334,12 +343,21 @@ async fn run_tui_classic(
 
     let Some(mut ctx) = maybe_ctx else {
         eprintln!("Terminal is not interactive. Falling back to standard mode.");
-        return crate::interactive::interactive_mode(
-            client,
-            &provider_info.resolved_model,
-            initial_prompt,
-        )
-        .await;
+        return match system_instructions {
+            Some(instructions) => crate::interactive::interactive_mode_with_instructions(
+                client,
+                &provider_info.resolved_model,
+                initial_prompt,
+                Some(instructions),
+            )
+            .await,
+            None => crate::interactive::interactive_mode(
+                client,
+                &provider_info.resolved_model,
+                initial_prompt,
+            )
+            .await,
+        };
     };
 
     let mut shared_writer = ctx.clone_shared_writer();
@@ -376,6 +394,7 @@ async fn run_tui_classic(
             client,
             provider_info,
             prompt_text,
+            system_instructions,
             &tool_registry,
             &mut conversation_history,
             &mut output_store,
@@ -494,6 +513,7 @@ async fn run_tui_classic(
                     client,
                     provider_info,
                     input,
+                    system_instructions,
                     &tool_registry,
                     &mut conversation_history,
                     &mut output_store,
@@ -581,6 +601,7 @@ async fn process_prompt(
     client: &Client,
     provider_info: &ProviderInfo,
     prompt: &str,
+    system_instructions: Option<&str>,
     tool_registry: &ToolRegistry,
     conversation_history: &mut Vec<Message>,
     output_store: &mut OutputStore,
@@ -603,10 +624,15 @@ async fn process_prompt(
     });
 
     // Run the agent with the TuiDisplaySink
+    let prompt = crate::instructions::compose_first_user_message(
+        system_instructions,
+        conversation_history.is_empty(),
+        prompt,
+    );
     let result = agent::run_agent_cancellable(
         client,
         &provider_info.resolved_model,
-        prompt,
+        &prompt,
         50, // tool_output_limit
         tool_registry,
         display,

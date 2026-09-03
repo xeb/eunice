@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**13,320 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
+**13,442 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -17,6 +17,7 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 - **Multi-Provider Support**: Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, Ollama, and local models
 - **4 Built-in Tools**: Bash, Read, Write, and Skill - always available, no configuration needed
 - **Skills System**: User-defined prompts in `~/.eunice/skills/` for reusable capabilities
+- **Project Instructions**: Automatically applies `AGENTS.md` from the current directory
 - **Smart Defaults**: Automatically selects the best available model (prefers Gemini)
 - **Interactive Chat**: TUI mode with command history and autocomplete
 - **Webapp Mode**: Browser-based interface with real-time streaming
@@ -259,6 +260,13 @@ server (and needs the GPU's VRAM free).
 
 ### Prompt Discovery
 
+On every agentic startup, Eunice checks the current working directory for
+`AGENTS.md`. When present, its contents are included as system instructions on
+the first turn in single-shot, chat, webapp, and scheduled-agent runs. Eunice
+checks only the current directory—it does not search parent directories. In
+webapp mode, `AGENTS.md` is applied before any system instructions supplied by
+`--prompt`.
+
 If no prompt is provided, eunice auto-discovers prompt files in the current directory:
 - `prompt.txt`, `prompt.md`
 - `instruction.txt`, `instruction.md`
@@ -360,7 +368,7 @@ eunice --uninstall-service          # stop, disable, and remove the unit
 
 ## Architecture
 
-Eunice v1.0.13 follows a "sophisticated simplicity" design:
+Eunice v1.0.14 follows a "sophisticated simplicity" design:
 
 1. **No configuration files** - just environment variables for API keys
 2. **No external MCP servers** - 4 built-in tools cover most use cases
@@ -379,6 +387,7 @@ MIT License
 
 ## Version History
 
+- **v1.0.14**: Automatic per-project `AGENTS.md` system instructions
 - **v1.0.13**: Cerebras support and collapsible webapp system instructions
 - **v1.0.12**: Current model catalogs/defaults for every provider and Azure OpenAI v1 endpoint support
 - **v1.0.11**: Abliteration AI `abliterated-model-large-v2` provider with full tool calling

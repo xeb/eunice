@@ -1348,10 +1348,7 @@ pub async fn cancel(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
 /// There is no System message variant, so the prompt rides in the first
 /// user message and persists with the session history.
 fn compose_first_message(system_prompt: Option<&str>, first_turn: bool, prompt: &str) -> String {
-    match (system_prompt, first_turn) {
-        (Some(sys), true) => format!("{}\n\n---\n\n{}", sys, prompt),
-        _ => prompt.to_string(),
-    }
+    crate::instructions::compose_first_user_message(system_prompt, first_turn, prompt)
 }
 
 /// Undo `compose_first_message` for browser display without changing the
