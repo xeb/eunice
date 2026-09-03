@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**13,030 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
+**13,320 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -273,6 +273,10 @@ eunice --webapp
 # Opens at http://localhost:8811
 ```
 
+When `--prompt` supplies system instructions, restored conversations show them
+in a compact disclosure that is collapsed by default. The user message remains
+separate and visible; expand **System instructions** only when you need them.
+
 Features:
 - Real-time SSE streaming
 - Session persistence
@@ -356,7 +360,7 @@ eunice --uninstall-service          # stop, disable, and remove the unit
 
 ## Architecture
 
-Eunice v1.0.12 follows a "sophisticated simplicity" design:
+Eunice v1.0.13 follows a "sophisticated simplicity" design:
 
 1. **No configuration files** - just environment variables for API keys
 2. **No external MCP servers** - 4 built-in tools cover most use cases
@@ -375,6 +379,7 @@ MIT License
 
 ## Version History
 
+- **v1.0.13**: Cerebras support and collapsible webapp system instructions
 - **v1.0.12**: Current model catalogs/defaults for every provider and Azure OpenAI v1 endpoint support
 - **v1.0.11**: Abliteration AI `abliterated-model-large-v2` provider with full tool calling
 - **v1.0.1**: Azure OpenAI support, GLM model support, --debug flag

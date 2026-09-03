@@ -213,6 +213,18 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 .msg.you .body blockquote{border-left-color:var(--you-line)}
 .msg.you .body td{border-color:var(--you-line)}
 .msg.you .body a{color:var(--you-ink)}
+.msg.instructions{margin:-8px 0 -8px}
+.system-instructions{border:1px solid var(--line); border-radius:10px; background:var(--panel); box-shadow:var(--shadow)}
+.system-instructions summary{display:flex; align-items:center; gap:9px; padding:9px 12px; cursor:pointer;
+  color:var(--muted); font-family:var(--mono); font-size:11.5px; user-select:none; list-style:none}
+.system-instructions summary::-webkit-details-marker{display:none}
+.system-instructions summary::before{content:'▸'; color:var(--accent-ink); transition:transform .15s ease}
+.system-instructions[open] summary::before{transform:rotate(90deg)}
+.system-instructions .instructions-label{color:var(--ink-2); font-weight:600; letter-spacing:.08em; text-transform:uppercase}
+.system-instructions .instructions-meta{margin-left:auto; font-size:10.5px}
+.system-instructions .instructions-body{max-height:360px; overflow:auto; border-top:1px solid var(--line-2);
+  padding:12px; background:var(--panel-2); color:var(--ink-2); font-family:var(--mono); font-size:12px;
+  line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere}
 .tool{margin:12px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden}
 .tool-head{display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line-2);
   font-family:var(--mono); font-size:12px}
@@ -1073,6 +1085,23 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             return el;
         }
 
+        function addSystemInstructions(content) {
+            if (!content) return null;
+            const el = document.createElement('div');
+            const charCount = Array.from(content).length.toLocaleString();
+            el.className = 'msg instructions';
+            el.innerHTML = `
+                <details class="system-instructions">
+                    <summary>
+                        <span class="instructions-label">System instructions</span>
+                        <span class="instructions-meta">${charCount} chars</span>
+                    </summary>
+                    <div class="instructions-body">${escapeHtml(content)}</div>
+                </details>`;
+            messagesEl.appendChild(el);
+            return el;
+        }
+
         function removeThinking() {
             if (thinkingEl) {
                 thinkingEl.remove();
@@ -1501,7 +1530,11 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 for (const msg of data.messages) {
                     switch (msg.role) {
                         case 'user':
-                            // Filter out system instructions, extract actual user prompt
+                            if (msg.system_instructions) {
+                                addSystemInstructions(msg.system_instructions);
+                            }
+                            // Retain compatibility with histories written by the old
+                            // DMN wrapper, which predates structured instructions.
                             let userContent = msg.content;
                             if (isSystemInstructionMessage(userContent)) {
                                 userContent = extractUserPrompt(userContent);

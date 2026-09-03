@@ -1,4 +1,4 @@
-# Eunice v1.0.12
+# Eunice v1.0.13
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Gemini, Claude, Azure OpenAI, and Ollama.
 
@@ -162,6 +162,8 @@ eunice --webapp --host 0.0.0.0 --port 8811
 ```
 
 Opens at http://localhost:8811 by default.
+Restored conversations keep configured system instructions in a collapsed
+disclosure, separate from the visible user message.
 
 ## Configuration
 
@@ -195,7 +197,7 @@ For high-volume usage, place multiple Gemini API keys in `~/.eunice/gemini-api-k
 
 ## Version
 
-v1.0.12
+v1.0.13
 
 ## License
 

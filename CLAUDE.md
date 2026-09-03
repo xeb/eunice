@@ -1,4 +1,4 @@
-# Eunice v1.0.12 - Development Guide
+# Eunice v1.0.13 - Development Guide
 
 ## About
 
@@ -248,6 +248,7 @@ println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
 ## Version History
 
+- **v1.0.13**: Cerebras inference provider and collapsible webapp system instructions
 - **v1.0.12**: Current provider model catalogs/defaults, pricing, bundled skill models, and Azure OpenAI v1 route
 - **v1.0.11**: Abliteration AI `abliterated-model-large-v2` provider with OpenAI-compatible tool calling
 - **v1.0.0**: Major simplification

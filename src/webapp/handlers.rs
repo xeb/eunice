@@ -239,7 +239,11 @@ pub struct SessionHistoryRequest {
 #[derive(Serialize)]
 #[serde(tag = "role", rename_all = "snake_case")]
 pub enum HistoryMessage {
-    User { content: String },
+    User {
+        content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        system_instructions: Option<String>,
+    },
     Assistant { content: Option<String>, tool_calls: Option<Vec<HistoryToolCall>> },
     Tool { tool_call_id: String, name: String, result: String },
 }
@@ -293,11 +297,22 @@ pub async fn get_session_history(
     // Get history from storage
     match state.storage.get_history(&session_id).await {
         Ok(history) if !history.is_empty() => {
+            let mut saw_user_message = false;
             let messages: Vec<HistoryMessage> = history.iter().map(|msg| {
                 match msg {
-                    Message::User { content } => HistoryMessage::User {
-                        content: content.clone(),
-                    },
+                    Message::User { content } => {
+                        let first_user_message = !saw_user_message;
+                        saw_user_message = true;
+                        let (system_instructions, content) = split_first_message_for_display(
+                            state.system_prompt.as_deref(),
+                            first_user_message,
+                            content,
+                        );
+                        HistoryMessage::User {
+                            content,
+                            system_instructions,
+                        }
+                    }
                     Message::Assistant { content, tool_calls } => HistoryMessage::Assistant {
                         content: content.clone(),
                         tool_calls: tool_calls.as_ref().map(|tcs| {
@@ -1339,6 +1354,30 @@ fn compose_first_message(system_prompt: Option<&str>, first_turn: bool, prompt: 
     }
 }
 
+/// Undo `compose_first_message` for browser display without changing the
+/// persisted conversation sent to the model. Matching the configured prompt
+/// exactly avoids treating an ordinary user-authored horizontal rule as a
+/// system-message boundary.
+fn split_first_message_for_display(
+    system_prompt: Option<&str>,
+    first_user_message: bool,
+    content: &str,
+) -> (Option<String>, String) {
+    if !first_user_message {
+        return (None, content.to_string());
+    }
+
+    let Some(system_prompt) = system_prompt.filter(|prompt| !prompt.is_empty()) else {
+        return (None, content.to_string());
+    };
+    let prefix = format!("{}\n\n---\n\n", system_prompt);
+
+    match content.strip_prefix(&prefix) {
+        Some(user_prompt) => (Some(system_prompt.to_string()), user_prompt.to_string()),
+        None => (None, content.to_string()),
+    }
+}
+
 /// Run the agent loop and emit events.
 ///
 /// `Err` carries the message of whatever ended the loop early. Interactive
@@ -2168,5 +2207,51 @@ timeout_secs = 900
 
         // No system prompt configured: passthrough on first turn too
         assert_eq!(compose_first_message(None, true, "hello"), "hello");
+    }
+
+    #[test]
+    fn test_first_system_prompt_is_split_for_web_display() {
+        let system_prompt = "You are an ERP investigator.\n\n## Safety\nRead only.";
+        let composed = compose_first_message(Some(system_prompt), true, "list tables");
+
+        let (instructions, user_prompt) =
+            split_first_message_for_display(Some(system_prompt), true, &composed);
+
+        assert_eq!(instructions.as_deref(), Some(system_prompt));
+        assert_eq!(user_prompt, "list tables");
+    }
+
+    #[test]
+    fn test_history_user_serializes_system_instructions_separately() {
+        let with_instructions = serde_json::to_value(HistoryMessage::User {
+            content: "list tables".to_string(),
+            system_instructions: Some("read only".to_string()),
+        })
+        .unwrap();
+        assert_eq!(with_instructions["role"], "user");
+        assert_eq!(with_instructions["content"], "list tables");
+        assert_eq!(with_instructions["system_instructions"], "read only");
+
+        let without_instructions = serde_json::to_value(HistoryMessage::User {
+            content: "next question".to_string(),
+            system_instructions: None,
+        })
+        .unwrap();
+        assert!(without_instructions.get("system_instructions").is_none());
+    }
+
+    #[test]
+    fn test_system_prompt_split_is_exact_and_first_message_only() {
+        let content = "ordinary text\n\n---\n\nwith a horizontal rule";
+        assert_eq!(
+            split_first_message_for_display(Some("different instructions"), true, content),
+            (None, content.to_string())
+        );
+
+        let composed = compose_first_message(Some("instructions"), true, "next question");
+        assert_eq!(
+            split_first_message_for_display(Some("instructions"), false, &composed),
+            (None, composed)
+        );
     }
 }
