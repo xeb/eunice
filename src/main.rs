@@ -16,6 +16,7 @@ mod models;
 mod output_store;
 mod provider;
 mod skills;
+mod session_model;
 mod theme;
 mod tools;
 mod tui;

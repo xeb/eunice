@@ -18,7 +18,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 /// Available slash commands for autocomplete
-const SLASH_COMMANDS: &[&str] = &["/help", "/clear", "/status"];
+const SLASH_COMMANDS: &[&str] = &["/help", "/clear", "/status", "/model", "/effort"];
 
 /// Get matching slash commands for autocomplete
 fn get_matching_commands(prefix: &str) -> Vec<&'static str> {
@@ -80,6 +80,8 @@ fn print_help() {
     println!("  {}       Show this help message", "/help".cyan());
     println!("  {}      Clear conversation history", "/clear".cyan());
     println!("  {}     Show current status", "/status".cyan());
+    println!("  /model <id> [effort]   Switch model, preserving conversation");
+    println!("  /effort <level>       Change reasoning effort");
     println!("  {}       Exit interactive mode", "exit".cyan());
     println!("  {}       Exit interactive mode", "quit".cyan());
     println!();
@@ -383,6 +385,8 @@ pub async fn interactive_mode_with_instructions(
     initial_prompt: Option<&str>,
     system_instructions: Option<&str>,
 ) -> Result<()> {
+    let info = client.session_info(model);
+    let mut session = crate::session_model::SessionModel::new(client, &info);
     let mut conversation_history: Vec<Message> = Vec::new();
     let mut input_history: Vec<String> = Vec::new();
     let mut output_store = OutputStore::new();
@@ -406,8 +410,8 @@ pub async fn interactive_mode_with_instructions(
         });
 
         let result = run_prompt(
-            client,
-            model,
+            &session.client,
+            &session.info.resolved_model,
             prompt,
             system_instructions,
             &tool_registry,
@@ -450,6 +454,7 @@ pub async fn interactive_mode_with_instructions(
         }
 
         // Handle slash commands
+        if let Some(message) = session.handle_with_history(input, &mut conversation_history) { println!("{message}"); continue; }
         if input.eq_ignore_ascii_case("/help") {
             print_help();
             continue;
@@ -462,7 +467,7 @@ pub async fn interactive_mode_with_instructions(
         }
 
         if input.eq_ignore_ascii_case("/status") {
-            print_status(model, tool_count, conversation_history.len(), &session_usage);
+            print_status(&session.info.resolved_model, tool_count, conversation_history.len(), &session_usage);
             continue;
         }
 
@@ -481,8 +486,8 @@ pub async fn interactive_mode_with_instructions(
         });
 
         let result = run_prompt(
-            client,
-            model,
+            &session.client,
+            &session.info.resolved_model,
             input,
             system_instructions,
             &tool_registry,

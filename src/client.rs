@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Retry configuration for API requests
+#[derive(Clone)]
 pub struct RetryConfig {
     pub max_retries: u32,
     pub initial_delay_ms: u64,
@@ -28,6 +29,7 @@ impl Default for RetryConfig {
 }
 
 /// OpenAI-compatible HTTP client for all providers
+#[derive(Clone)]
 pub struct Client {
     http: reqwest::Client,
     base_url: String,
@@ -39,6 +41,7 @@ pub struct Client {
     azure_api_version: Option<String>,
     /// Enable debug output
     debug: bool,
+    effort: Option<String>,
 }
 
 impl Client {
@@ -87,12 +90,29 @@ impl Client {
             retry_config: RetryConfig::default(),
             azure_api_version: provider_info.azure_api_version.clone(),
             debug: std::env::var("EUNICE_DEBUG").is_ok(),
+            effort: None,
         })
     }
 
     /// Enable or disable debug mode
     pub fn set_debug(&mut self, debug: bool) {
         self.debug = debug;
+    }
+
+    pub fn set_effort(&mut self, effort: Option<String>) { self.effort = effort; }
+
+    /// Preserve the already-resolved endpoint/provider in fallback REPL mode.
+    pub fn session_info(&self, model: &str) -> ProviderInfo {
+        ProviderInfo {
+            provider: self.provider.clone(), base_url: self.base_url.clone(),
+            api_key: self.current_api_key().to_string(), resolved_model: model.to_string(),
+            use_native_gemini_api: self.use_native_gemini_api,
+            azure_api_version: self.azure_api_version.clone(),
+        }
+    }
+
+    fn thinking_config(&self) -> Option<serde_json::Value> {
+        self.effort.as_ref().map(|e| serde_json::json!({"thinkingConfig": {"thinkingLevel": e.to_uppercase()}}))
     }
 
     /// Get the current API key
@@ -185,8 +205,8 @@ impl Client {
             messages,
             tools: tools.map(|t| t.to_vec()),
             tool_choice: tools.map(|_| "auto".to_string()),
-            reasoning_effort: matches!(self.provider, Provider::Abliteration)
-                .then(|| crate::abliteration::REASONING_EFFORT.to_string()),
+            reasoning_effort: self.effort.clone().or_else(|| matches!(self.provider, Provider::Abliteration)
+                .then(|| crate::abliteration::REASONING_EFFORT.to_string())),
             include_reasoning: matches!(self.provider, Provider::Abliteration).then_some(false),
             max_completion_tokens: matches!(self.provider, Provider::Abliteration)
                 .then_some(crate::abliteration::MAX_COMPLETION_TOKENS),
@@ -298,6 +318,7 @@ impl Client {
         });
 
         let gemini_request = GeminiRequest {
+            generation_config: self.thinking_config(),
             contents,
             tools: gemini_tools,
         };
@@ -431,6 +452,7 @@ impl Client {
         });
 
         let gemini_request = GeminiRequest {
+            generation_config: self.thinking_config(),
             contents,
             tools: gemini_tools,
         };
@@ -600,6 +622,7 @@ impl Client {
         // Use native Gemini API for multimodal requests if configured
         if self.use_native_gemini_api {
             let gemini_request = GeminiRequest {
+            generation_config: self.thinking_config(),
                 contents: vec![GeminiContent {
                     parts: vec![
                         GeminiPart {
@@ -679,7 +702,7 @@ impl Client {
             messages,
             tools: None,
             tool_choice: None,
-            reasoning_effort: None,
+            reasoning_effort: self.effort.clone(),
             include_reasoning: None,
             max_completion_tokens: None,
         };

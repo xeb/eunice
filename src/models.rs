@@ -215,6 +215,8 @@ pub struct OllamaModel {
 /// Gemini API request format
 #[derive(Debug, Serialize)]
 pub struct GeminiRequest {
+    #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
+    pub generation_config: Option<serde_json::Value>,
     pub contents: Vec<GeminiContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<GeminiTool>>,
@@ -393,6 +395,7 @@ mod tests {
     #[test]
     fn test_gemini_request_serialization() {
         let request = GeminiRequest {
+            generation_config: None,
             contents: vec![GeminiContent {
                 parts: vec![GeminiPart {
                     text: Some("Hello".to_string()),
@@ -432,6 +435,7 @@ mod tests {
     #[test]
     fn test_gemini_request_without_role() {
         let request = GeminiRequest {
+            generation_config: None,
             contents: vec![GeminiContent {
                 parts: vec![GeminiPart {
                     text: Some("Test".to_string()),

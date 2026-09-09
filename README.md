@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**13,442 lines of code** - **12MB binary** - Emphasizing "sophisticated simplicity".
+**13,755 lines of code** - **11.8MB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -394,3 +394,17 @@ MIT License
 - **v1.0.1**: Azure OpenAI support, GLM model support, --debug flag
 - **v1.0.0**: Major simplification - 4 built-in tools, skills system, no MCP/orchestrator
 - **v0.3.x**: Full-featured with MCP servers, multi-agent, DMN mode, research mode
+
+## Change model during a CLI session
+
+Use `/model <id> [effort]` to switch providers/models without discarding the
+conversation, or `/effort low` (also medium/high/xhigh where supported) to change
+reasoning. `/effort default` restores the provider default. `/model` and
+`/effort` show the current selection; `/model --json` lists available choices.
+Unsupported efforts are rejected before replacing the client. Local models
+requiring server startup still launch in a new session.
+
+The tmux-terminal model badge uses `/model --tmux` and pane-local metadata to
+read choices without adding a catalog to the transcript. The bridge checks a
+per-request confirmation, and new input invalidates an open picker. Existing
+Eunice processes must be relaunched once after installing this update.

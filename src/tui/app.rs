@@ -62,6 +62,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show this help"),
     ("/clear", "Clear conversation history"),
     ("/status", "Show current status"),
+    ("/model", "Switch model: /model <id> [effort]"),
+    ("/effort", "Set reasoning effort: /effort <level>"),
     ("/quit", "Exit TUI mode"),
 ];
 
@@ -238,7 +240,8 @@ async fn run_tui_framed(
     initial_prompt: Option<&str>,
     system_instructions: Option<&str>,
 ) -> Result<()> {
-    let model = provider_info.resolved_model.clone();
+    let mut session = crate::session_model::SessionModel::new(client, provider_info);
+    let model = &session.info.resolved_model;
     let tool_registry = ToolRegistry::new();
     let tool_count = tool_registry.get_tools().len();
     let mut conversation_history: Vec<Message> = Vec::new();
@@ -252,7 +255,7 @@ async fn run_tui_framed(
     println!("{DIM}  model: {model}  ·  tools: {tool_count}{RESET}");
     println!("{DIM}  /help for commands · /quit or Ctrl+D to exit{RESET}");
 
-    let footer = "↵ send · esc clear · /help · ctrl+d exit";
+    let footer = "↵ send · esc clear · /help · ctrl+d exit · /model";
 
     crossterm::terminal::enable_raw_mode()
         .map_err(|e| anyhow!("Failed to enable raw mode: {}", e))?;
@@ -260,7 +263,7 @@ async fn run_tui_framed(
     if let Some(p) = initial_prompt {
         raw_print(&format!("\r\n{}\r\n", theme::user_bar(p)));
         run_generation(
-            client, &model, p, system_instructions, &tool_registry,
+            &session.client, &session.info.resolved_model, p, system_instructions, &tool_registry,
             &mut conversation_history, &mut output_store, &mut session_usage,
         )
         .await;
@@ -284,9 +287,14 @@ async fn run_tui_framed(
         if lower == "exit" || lower == "quit" || lower == "/quit" || lower == "/q" || lower == "/exit" {
             break;
         }
+        if let Some(message) = session.handle_with_history(&input, &mut conversation_history) {
+            raw_print(&format!("\r\n{}\r\n", message.replace('\n', "\r\n")));
+            continue;
+        }
+        let model = &session.info.resolved_model;
         match input.as_str() {
             "/help" | "/h" | "/?" => {
-                raw_print(&format!("\r\n{DIM}Commands:{RESET}\r\n  /help  /clear  /status  /quit\r\n"));
+                raw_print(&format!("\r\n{DIM}Commands:{RESET}\r\n  /help  /clear  /status  /model <id> [effort]  /effort <level>  /quit\r\n"));
                 continue;
             }
             "/clear" | "/c" => {
@@ -309,7 +317,7 @@ async fn run_tui_framed(
             input_history.push(input.clone());
         }
         run_generation(
-            client, &model, &input, system_instructions, &tool_registry,
+            &session.client, &session.info.resolved_model, &input, system_instructions, &tool_registry,
             &mut conversation_history, &mut output_store, &mut session_usage,
         )
         .await;
@@ -319,7 +327,7 @@ async fn run_tui_framed(
 
     if session_usage.has_usage() {
         println!();
-        let summary = session_usage.format_summary(&model, &provider_info.provider);
+        let summary = session_usage.format_summary(&session.info.resolved_model, &session.info.provider);
         for l in summary.lines() {
             println!("{DIM}{l}{RESET}");
         }
@@ -362,6 +370,7 @@ async fn run_tui_classic(
 
     let mut shared_writer = ctx.clone_shared_writer();
 
+    let mut session = crate::session_model::SessionModel::new(client, provider_info);
     // Suppress r3bl's echo of the submitted line — we render user turns as an inverse bar.
     ctx.readline.should_print_line_on(false, false);
 
@@ -372,7 +381,7 @@ async fn run_tui_classic(
     let tool_registry = ToolRegistry::new();
     let tool_count = tool_registry.get_tools().len();
 
-    print_status(&mut shared_writer, &provider_info.resolved_model, tool_count)?;
+    print_status(&mut shared_writer, &session.info.resolved_model, tool_count)?;
     print_help(&mut shared_writer)?;
 
     // Conversation history
@@ -391,8 +400,8 @@ async fn run_tui_classic(
         writeln!(shared_writer)?;
         process_prompt(
             &mut ctx,
-            client,
-            provider_info,
+            &session.client,
+            &session.info,
             prompt_text,
             system_instructions,
             &tool_registry,
@@ -427,7 +436,7 @@ async fn run_tui_classic(
                     let mut sw = ctx.clone_shared_writer();
                     if session_usage.has_usage() {
                         writeln!(sw)?;
-                        let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                        let summary = session_usage.format_summary(&session.info.resolved_model, &session.info.provider);
                         for line in summary.lines() {
                             writeln!(sw, "{DIM}{}{RESET}", line)?;
                         }
@@ -449,6 +458,7 @@ async fn run_tui_classic(
                     };
 
                     let mut sw = ctx.clone_shared_writer();
+                    if let Some(message) = session.handle_with_history(&cmd, &mut conversation_history) { writeln!(sw, "{message}")?; continue; }
                     match cmd.as_str() {
                         "/help" | "/h" | "/?" => {
                             print_help(&mut sw)?;
@@ -461,7 +471,7 @@ async fn run_tui_classic(
                             writeln!(sw)?;
                             print_status(
                                 &mut sw,
-                                &provider_info.resolved_model,
+                                &session.info.resolved_model,
                                 tool_count,
                             )?;
                             writeln!(
@@ -471,7 +481,7 @@ async fn run_tui_classic(
                             )?;
                             // Display token usage if any
                             if session_usage.has_usage() {
-                                let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                                let summary = session_usage.format_summary(&session.info.resolved_model, &session.info.provider);
                                 for line in summary.lines() {
                                     writeln!(sw, "  {DIM}{}{RESET}", line)?;
                                 }
@@ -482,7 +492,7 @@ async fn run_tui_classic(
                             // Display session usage summary if any
                             if session_usage.has_usage() {
                                 writeln!(sw)?;
-                                let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                                let summary = session_usage.format_summary(&session.info.resolved_model, &session.info.provider);
                                 for line in summary.lines() {
                                     writeln!(sw, "{DIM}{}{RESET}", line)?;
                                 }
@@ -510,8 +520,8 @@ async fn run_tui_classic(
                 // Process the prompt
                 process_prompt(
                     &mut ctx,
-                    client,
-                    provider_info,
+                    &session.client,
+                    &session.info,
                     input,
                     system_instructions,
                     &tool_registry,
@@ -526,7 +536,7 @@ async fn run_tui_classic(
                 // Display session usage summary if any
                 if session_usage.has_usage() {
                     writeln!(sw)?;
-                    let summary = session_usage.format_summary(&provider_info.resolved_model, &provider_info.provider);
+                    let summary = session_usage.format_summary(&session.info.resolved_model, &session.info.provider);
                     for line in summary.lines() {
                         writeln!(sw, "{DIM}{}{RESET}", line)?;
                     }
