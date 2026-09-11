@@ -13,6 +13,7 @@ use anyhow::Result;
 
 /// Registry of built-in tools
 pub struct ToolRegistry {
+    cwd: Option<std::path::PathBuf>,
     bash: BashTool,
     read: ReadTool,
     write: WriteTool,
@@ -28,12 +29,15 @@ impl ToolRegistry {
     /// (`~/.eunice/skills`), so SkillTool is unaffected.
     pub fn with_cwd(cwd: Option<std::path::PathBuf>) -> Self {
         Self {
+            cwd: cwd.clone(),
             bash: BashTool::with_cwd(cwd.clone()),
             read: ReadTool::with_cwd(cwd.clone()),
             write: WriteTool::with_cwd(cwd),
             skill: SkillTool::new(),
         }
     }
+
+    pub fn cwd(&self) -> Option<&std::path::Path> { self.cwd.as_deref() }
 
     /// Get all tool specifications for the API
     pub fn get_tools(&self) -> Vec<Tool> {

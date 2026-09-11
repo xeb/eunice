@@ -19,6 +19,7 @@ pub fn efforts(provider: &Provider, model: &str) -> Vec<String> {
             }
             levels.push("high");
         }
+        Provider::OpenAI if crate::openai::is_astra(model) => { levels.extend(["low", "medium", "high", "xhigh", "max"]); }
         Provider::OpenAI | Provider::AzureOpenAI
             if model.starts_with("gpt-5.6")
                 || model.starts_with("gpt-5.3-codex")
@@ -117,6 +118,9 @@ impl SessionModel {
     }
 
     fn switch(&mut self, id: &str, effort: &str) -> Result<()> {
+        if self.client.runtime() == crate::runtime::Runtime::OpenaiAgents && (id != self.id || effort != self.effort) {
+            return Err(anyhow!("Managed sessions pin their model and effort; start a new Eunice process to change them."));
+        }
         let info = if id == self.id {
             self.info.clone()
         } else {
@@ -138,6 +142,7 @@ impl SessionModel {
         } else {
             Client::new(&info)?
         };
+        next.set_runtime(self.client.runtime())?;
         next.set_effort(if effort == "default" {
             None
         } else {
@@ -243,6 +248,7 @@ fn portable_history(history: &mut [crate::models::Message], provider: &Provider)
     let mut ids = std::collections::HashMap::new();
     let mut counter = 0;
     for message in history {
+        if let Message::Assistant { native_output, .. } = message { *native_output = None; }
         match message {
             Message::Assistant {
                 tool_calls: Some(calls),
@@ -318,6 +324,7 @@ mod tests {
                 content: "Remember amber-seven".into(),
             },
             Message::Assistant {
+                native_output: None,
                 content: Some("Reading".into()),
                 tool_calls: Some(vec![ToolCall {
                     id: "Read::private-signature".into(),

@@ -3,7 +3,6 @@ use crate::client::Client;
 use crate::compact::CompactionConfig;
 use crate::display;
 use crate::display_sink::create_display_sink;
-use crate::models::Message;
 use crate::output_store::OutputStore;
 use crate::tools::ToolRegistry;
 use crate::usage::SessionUsage;
@@ -387,7 +386,7 @@ pub async fn interactive_mode_with_instructions(
 ) -> Result<()> {
     let info = client.session_info(model);
     let mut session = crate::session_model::SessionModel::new(client, &info);
-    let mut conversation_history: Vec<Message> = Vec::new();
+    let mut conversation_history = crate::runtime::Conversation::default();
     let mut input_history: Vec<String> = Vec::new();
     let mut output_store = OutputStore::new();
     let mut session_usage = SessionUsage::new();
@@ -533,7 +532,7 @@ async fn run_prompt(
     prompt: &str,
     system_instructions: Option<&str>,
     tool_registry: &ToolRegistry,
-    conversation_history: &mut Vec<Message>,
+    conversation_history: &mut crate::runtime::Conversation,
     cancel_rx: Option<watch::Receiver<bool>>,
     output_store: &mut OutputStore,
     session_usage: &mut SessionUsage,
@@ -566,6 +565,8 @@ async fn run_prompt(
     session_usage.total_output_tokens += result.usage.total_output_tokens;
     session_usage.total_cached_tokens += result.usage.total_cached_tokens;
     session_usage.api_calls += result.usage.api_calls;
+    session_usage.requests.extend(result.usage.requests.clone());
+    session_usage.aggregate_only |= result.usage.aggregate_only;
 
     Ok(result.status == AgentStatus::Cancelled)
 }

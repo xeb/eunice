@@ -66,6 +66,7 @@ pub async fn index() -> Html<&'static str> {
 /// Status response
 #[derive(Serialize)]
 pub struct StatusResponse {
+    runtime: crate::runtime::Runtime,
     version: String,
     model: String,
     provider: String,
@@ -87,6 +88,7 @@ pub async fn status(
     let authenticated_user = extract_user_identity(&headers);
 
     Json(StatusResponse {
+        runtime: state.client.runtime(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         model: state.provider_info.resolved_model.clone(),
         provider: state.provider_info.provider.to_string(),
@@ -212,9 +214,17 @@ pub struct DeleteSessionResponse {
 
 /// Delete a session
 pub async fn delete_session(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Json(request): Json<DeleteSessionRequest>,
 ) -> Json<DeleteSessionResponse> {
+    let lock = state.session_locks.lock().await.entry(request.session_id.clone()).or_default().clone();
+    let Ok(_lease) = lock.try_lock_owned() else { return Json(DeleteSessionResponse {deleted:false}); };
+    let owner = extract_user_identity(&headers);
+    if !state.storage.get_session(&request.session_id).await.ok().flatten()
+        .is_some_and(|session| session.user_id == owner) {
+        return Json(DeleteSessionResponse {deleted:false});
+    }
     match state.storage.delete_session(&request.session_id).await {
         Ok(deleted) => {
             if deleted {
@@ -313,7 +323,7 @@ pub async fn get_session_history(
                             system_instructions,
                         }
                     }
-                    Message::Assistant { content, tool_calls } => HistoryMessage::Assistant {
+                    Message::Assistant { content, tool_calls, .. } => HistoryMessage::Assistant {
                         content: content.clone(),
                         tool_calls: tool_calls.as_ref().map(|tcs| {
                             tcs.iter().map(|tc| HistoryToolCall {
@@ -449,6 +459,7 @@ fn default_enabled() -> bool {
 /// Full definition of one agent, including the complete prompt text.
 #[derive(Serialize)]
 pub struct AgentDetail {
+    runtime: Option<crate::runtime::Runtime>,
     name: String,
     schedule: String,
     model: Option<String>,
@@ -476,6 +487,8 @@ pub struct AgentGetResponse {
 /// Save agent request. `original_name` is None when creating.
 #[derive(Deserialize)]
 pub struct AgentSaveRequest {
+    #[serde(default)]
+    runtime: Option<crate::runtime::Runtime>,
     #[serde(default)]
     original_name: Option<String>,
     fingerprint: String,
@@ -593,6 +606,7 @@ fn agent_detail(doc_text: &str, base_dir: &Path, name: &str) -> Option<AgentDeta
     };
 
     Some(AgentDetail {
+        runtime: spec.runtime,
         name: spec.name,
         schedule: spec.schedule,
         model: spec.model,
@@ -696,6 +710,8 @@ where
     .map_err(|e| EditError::failed(format!("validation task failed: {}", e)))?;
 
     let mut validated = validated.map_err(|e| EditError::failed(e.to_string()))?;
+
+    registry.validate_runtime_config(&validated).map_err(|e|EditError::failed(e.to_string()))?;
 
     // Nothing has been written up to this point.
 
@@ -820,6 +836,7 @@ pub async fn save_agent(
     };
 
     let AgentSaveRequest {
+        runtime,
         original_name,
         fingerprint,
         name,
@@ -844,6 +861,7 @@ pub async fn save_agent(
             .and_then(|target| declared_prompt_file(current, base_dir, target));
 
         let spec = crate::agents::AgentSpec {
+            runtime,
             name: name.clone(),
             schedule,
             model: blank_to_none(model),
@@ -961,7 +979,7 @@ pub enum SseEvent {
     /// Session ID confirmation (sent at start of query)
     SessionId { session_id: String },
     /// Token usage summary for this query
-    Usage { input_tokens: u64, output_tokens: u64, cached_tokens: u64, estimated_cost: f64 },
+    Usage { input_tokens: u64, output_tokens: u64, cached_tokens: u64, estimated_cost: Option<f64> },
     Done,
 }
 
@@ -1074,6 +1092,7 @@ pub async fn session_events(
 }
 
 /// Helper to send events to multiple destinations
+#[derive(Clone)]
 pub(super) struct EventSender {
     pub(super) tx: mpsc::Sender<SseEvent>,
     pub(super) state: Arc<AppState>,
@@ -1183,12 +1202,6 @@ pub async fn query(
     // Create cancellation channel
     let (cancel_tx, cancel_rx) = watch::channel(false);
 
-    // Store cancel sender for /api/cancel endpoint
-    {
-        let mut cancel_guard = state.cancel_tx.lock().await;
-        *cancel_guard = Some(cancel_tx);
-    }
-
     let state_clone = state.clone();
     let prompt = request.prompt.clone();
 
@@ -1197,7 +1210,7 @@ pub async fn query(
 
     // Log incoming query with user info
     let prompt_preview = if request.prompt.len() > 100 {
-        format!("{}...", &request.prompt[..100])
+        format!("{}...", request.prompt.chars().take(100).collect::<String>())
     } else {
         request.prompt.clone()
     };
@@ -1207,46 +1220,16 @@ pub async fn query(
     // Get or create session
     let (session_id, session_name) = match request.session_id {
         Some(ref id) if !id.is_empty() => {
-            // User specified a session - validate ownership
-            if let Some(ref user) = authenticated_user {
-                if let Ok(Some(session)) = state.storage.get_session(id).await {
-                    if let Some(ref session_user) = session.user_id {
-                        if session_user != user {
-                            // Session belongs to a different user - create new session
-                            log(&format!("Session {} belongs to different user, creating new session", &id[..8.min(id.len())]));
-                            match state.storage.create_session(Some(user)).await {
-                                Ok(new_session) => {
-                                    log(&format!("Created new session: {} ({})", &new_session.id[..8], new_session.name));
-                                    (new_session.id, new_session.name)
-                                }
-                                Err(_) => (uuid::Uuid::new_v4().to_string(), "unknown".to_string()),
-                            }
-                        } else {
-                            (session.id, session.name)
-                        }
-                    } else {
-                        let user_ref = authenticated_user.as_deref();
-                        match state.storage.ensure_session(id, user_ref).await {
-                            Ok(session) => (session.id, session.name),
-                            Err(_) => (id.clone(), "unknown".to_string()),
-                        }
-                    }
-                } else {
-                    let user_ref = authenticated_user.as_deref();
-                    match state.storage.ensure_session(id, user_ref).await {
-                        Ok(session) => (session.id, session.name),
-                        Err(_) => (id.clone(), "unknown".to_string()),
-                    }
-                }
-            } else {
-                let user_ref = authenticated_user.as_deref();
-                match state.storage.ensure_session(id, user_ref).await {
-                    Ok(session) => (session.id, session.name),
-                    Err(e) => {
-                        log(&format!("Failed to ensure session {}: {}", id, e));
-                        (id.clone(), "unknown".to_string())
-                    }
-                }
+            match state.storage.get_session(id).await {
+                Ok(Some(session)) if session.user_id == authenticated_user => (session.id,session.name),
+                Ok(Some(_)) => match state.storage.create_session(authenticated_user.as_deref()).await {
+                    Ok(session) => (session.id,session.name),
+                    Err(_) => (uuid::Uuid::new_v4().to_string(),"unknown".into()),
+                },
+                _ => match state.storage.ensure_session(id,authenticated_user.as_deref()).await {
+                    Ok(session) => (session.id,session.name),
+                    Err(_) => (id.clone(),"unknown".into()),
+                },
             }
         }
         _ => {
@@ -1280,31 +1263,23 @@ pub async fn query(
         user_info
     ));
 
-    // Create broadcast channel for this query
-    let (broadcast_tx, _) = broadcast::channel::<SseEvent>(100);
-
-    // Set up session for this query
-    state.storage.clear_runtime_events(&session_id).await;
-    state.storage.set_runtime_state(
-        &session_id,
-        Vec::new(),
-        Some(broadcast_tx.clone()),
-        true,
-    ).await;
-
-    // Create event sender
-    let event_sender = EventSender {
-        tx,
-        state: state.clone(),
-        session_id: session_id.clone(),
-        broadcast_tx,
-    };
-
-    // Spawn agent task
-    tokio::spawn(async move {
-        // The client already received the failure as an SSE Error event.
-        let _ = run_agent_with_events(state_clone, prompt, session_id, session_name, event_sender, cancel_rx, None, true).await;
-    });
+    let lock = state.session_locks.lock().await.entry(session_id.clone()).or_default().clone();
+    match lock.try_lock_owned() {
+        Ok(lease) => {
+            state.cancellations.lock().await.insert(session_id.clone(), cancel_tx);
+            let (broadcast_tx, _) = broadcast::channel::<SseEvent>(100);
+            state.storage.clear_runtime_events(&session_id).await;
+            state.storage.set_runtime_state(&session_id,Vec::new(),Some(broadcast_tx.clone()),true).await;
+            let event_sender = EventSender {tx,state:state.clone(),session_id:session_id.clone(),broadcast_tx};
+            tokio::spawn(async move {
+                let _ = run_agent_with_lease(lease,state_clone,prompt,session_id,session_name,event_sender,cancel_rx,None,true).await;
+            });
+        }
+        Err(_) => {
+            let _ = tx.send(SseEvent::Error {message:"This session is already running; watch it or cancel its active turn".into()}).await;
+            let _ = tx.send(SseEvent::Done).await;
+        }
+    }
 
     // Convert channel to SSE stream
     let stream = ReceiverStream::new(rx).map(|event| {
@@ -1334,14 +1309,41 @@ pub async fn query(
 }
 
 /// Cancel endpoint handler
-pub async fn cancel(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    let mut cancel_guard = state.cancel_tx.lock().await;
-    if let Some(tx) = cancel_guard.take() {
-        let _ = tx.send(true);
-        Json(serde_json::json!({"cancelled": true}))
-    } else {
-        Json(serde_json::json!({"cancelled": false, "reason": "no active query"}))
+#[derive(Deserialize)]
+pub struct CancelRequest { session_id: Option<String> }
+
+pub async fn cancel(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    request: Option<Json<CancelRequest>>,
+) -> Json<serde_json::Value> {
+    let requested = request.and_then(|Json(body)| body.session_id);
+    let user = extract_user_identity(&headers);
+    let candidates: Vec<String> = state
+        .cancellations
+        .lock()
+        .await
+        .keys()
+        .filter(|id| requested.as_ref().is_none_or(|wanted| wanted == *id))
+        .cloned()
+        .collect();
+    let mut owned = Vec::new();
+    for id in candidates {
+        if let Ok(Some(session)) = state.storage.get_session(&id).await {
+            if session.user_id == user {
+                owned.push(id);
+            }
+        }
     }
+    if owned.len() == 1 {
+        if let Some(tx) = state.cancellations.lock().await.get(&owned[0]) {
+            let sent = tx.send(true).is_ok();
+            return Json(serde_json::json!({"cancelled":sent}));
+        }
+    }
+    Json(
+        serde_json::json!({"cancelled":false,"reason":"specify one active session owned by this user"}),
+    )
 }
 
 /// Prepend the system prompt to the first message of a new session.
@@ -1390,6 +1392,74 @@ pub(super) async fn run_agent_with_events(
     run_ctx: Option<RunContext>,
     manage_cancel_slot: bool,
 ) -> Result<(), String> {
+    let lock = state
+        .session_locks
+        .lock()
+        .await
+        .entry(session_id.clone())
+        .or_default()
+        .clone();
+    let Ok(lease) = lock.try_lock_owned() else {
+        let message =
+            "This session is already running; watch it or cancel its active turn".to_string();
+        event_sender
+            .send(SseEvent::Error {
+                message: message.clone(),
+            })
+            .await;
+        event_sender.send(SseEvent::Done).await;
+        return Err(message);
+    };
+    run_agent_with_lease(
+        lease,
+        state,
+        prompt,
+        session_id,
+        session_name,
+        event_sender,
+        cancel_rx,
+        run_ctx,
+        manage_cancel_slot,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_agent_with_lease(
+    _lease: tokio::sync::OwnedMutexGuard<()>,
+    state: Arc<AppState>,
+    prompt: String,
+    session_id: String,
+    session_name: String,
+    event_sender: EventSender,
+    cancel_rx: watch::Receiver<bool>,
+    run_ctx: Option<RunContext>,
+    manage_cancel_slot: bool,
+) -> Result<(), String> {
+    let result = run_agent_with_events_inner(
+        state.clone(),
+        prompt,
+        session_id.clone(),
+        session_name,
+        event_sender.clone(),
+        cancel_rx,
+        run_ctx,
+        manage_cancel_slot,
+    )
+    .await;
+    state.cancellations.lock().await.remove(&session_id);
+    state
+        .storage
+        .set_runtime_state(&session_id, Vec::new(), None, false)
+        .await;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_agent_with_events_inner(
+    state: Arc<AppState>, prompt: String, session_id: String, session_name: String,
+    event_sender: EventSender, cancel_rx: watch::Receiver<bool>, run_ctx: Option<RunContext>, manage_cancel_slot: bool,
+) -> Result<(), String> {
     let mut run_error: Option<String> = None;
     let client: &Client = run_ctx.as_ref().map_or(state.client.as_ref(), |c| c.client.as_ref());
     let provider_info: &ProviderInfo =
@@ -1416,11 +1486,24 @@ pub(super) async fn run_agent_with_events(
 
     // Build conversation history
     let mut conversation_history: Vec<Message> = incoming_history;
-    let user_content = compose_first_message(
+    let user_content = if prompt.is_empty() { String::new() } else { compose_first_message(
         state.system_prompt.as_deref(),
         conversation_history.is_empty(),
         &prompt,
-    );
+    ) };
+    let binding = match state.storage.bind_runtime(&session_id, client.runtime(), &provider_info.resolved_model).await {
+        Ok(binding) => binding,
+        Err(error) => {
+            let message = error.to_string();
+            event_sender.send(SseEvent::Error {message:message.clone()}).await;
+            event_sender.send(SseEvent::Done).await;
+            return Err(message);
+        }
+    };
+    if client.runtime() == crate::runtime::Runtime::OpenaiAgents {
+        return run_managed_web(client, &provider_info.resolved_model, &user_content, tool_registry,
+            conversation_history, binding, state.storage.clone(), event_sender, cancel_rx).await;
+    }
     conversation_history.push(Message::User {
         content: user_content,
     });
@@ -1461,7 +1544,7 @@ pub(super) async fn run_agent_with_events(
 
     // Agent loop
     let mut loop_iteration = 0;
-    loop {
+    'agent_loop: loop {
         loop_iteration += 1;
         log(&format!("[{}] Loop iteration {}", log_prefix, loop_iteration));
 
@@ -1482,13 +1565,15 @@ pub(super) async fn run_agent_with_events(
             conversation_history.len()
         ));
 
-        let response = client
-            .chat_completion(
-                &provider_info.resolved_model,
-                serde_json::to_value(&conversation_history).unwrap(),
-                tools_option.as_deref(),
-            )
-            .await;
+        let mut cancellation = cancel_rx.clone();
+        let response = tokio::select! {
+            result = web_completion(client, &provider_info.resolved_model, serde_json::to_value(&conversation_history).unwrap(), tools_option.as_deref(), &event_sender) => result,
+            _ = async { let _ = cancellation.wait_for(|cancel| *cancel).await; } => {
+                run_error = Some("Query cancelled".into());
+                event_sender.send(SseEvent::Error {message:"Query cancelled".into()}).await;
+                break;
+            }
+        };
 
         let response = match response {
             Ok(r) => {
@@ -1552,7 +1637,7 @@ pub(super) async fn run_agent_with_events(
                 }
 
                 // Try compaction if context exhausted
-                if is_context_exhausted_error(&error_msg) && !compaction_attempted {
+                if !client.uses_responses(&provider_info.resolved_model) && is_context_exhausted_error(&error_msg) && !compaction_attempted {
                     log(&format!("[{}] Context exhausted, compacting to fit window...", log_prefix));
                     let target = crate::compact::parse_context_window(&error_msg)
                         .map(|n| ((n as f64) * 0.6) as usize)
@@ -1601,15 +1686,16 @@ pub(super) async fn run_agent_with_events(
 
         // Add assistant message to history
         conversation_history.push(Message::Assistant {
+            native_output: choice.message.native_output.clone(),
             content: choice.message.content.clone(),
             tool_calls: choice.message.tool_calls.clone(),
         });
 
         // Send response content if present
         if let Some(content) = &choice.message.content {
-            if !content.is_empty() {
+            if !content.is_empty() && !client.uses_responses(&provider_info.resolved_model) {
                 let content_preview = if content.len() > 80 {
-                    format!("{}...", &content[..80])
+                    format!("{}...", content.chars().take(80).collect::<String>())
                 } else {
                     content.clone()
                 };
@@ -1651,14 +1737,21 @@ pub(super) async fn run_agent_with_events(
 
             // Execute tool
             let tool_result = if tool_registry.has_tool(tool_name) {
-                tool_registry.execute(tool_name, args).await
-                    .unwrap_or_else(|e| format!("Error: {}", e))
+                let mut cancellation = cancel_rx.clone();
+                tokio::select! {
+                    result = tool_registry.execute(tool_name,args) => result.unwrap_or_else(|e|format!("Error: {e}")),
+                    _ = async { let _ = cancellation.wait_for(|cancel| *cancel).await; } => {
+                        run_error = Some("Query cancelled".into());
+                        event_sender.send(SseEvent::Error {message:"Query cancelled".into()}).await;
+                        break 'agent_loop;
+                    }
+                }
             } else {
                 format!("Error: Unknown tool '{}'", tool_name)
             };
 
             let result_preview = if tool_result.len() > 80 {
-                format!("{}...", &tool_result[..80])
+                format!("{}...", tool_result.chars().take(80).collect::<String>())
             } else {
                 tool_result.clone()
             };
@@ -1694,16 +1787,6 @@ pub(super) async fn run_agent_with_events(
     let _ = state.storage.set_history(&session_id, &conversation_history).await;
     state.storage.set_runtime_state(&session_id, Vec::new(), None, false).await;
 
-    // Persist events to storage
-    for msg in &conversation_history {
-        let (event_type, content) = match msg {
-            Message::User { .. } => ("user_message", serde_json::to_string(msg).unwrap_or_default()),
-            Message::Assistant { .. } => ("assistant_message", serde_json::to_string(msg).unwrap_or_default()),
-            Message::Tool { .. } => ("tool_message", serde_json::to_string(msg).unwrap_or_default()),
-        };
-        let _ = state.storage.append_event(&session_id, event_type, &content).await;
-    }
-
     log(&format!("[{}] Query complete, saved {} messages to session", log_prefix, conversation_history.len()));
 
     // Clear cancel sender. `state.cancel_tx` is a single global slot, so a scheduled
@@ -1723,7 +1806,7 @@ pub(super) async fn run_agent_with_events(
             input_tokens: session_usage.total_input_tokens,
             output_tokens: session_usage.total_output_tokens,
             cached_tokens: session_usage.total_cached_tokens,
-            estimated_cost,
+            estimated_cost: Some(estimated_cost),
         }).await;
     }
 
@@ -1734,6 +1817,257 @@ pub(super) async fn run_agent_with_events(
         Some(message) => Err(message),
         None => Ok(()),
     }
+}
+
+async fn web_completion(
+    client: &Client,
+    model: &str,
+    messages: serde_json::Value,
+    tools: Option<&[crate::models::Tool]>,
+    sender: &EventSender,
+) -> anyhow::Result<crate::models::ChatCompletionResponse> {
+    if !client.uses_responses(model) {
+        return client.chat_completion(model, messages, tools).await;
+    }
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let call = client.chat_completion_streaming(model, messages, tools, |text| {
+        let _ = tx.send(text.into());
+    });
+    tokio::pin!(call);
+    loop {
+        tokio::select! {
+            result = &mut call => {
+                while let Ok(content) = rx.try_recv() { sender.send(SseEvent::StreamChunk {content}).await; }
+                return result;
+            }
+            Some(content) = rx.recv() => sender.send(SseEvent::StreamChunk {content}).await,
+        }
+    }
+}
+
+struct ManagedCheckpoint {
+    storage: super::persistence::SessionStorage,
+    session_id: String,
+    revision: tokio::sync::Mutex<u64>,
+}
+
+impl crate::runtime::Checkpoint for ManagedCheckpoint {
+    fn save<'a>(&'a self, state: &'a crate::openai::agents::ManagedSession, messages: &'a [Message])
+        -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut revision = self.revision.lock().await;
+            self.storage.save_managed(&self.session_id, *revision, state, messages).await?;
+            *revision += 1;
+            Ok(())
+        })
+    }
+}
+
+struct ManagedDisplay(mpsc::UnboundedSender<DisplayEvent>);
+impl DisplaySink for ManagedDisplay {
+    fn write_event(&self, event: DisplayEvent) { let _ = self.0.send(event); }
+}
+
+/// Restore observers and function handlers before the scheduler can claim new
+/// work. Each resumed run uses its saved model and execution directory.
+pub(super) async fn recover_managed_sessions(state: Arc<AppState>) -> anyhow::Result<()> {
+    for (id, binding) in state.storage.pending_managed().await? {
+        let Some(session) = state.storage.get_session(&id).await? else {
+            continue;
+        };
+        let lock = state
+            .session_locks
+            .lock()
+            .await
+            .entry(id.clone())
+            .or_default()
+            .clone();
+        let Ok(lease) = lock.try_lock_owned() else {
+            continue;
+        };
+        let guard = if let (Some(registry), Some(name)) = (&state.agents, &session.agent_name) {
+            if !registry.begin_run(name).await {
+                continue;
+            }
+            Some(scheduler::RunGuard {
+                registry: registry.clone(),
+                name: name.clone(),
+            })
+        } else {
+            None
+        };
+        let state = state.clone();
+        tokio::spawn(async move {
+            let _guard = guard;
+            let setup = (|| -> anyhow::Result<RunContext> {
+                let info = crate::agents::detect_provider_isolated(&binding.model)?;
+                if info.base_url != binding.managed.endpoint {
+                    anyhow::bail!(
+                        "Saved managed endpoint differs from current provider configuration"
+                    );
+                }
+                let mut client = Client::new(&info)?;
+                client.set_runtime(binding.runtime)?;
+                client.set_effort(binding.managed.effort.clone());
+                Ok(RunContext {
+                    client: Arc::new(client),
+                    provider_info: Arc::new(info),
+                    tool_registry: Arc::new(ToolRegistry::with_cwd(
+                        binding.managed.working_dir.clone(),
+                    )),
+                })
+            })();
+            let result = match setup {
+                Ok(context) => {
+                    let (tx, mut rx) = mpsc::channel(100);
+                    tokio::spawn(async move { while rx.recv().await.is_some() {} });
+                    let (broadcast_tx, _) = broadcast::channel(100);
+                    state
+                        .storage
+                        .set_runtime_state(&id, Vec::new(), Some(broadcast_tx.clone()), true)
+                        .await;
+                    let (cancel_tx, cancel_rx) = watch::channel(false);
+                    state
+                        .cancellations
+                        .lock()
+                        .await
+                        .insert(id.clone(), cancel_tx);
+                    let sender = EventSender::new(tx, state.clone(), id.clone(), broadcast_tx);
+                    run_agent_with_lease(
+                        lease,
+                        state.clone(),
+                        String::new(),
+                        id.clone(),
+                        session.name,
+                        sender,
+                        cancel_rx,
+                        Some(context),
+                        false,
+                    )
+                    .await
+                }
+                Err(e) => Err(format!("Could not recover managed session: {e:#}")),
+            };
+            let status = if result.is_ok() {
+                super::persistence::RunStatus::Success
+            } else {
+                super::persistence::RunStatus::Interrupted
+            };
+            if session.agent_name.is_some() {
+                let _ = state.storage.set_run_status(&id, status).await;
+            }
+            if let (Some(registry), Some(name)) = (&state.agents, &session.agent_name) {
+                // Pending durable state independently prevents another cron run.
+                registry
+                    .finish_run(
+                        name,
+                        status,
+                        Some(id.clone()),
+                        result.as_ref().err().cloned(),
+                    )
+                    .await;
+            }
+            if let Err(error) = result {
+                log(&format!("[{id}] {error}"));
+            }
+        });
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_managed_web(
+    client: &Client,
+    model: &str,
+    prompt: &str,
+    tools: &ToolRegistry,
+    history: Vec<Message>,
+    binding: super::persistence::RuntimeBinding,
+    storage: super::persistence::SessionStorage,
+    sender: EventSender,
+    cancel: watch::Receiver<bool>,
+) -> Result<(), String> {
+    let mut conversation = crate::runtime::Conversation::from(history);
+    conversation.managed = binding.managed;
+    conversation.checkpoint = Some(Arc::new(ManagedCheckpoint {
+        storage,
+        session_id: sender.session_id.clone(),
+        revision: tokio::sync::Mutex::new(binding.revision),
+    }));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let relay_sender = sender.clone();
+    let relay = tokio::spawn(async move {
+        let mut tool = String::new();
+        while let Some(event) = rx.recv().await {
+            let event = match event {
+                DisplayEvent::ThinkingStart => SseEvent::Thinking { elapsed_seconds: 0 },
+                DisplayEvent::ThinkingStop | DisplayEvent::StreamEnd => continue,
+                DisplayEvent::Response { content } => SseEvent::Response { content },
+                DisplayEvent::StreamChunk { content } => SseEvent::StreamChunk { content },
+                DisplayEvent::Info { message } => SseEvent::Info { message },
+                DisplayEvent::Error { message } => SseEvent::Error { message },
+                DisplayEvent::ToolCall { name, arguments } => {
+                    tool = name.clone();
+                    SseEvent::ToolCall { name, arguments }
+                }
+                DisplayEvent::ToolResult { result, limit } => {
+                    let truncated = limit > 0 && result.lines().count() > limit;
+                    let result = if truncated {
+                        result.lines().take(limit).collect::<Vec<_>>().join("\n")
+                    } else {
+                        result
+                    };
+                    SseEvent::ToolResult {
+                        name: tool.clone(),
+                        result,
+                        truncated,
+                    }
+                }
+            };
+            relay_sender.send(event).await;
+        }
+    });
+    let result = crate::openai::agents::run(
+        client,
+        model,
+        prompt,
+        tools,
+        Arc::new(ManagedDisplay(tx)),
+        &mut conversation,
+        Some(cancel),
+        50,
+    )
+    .await;
+    let _ = relay.await;
+    let outcome = match result {
+        Ok(result) => {
+            if result.usage.has_usage() {
+                sender
+                    .send(SseEvent::Usage {
+                        input_tokens: result.usage.total_input_tokens,
+                        output_tokens: result.usage.total_output_tokens,
+                        cached_tokens: result.usage.total_cached_tokens,
+                        estimated_cost: None,
+                    })
+                    .await;
+            }
+            if result.status == crate::agent::AgentStatus::Cancelled {
+                Err("Query cancelled".into())
+            } else {
+                Ok(())
+            }
+        }
+        Err(error) => Err(format!("{error:#}")),
+    };
+    if let Err(message) = &outcome {
+        sender
+            .send(SseEvent::Error {
+                message: message.clone(),
+            })
+            .await;
+    }
+    sender.send(SseEvent::Done).await;
+    outcome
 }
 
 #[cfg(test)]
@@ -1924,6 +2258,7 @@ timeout_secs = 900
             "name",
             "schedule",
             "model",
+            "runtime",
             "prompt",
             "prompt_file",
             "enabled",
@@ -1932,7 +2267,7 @@ timeout_secs = 900
         ] {
             assert!(agent.get(field).is_some(), "missing field {}", field);
         }
-        assert_eq!(agent.as_object().unwrap().len(), 8);
+        assert_eq!(agent.as_object().unwrap().len(), 9);
     }
 
     #[test]
@@ -2051,6 +2386,7 @@ timeout_secs = 900
                 mutation: crate::agents::AgentMutation::Upsert {
                     original_name: Some("daily-digest".to_string()),
                     spec: crate::agents::AgentSpec {
+                        runtime: None,
                         name: "daily-digest".to_string(),
                         schedule: "not a cron".to_string(),
                         model: None,

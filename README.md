@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**13,755 lines of code** - **11.8MB binary** - Emphasizing "sophisticated simplicity".
+**15,440 lines of code** - **12.6 MiB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -15,6 +15,7 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 ## Features
 
 - **Multi-Provider Support**: Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Google Gemini, Anthropic Claude, Ollama, and local models
+- **Astra and OpenAI Agents API**: Native Astra Responses support plus an optional managed runtime for CLI, webapp, and scheduled runs
 - **4 Built-in Tools**: Bash, Read, Write, and Skill - always available, no configuration needed
 - **Skills System**: User-defined prompts in `~/.eunice/skills/` for reusable capabilities
 - **Project Instructions**: Automatically applies `AGENTS.md` from the current directory
@@ -22,6 +23,31 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 - **Interactive Chat**: TUI mode with command history and autocomplete
 - **Webapp Mode**: Browser-based interface with real-time streaming
 - **Zero Configuration**: Works out of the box with just an API key
+
+## Astra and OpenAI Agents API
+
+```bash
+# Astra with Eunice's local agent loop
+eunice --model astra "Review this repository"
+
+# OpenAI manages the agent loop; Eunice runs the local tools
+eunice --runtime openai-agents --model astra "Review this repository"
+eunice --webapp --runtime openai-agents --model astra
+```
+
+Both use `OPENAI_API_KEY`; the managed runtime requires Agents API access.
+`--runtime` defaults to `eunice`. With `openai-agents`, the default model is Astra.
+`--agents` still selects a schedule file. A scheduled entry can set
+`runtime = "openai-agents"` or `runtime = "eunice"`; omitting it inherits the
+server runtime. The web editor and `--install` preserve this setting.
+
+Managed tools run on the Eunice host. Completed messages appear as the remote
+session progresses. SQLite sessions recover pending work after restart and
+journal tool results to prevent automatic re-execution after acknowledgement
+loss. CLI and `--no-persist` state lasts only for the current process. Start a new
+session to change a managed session's runtime/model. See the
+[integration guide](docs/astra-agents-api-design.md) for recovery details,
+retention, test coverage and the opt-in live smoke test.
 
 ## Installation
 

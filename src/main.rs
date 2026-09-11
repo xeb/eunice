@@ -1,3 +1,5 @@
+mod runtime;
+mod openai;
 mod abliteration;
 mod agent;
 mod agents;
@@ -25,7 +27,6 @@ mod webapp;
 
 use crate::client::Client;
 use crate::display_sink::create_display_sink;
-use crate::models::Message;
 use crate::provider::{detect_provider, get_smart_default_model, supports_tools};
 use anyhow::{anyhow, Result};
 use clap::Parser;
@@ -39,6 +40,10 @@ const LLMS_FULL_TXT: &str = include_str!("../llms-full.txt");
 #[derive(Parser)]
 #[command(name = "eunice", about = "Agentic CLI runner with Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local model support", version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"))]
 struct Args {
+    /// Agent runtime: local Eunice orchestration or OpenAI managed sessions
+    #[arg(long, value_enum, default_value = "eunice")]
+    runtime: runtime::Runtime,
+
     /// AI model to use
     #[arg(long)]
     model: Option<String>,
@@ -352,7 +357,12 @@ async fn main() -> Result<()> {
 
     // Handle --install
     if args.install {
+        if args.runtime == runtime::Runtime::OpenaiAgents {
+            let info = agents::detect_provider_isolated(args.requested_model()?.unwrap_or("astra"))?;
+            args.runtime.validate(&info.provider)?;
+        }
         return daemon::run_install(&daemon::InstallOptions {
+            runtime: args.runtime,
             port: args.port,
             host: args.host.clone(),
             agents_file: args.agents.clone(),
@@ -506,7 +516,7 @@ async fn main() -> Result<()> {
             .await
             .unwrap_or_else(gemmad::model_id),
         gemmad::ModelChoice::Gemma31b => "gemma4:31b".to_string(),
-        gemmad::ModelChoice::SmartDefault => get_smart_default_model()?,
+        gemmad::ModelChoice::SmartDefault => if args.runtime == runtime::Runtime::OpenaiAgents { "astra".into() } else { get_smart_default_model()? },
     };
     if used_gemmad {
         eprintln!(
@@ -519,6 +529,7 @@ async fn main() -> Result<()> {
 
     // Detect provider and check tool support
     let provider_info = detect_provider(&model)?;
+    args.runtime.validate(&provider_info.provider)?;
 
     // If local provider, start gemma4-server
     let mut _local_server: Option<std::process::Child> = if provider_info.provider == models::Provider::Local {
@@ -537,6 +548,7 @@ async fn main() -> Result<()> {
 
     // Create client
     let mut client = Client::new(&provider_info)?;
+    client.set_runtime(args.runtime)?;
     if args.debug {
         client.set_debug(true);
         eprintln!("[DEBUG] Debug mode enabled");
@@ -608,7 +620,7 @@ async fn main() -> Result<()> {
     let mut output_store = output_store::OutputStore::new();
 
     // Conversation history
-    let mut conversation_history: Vec<Message> = Vec::new();
+    let mut conversation_history = crate::runtime::Conversation::default();
 
     // Run agent
     agent::run_agent(
@@ -637,6 +649,29 @@ async fn main() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn managed_runtime_parses_with_webapp_and_leaves_agents_for_config() {
+        let args = Args::try_parse_from([
+            "eunice",
+            "--webapp",
+            "--runtime",
+            "openai-agents",
+            "--model",
+            "astra",
+            "--agents",
+            "agents.toml",
+        ])
+        .unwrap();
+        assert_eq!(args.runtime, crate::runtime::Runtime::OpenaiAgents);
+        assert!(args.webapp);
+        assert_eq!(args.agents.as_deref(), Some("agents.toml"));
+        assert_eq!(
+            Args::try_parse_from(["eunice", "hello"]).unwrap().runtime,
+            crate::runtime::Runtime::Eunice
+        );
+        assert!(Args::try_parse_from(["eunice", "--runtime", "bogus"]).is_err());
+    }
 
     #[test]
     fn test_args_list_models() {

@@ -126,6 +126,17 @@ fn resolve_gemini_alias(model: &str) -> &str {
 pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
 
+    if crate::openai::is_astra(model) {
+        return Ok(ProviderInfo {
+            provider: Provider::OpenAI,
+            base_url: "https://api.openai.com/v1/".into(),
+            api_key: env::var("OPENAI_API_KEY").map_err(|_| anyhow!("OPENAI_API_KEY required for Astra"))?,
+            resolved_model: if model == "astra" { "gpt-6-astra".into() } else { model.into() },
+            use_native_gemini_api: false,
+            azure_api_version: None,
+        });
+    }
+
     // Abliteration AI's published model ids all share this prefix. Detect this
     // before probing Ollama so an identically named local model cannot hijack it.
     if crate::abliteration::is_model(model) {
@@ -441,6 +452,7 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
 
     // OpenAI
     let openai_models = vec![
+        "astra, gpt-6-astra (Responses API)".to_string(),
         "gpt-5.6, gpt-5.6-sol (default/flagship)".to_string(),
         "gpt-5.6-terra (balanced)".to_string(),
         "gpt-5.6-luna (fast/economical)".to_string(),

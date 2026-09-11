@@ -86,23 +86,18 @@ pub async fn run_agent(
     tool_output_limit: usize,
     tool_registry: &ToolRegistry,
     display: Arc<dyn DisplaySink>,
-    conversation_history: &mut Vec<Message>,
+    conversation_history: &mut crate::runtime::Conversation,
     compaction_config: Option<CompactionConfig>,
     output_store: Option<&mut OutputStore>,
 ) -> Result<AgentResult> {
-    run_agent_cancellable(
-        client,
-        model,
-        prompt,
-        tool_output_limit,
-        tool_registry,
-        display,
-        conversation_history,
-        None,
-        compaction_config,
-        output_store,
-    )
-    .await
+    let (tx, rx) = watch::channel(false);
+    let signal = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() { let _ = tx.send(true); }
+    });
+    let result = run_agent_cancellable(client, model, prompt, tool_output_limit, tool_registry,
+        display, conversation_history, Some(rx), compaction_config, output_store).await;
+    signal.abort();
+    result
 }
 
 /// Run the agent loop with optional cancellation support
@@ -114,11 +109,15 @@ pub async fn run_agent_cancellable(
     tool_output_limit: usize,
     tool_registry: &ToolRegistry,
     display: Arc<dyn DisplaySink>,
-    conversation_history: &mut Vec<Message>,
+    conversation_history: &mut crate::runtime::Conversation,
     cancel_rx: Option<watch::Receiver<bool>>,
     compaction_config: Option<CompactionConfig>,
     mut output_store: Option<&mut OutputStore>,
 ) -> Result<AgentResult> {
+    if client.runtime() == crate::runtime::Runtime::OpenaiAgents {
+        return crate::openai::agents::run(client, model, prompt, tool_registry, display,
+            conversation_history, cancel_rx, tool_output_limit).await;
+    }
     // Add user message to history
     conversation_history.push(Message::User {
         content: prompt.to_string(),
@@ -145,7 +144,7 @@ pub async fn run_agent_cancellable(
         let mut used_streaming = false;
 
         // Call the LLM - use streaming if available
-        let response = if client.supports_streaming() {
+        let response = if client.supports_streaming() || client.uses_responses(model) {
             // Streaming mode - show thinking until first chunk arrives
             display.write_event(DisplayEvent::ThinkingStart);
             let display_clone = Arc::clone(&display);
@@ -291,7 +290,7 @@ pub async fn run_agent_cancellable(
                 }
 
                 // Check if this is a context exhaustion error and we can compact
-                if is_context_exhausted_error(&error_msg)
+                if !client.uses_responses(model) && is_context_exhausted_error(&error_msg)
                     && !compaction_attempted
                     && compaction_config.is_some()
                 {
@@ -342,6 +341,7 @@ pub async fn run_agent_cancellable(
 
         // Add assistant response to history
         let assistant_message = Message::Assistant {
+            native_output: choice.message.native_output.clone(),
             content: choice.message.content.clone(),
             tool_calls: choice.message.tool_calls.clone(),
         };

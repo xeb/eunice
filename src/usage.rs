@@ -11,6 +11,9 @@ pub struct SessionUsage {
     pub total_output_tokens: u64,
     pub total_cached_tokens: u64,
     pub api_calls: u64,
+    pub requests: Vec<UsageStats>,
+    /// Managed turn totals do not reveal per-request pricing tiers or cache writes.
+    pub aggregate_only: bool,
 }
 
 impl SessionUsage {
@@ -24,10 +27,29 @@ impl SessionUsage {
         self.total_output_tokens += usage.completion_tokens;
         self.total_cached_tokens += usage.cached_tokens;
         self.api_calls += 1;
+        self.requests.push(usage.clone());
     }
 
     /// Estimate cost in USD based on model and provider
     pub fn estimate_cost(&self, model: &str, provider: &Provider) -> f64 {
+        if matches!(provider, Provider::OpenAI) && crate::openai::is_astra(model) {
+            return self
+                .requests
+                .iter()
+                .map(|u| {
+                    let long = u.prompt_tokens > 272_000;
+                    let factor = if long { 2.0 } else { 1.0 };
+                    let cached = u.cached_tokens.min(u.prompt_tokens);
+                    let writes = u.cache_write_tokens.min(u.prompt_tokens - cached);
+                    let input = u.prompt_tokens - cached - writes;
+                    (input as f64 * 10.0 * factor
+                        + cached as f64 * factor
+                        + writes as f64 * 12.5 * factor
+                        + u.completion_tokens as f64 * if long { 75.0 } else { 50.0 })
+                        / 1_000_000.0
+                })
+                .sum();
+        }
         let (input_price, output_price) = get_pricing(model, provider);
 
         let input_cost = (self.total_input_tokens as f64 / 1_000_000.0) * input_price;
@@ -54,12 +76,9 @@ impl SessionUsage {
             String::new()
         };
 
-        format!(
-            "Tokens: {}{}\nEstimated cost: ${:.4}",
-            tokens_str,
-            cached_str,
-            cost
-        )
+        let cost_str = if self.aggregate_only { "Cost unavailable (managed turn totals)".to_string() }
+            else { format!("Estimated cost: ${cost:.4}") };
+        format!("Tokens: {tokens_str}{cached_str}\n{cost_str}")
     }
 
     /// Check if any usage was recorded
@@ -167,6 +186,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn astra_prices_each_request_and_cache_category_independently() {
+        let mut usage = SessionUsage::new();
+        usage.add(&UsageStats {
+            prompt_tokens: 200_000,
+            completion_tokens: 1000,
+            total_tokens: 201_000,
+            cached_tokens: 50_000,
+            cache_write_tokens: 20_000,
+        });
+        usage.add(&UsageStats {
+            prompt_tokens: 200_000,
+            completion_tokens: 1000,
+            total_tokens: 201_000,
+            cached_tokens: 50_000,
+            cache_write_tokens: 20_000,
+        });
+        assert!((usage.estimate_cost("gpt-6-astra", &Provider::OpenAI) - 3.3).abs() < 1e-9);
+        usage.add(&UsageStats {
+            prompt_tokens: 300_000,
+            completion_tokens: 1000,
+            total_tokens: 301_000,
+            cached_tokens: 50_000,
+            cache_write_tokens: 20_000,
+        });
+        assert!((usage.estimate_cost("gpt-6-astra", &Provider::OpenAI) - 8.575).abs() < 1e-9);
+        usage.aggregate_only = true;
+        assert!(usage
+            .format_summary("gpt-6-astra", &Provider::OpenAI)
+            .contains("Cost unavailable"));
+    }
+
+    #[test]
     fn test_session_usage_add() {
         let mut session = SessionUsage::new();
 
@@ -175,6 +226,7 @@ mod tests {
             completion_tokens: 50,
             total_tokens: 150,
             cached_tokens: 0,
+        cache_write_tokens: 0,
         });
 
         assert_eq!(session.total_input_tokens, 100);
@@ -186,6 +238,7 @@ mod tests {
             completion_tokens: 100,
             total_tokens: 300,
             cached_tokens: 50,
+        cache_write_tokens: 0,
         });
 
         assert_eq!(session.total_input_tokens, 300);
@@ -202,6 +255,7 @@ mod tests {
             completion_tokens: 1_000_000,
             total_tokens: 2_000_000,
             cached_tokens: 0,
+        cache_write_tokens: 0,
         });
 
         let cost = session.estimate_cost("gemini-3.7-flash", &Provider::Gemini);
@@ -217,6 +271,7 @@ mod tests {
             completion_tokens: 1_000_000,
             total_tokens: 2_000_000,
             cached_tokens: 0,
+        cache_write_tokens: 0,
         });
 
         let cost = session.estimate_cost("claude-sonnet-5", &Provider::Anthropic);
@@ -254,6 +309,7 @@ mod tests {
             completion_tokens: 6789,
             total_tokens: 19134,
             cached_tokens: 1000,
+        cache_write_tokens: 0,
         });
 
         let summary = session.format_summary("gemini-3.7-flash", &Provider::Gemini);
@@ -271,6 +327,7 @@ mod tests {
             completion_tokens: 1_000_000,
             total_tokens: 2_000_000,
             cached_tokens: 0,
+        cache_write_tokens: 0,
         });
 
         let cost = session.estimate_cost("gemma4", &Provider::Ollama);

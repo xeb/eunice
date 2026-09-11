@@ -66,6 +66,8 @@ pub enum Message {
     User { content: String },
     #[serde(rename = "assistant")]
     Assistant {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native_output: Option<Vec<serde_json::Value>>,
         content: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<ToolCall>>,
@@ -147,6 +149,8 @@ pub struct UsageStats {
     /// Cached tokens (Anthropic, some OpenAI models)
     #[serde(default, alias = "cache_read_input_tokens")]
     pub cached_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
 }
 
 /// A choice in the response
@@ -158,6 +162,8 @@ pub struct Choice {
 /// Assistant message from the API
 #[derive(Debug, Deserialize)]
 pub struct AssistantMessage {
+    #[serde(default)]
+    pub native_output: Option<Vec<serde_json::Value>>,
     pub content: Option<String>,
     pub tool_calls: Option<Vec<ToolCall>>,
 }
@@ -468,6 +474,7 @@ mod tests {
     #[test]
     fn test_message_assistant_serialization() {
         let message = Message::Assistant {
+            native_output: None,
             content: Some("Response".to_string()),
             tool_calls: None,
         };

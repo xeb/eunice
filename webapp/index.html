@@ -885,6 +885,12 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 <div class="form-hint" id="agent-form-prompt-hint"></div>
             </div>
             <div class="form-field">
+                <label class="form-label" for="agent-form-runtime">RUNTIME</label>
+                <select class="form-input" id="agent-form-runtime">
+                    <option value="">Server default</option>
+                    <option value="eunice">Eunice</option>
+                    <option value="openai-agents">OpenAI Agents API</option>
+                </select>
                 <label class="form-label" for="agent-form-model">MODEL</label>
                 <input class="form-input" id="agent-form-model" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
                 <div class="form-hint" id="agent-form-model-hint"></div>
@@ -1268,7 +1274,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
 
         async function cancelQuery() {
             try {
-                await fetch('/api/cancel', { method: 'POST' });
+                await fetch('/api/cancel', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({session_id: sessionId}) });
             } catch (err) {
                 console.error('Cancel error:', err);
             }
@@ -2667,6 +2673,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
         const agentFormPromptLabel = document.getElementById('agent-form-prompt-label');
         const agentFormPrompt = document.getElementById('agent-form-prompt');
         const agentFormPromptHint = document.getElementById('agent-form-prompt-hint');
+        const agentFormRuntime = document.getElementById('agent-form-runtime');
         const agentFormModel = document.getElementById('agent-form-model');
         const agentFormModelHint = document.getElementById('agent-form-model-hint');
         const agentFormTimeout = document.getElementById('agent-form-timeout');
@@ -2702,6 +2709,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 agentFormSchedule.value,
                 agentFormPrompt.value,
                 agentFormModel.value,
+                agentFormRuntime.value,
                 agentFormTimeout.value,
                 agentFormWorkingDir.value,
                 agentFormEnabled.checked
@@ -2794,6 +2802,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
             agentFormSchedule.value = creating ? '' : detail.schedule;
             agentFormPrompt.value = creating ? '' : detail.prompt;
             agentFormModel.value = creating ? '' : (detail.model || '');
+            agentFormRuntime.value = creating ? '' : (detail.runtime || '');
             agentFormTimeout.value = creating ? String(DEFAULT_TIMEOUT_SECS) : String(detail.timeout_secs);
             agentFormWorkingDir.value = creating ? '' : (detail.working_dir || '');
             agentFormEnabled.checked = creating ? true : detail.enabled;
@@ -2894,6 +2903,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 schedule: detail.schedule,
                 prompt: detail.prompt,
                 model: detail.model || '',
+                runtime: detail.runtime || null,
                 enabled,
                 timeout_secs: detail.timeout_secs,
                 working_dir: detail.working_dir || ''
@@ -2966,6 +2976,7 @@ main{flex:1; width:100%; animation:rise .4s ease both}
                 schedule: agentFormSchedule.value.trim(),
                 prompt: agentFormPrompt.value,
                 model: agentFormModel.value.trim(),
+                runtime: agentFormRuntime.value || null,
                 enabled: agentFormEnabled.checked,
                 timeout_secs: timeoutSecs,
                 working_dir: agentFormWorkingDir.value.trim()

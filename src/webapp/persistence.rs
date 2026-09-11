@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use rand::seq::SliceRandom;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -101,6 +101,7 @@ pub struct SessionMetadata {
 
 /// In-memory session for runtime use
 pub struct MemorySession {
+    pub binding: Option<RuntimeBinding>,
     pub id: String,
     pub name: String,
     pub user_id: Option<String>,
@@ -118,6 +119,7 @@ impl MemorySession {
     pub fn new(id: String, name: String, user_id: Option<String>) -> Self {
         let now = chrono::Utc::now().timestamp();
         Self {
+            binding: None,
             id,
             name,
             user_id,
@@ -134,6 +136,7 @@ impl MemorySession {
 }
 
 /// Storage backend abstraction
+#[derive(Clone)]
 pub enum SessionStorage {
     /// In-memory storage (fallback when mcpz not available)
     Memory(Arc<RwLock<HashMap<String, MemorySession>>>),
@@ -143,6 +146,14 @@ pub enum SessionStorage {
         /// Runtime state (events, broadcast channels) still in memory
         runtime: Arc<RwLock<HashMap<String, RuntimeState>>>,
     },
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct RuntimeBinding {
+    pub runtime: crate::runtime::Runtime,
+    pub model: String,
+    pub managed: crate::openai::agents::ManagedSession,
+    pub revision: u64,
 }
 
 /// Runtime state for SQLite sessions (not persisted)
@@ -180,6 +191,7 @@ impl SessionStorage {
     /// Initialize SQLite storage with a custom path (for testing)
     pub fn new_sqlite(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         Self::init_schema(&conn)?;
         Self::migrate_schema(&conn)?;
         Self::sweep_interrupted_runs(&conn)?;
@@ -209,6 +221,10 @@ impl SessionStorage {
                 content TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 UNIQUE(session_id, sequence_num)
+            );
+            CREATE TABLE IF NOT EXISTS session_runtime (
+                session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                binding TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS compactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,7 +273,8 @@ impl SessionStorage {
     /// the column is guaranteed to exist.
     fn sweep_interrupted_runs(conn: &Connection) -> Result<usize> {
         let updated = conn.execute(
-            "UPDATE sessions SET run_status = ? WHERE run_status = ?",
+            "UPDATE sessions SET run_status = ? WHERE run_status = ? AND id NOT IN
+             (SELECT session_id FROM session_runtime WHERE json_extract(binding, '$.runtime') = 'openai-agents')",
             params![RunStatus::Interrupted.as_str(), RunStatus::Running.as_str()],
         )?;
         Ok(updated)
@@ -619,10 +636,18 @@ impl SessionStorage {
         match self {
             SessionStorage::Memory(store) => {
                 let mut store = store.write().await;
+                if store.get(session_id).and_then(|s|s.binding.as_ref()).is_some_and(|b| b.managed.active || b.managed.uncertain_input) {
+                    anyhow::bail!("Cancel and reconcile the managed session before deleting its local record");
+                }
                 Ok(store.remove(session_id).is_some())
             }
             SessionStorage::Sqlite { conn, runtime } => {
                 let conn = conn.lock().await;
+                let binding: Option<String> = conn.query_row("SELECT binding FROM session_runtime WHERE session_id = ?",[session_id],|row|row.get(0)).optional()?;
+                if let Some(binding) = binding {
+                    let binding: RuntimeBinding = serde_json::from_str(&binding)?;
+                    if binding.managed.active || binding.managed.uncertain_input { anyhow::bail!("Cancel and reconcile the managed session before deleting its local record"); }
+                }
                 let deleted = conn.execute("DELETE FROM sessions WHERE id = ?", [session_id])?;
                 runtime.write().await.remove(session_id);
                 Ok(deleted > 0)
@@ -855,17 +880,186 @@ impl SessionStorage {
                 Ok(())
             }
             SessionStorage::Sqlite { conn, .. } => {
-                // For SQLite, history is derived from events
-                // Just update the timestamp
-                let now = chrono::Utc::now().timestamp();
-                let conn = conn.lock().await;
-                conn.execute(
-                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
-                    params![now, session_id],
-                )?;
+                let mut conn = conn.lock().await;
+                let tx = conn.transaction()?;
+                Self::write_history(&tx, session_id, history)?;
+                tx.commit()?;
                 Ok(())
             }
         }
+    }
+
+    fn write_history(conn: &Connection, session_id: &str, history: &[Message]) -> Result<()> {
+        // Canonical replacement avoids appending all previous turns again. Tool
+        // journal and transcript are committed in the same transaction below.
+        conn.execute("DELETE FROM events WHERE session_id = ? AND event_type IN ('user_message','assistant_message','tool_message')", [session_id])?;
+        conn.execute("DELETE FROM compactions WHERE session_id = ?", [session_id])?;
+        let next: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(sequence_num), -1) + 1 FROM events WHERE session_id = ?",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        let now = chrono::Utc::now().timestamp();
+        for (offset, message) in history.iter().enumerate() {
+            let kind = match message {
+                Message::User { .. } => "user_message",
+                Message::Assistant { .. } => "assistant_message",
+                Message::Tool { .. } => "tool_message",
+            };
+            conn.execute("INSERT INTO events(session_id,event_type,sequence_num,content,created_at) VALUES(?,?,?,?,?)",
+                params![session_id,kind,next + offset as i64,serde_json::to_string(message)?,now])?;
+        }
+        conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            params![now, session_id],
+        )?;
+        Ok(())
+    }
+
+    pub async fn bind_runtime(
+        &self,
+        session_id: &str,
+        runtime: crate::runtime::Runtime,
+        model: &str,
+    ) -> Result<RuntimeBinding> {
+        let initial = RuntimeBinding {
+            runtime,
+            model: model.into(),
+            managed: Default::default(),
+            revision: 0,
+        };
+        let binding = match self {
+            Self::Memory(store) => {
+                let mut store = store.write().await;
+                let session = store
+                    .get_mut(session_id)
+                    .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
+                if session.binding.is_none()
+                    && runtime == crate::runtime::Runtime::OpenaiAgents
+                    && !session.history.is_empty()
+                {
+                    anyhow::bail!("Existing local history cannot be resumed as a managed session; start a new session");
+                }
+                session.binding.get_or_insert(initial).clone()
+            }
+            Self::Sqlite { conn, .. } => {
+                let conn = conn.lock().await;
+                let legacy: bool = conn.query_row("SELECT NOT EXISTS(SELECT 1 FROM session_runtime WHERE session_id = ?1) AND EXISTS(SELECT 1 FROM events WHERE session_id = ?1 AND event_type IN ('user_message','assistant_message','tool_message'))",[session_id],|row|row.get(0))?;
+                if legacy && runtime == crate::runtime::Runtime::OpenaiAgents {
+                    anyhow::bail!("Existing local history cannot be resumed as a managed session; start a new session");
+                }
+                conn.execute(
+                    "INSERT OR IGNORE INTO session_runtime(session_id,binding) VALUES(?,?)",
+                    params![session_id, serde_json::to_string(&initial)?],
+                )?;
+                let text: String = conn.query_row(
+                    "SELECT binding FROM session_runtime WHERE session_id = ?",
+                    [session_id],
+                    |row| row.get(0),
+                )?;
+                serde_json::from_str(&text)?
+            }
+        };
+        if binding.runtime != runtime || binding.model != model {
+            anyhow::bail!("Session is pinned to runtime {} and model {}; start a new session for the selected configuration",binding.runtime.as_str(),binding.model);
+        }
+        Ok(binding)
+    }
+
+    pub async fn save_managed(
+        &self,
+        session_id: &str,
+        expected: u64,
+        state: &crate::openai::agents::ManagedSession,
+        history: &[Message],
+    ) -> Result<()> {
+        match self {
+            Self::Memory(store) => {
+                let mut store = store.write().await;
+                let session = store
+                    .get_mut(session_id)
+                    .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
+                let binding = session
+                    .binding
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("Session runtime not bound"))?;
+                if binding.revision != expected {
+                    anyhow::bail!("Session changed in another worker; reconnect before continuing");
+                }
+                binding.managed = state.clone();
+                binding.revision += 1;
+                session.history = history.to_vec();
+                session.updated_at = chrono::Utc::now().timestamp();
+            }
+            Self::Sqlite { conn, .. } => {
+                let mut conn = conn.lock().await;
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let text: String = tx.query_row(
+                    "SELECT binding FROM session_runtime WHERE session_id = ?",
+                    [session_id],
+                    |row| row.get(0),
+                )?;
+                let mut binding: RuntimeBinding = serde_json::from_str(&text)?;
+                if binding.revision != expected {
+                    anyhow::bail!("Session changed in another worker; reconnect before continuing");
+                }
+                binding.managed = state.clone();
+                binding.revision += 1;
+                tx.execute(
+                    "UPDATE session_runtime SET binding = ? WHERE session_id = ?",
+                    params![serde_json::to_string(&binding)?, session_id],
+                )?;
+                Self::write_history(&tx, session_id, history)?;
+                tx.commit()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn pending_managed(&self) -> Result<Vec<(String, RuntimeBinding)>> {
+        let bindings: Vec<(String, RuntimeBinding)> = match self {
+            Self::Memory(store) => store
+                .read()
+                .await
+                .iter()
+                .filter_map(|(id, session)| {
+                    session.binding.clone().map(|binding| (id.clone(), binding))
+                })
+                .collect(),
+            Self::Sqlite { conn, .. } => {
+                let conn = conn.lock().await;
+                let mut stmt = conn.prepare("SELECT session_id,binding FROM session_runtime")?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                let mut bindings = Vec::new();
+                for row in rows {
+                    let (id, text) = row?;
+                    bindings.push((id, serde_json::from_str(&text)?));
+                }
+                bindings
+            }
+        };
+        Ok(bindings
+            .into_iter()
+            .filter(|(_, b)| {
+                b.runtime == crate::runtime::Runtime::OpenaiAgents
+                    && (b.managed.active || b.managed.uncertain_input)
+            })
+            .collect())
+    }
+
+    pub async fn has_pending_managed_agent(&self, name: &str) -> Result<bool> {
+        for (id, _) in self.pending_managed().await? {
+            if self
+                .get_session(&id)
+                .await?
+                .is_some_and(|s| s.agent_name.as_deref() == Some(name))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Get runtime state (events, broadcast channel, query_running)
@@ -1053,39 +1247,11 @@ impl SessionStorage {
     /// Clear history for a user's session (for NEW button with authenticated users)
     /// Returns the new session that was created
     pub async fn clear_user_session(&self, user_id: &str) -> Result<SessionRecord> {
-        match self {
-            SessionStorage::Memory(store) => {
-                // For memory mode, also create a new session (consistent with SQLite)
-                let mut store = store.write().await;
-                // Clear runtime state from old session if exists
-                for session in store.values_mut() {
-                    if session.user_id.as_deref() == Some(user_id) {
-                        session.history.clear();
-                        session.events.clear();
-                        break;
-                    }
-                }
-                drop(store);
-                // Create new session
-                self.create_session(Some(user_id)).await
-            }
-            SessionStorage::Sqlite { conn, runtime } => {
-                // For SQLite, we create a new session instead of clearing
-                // This preserves the old session in history
-                let conn = conn.lock().await;
-                if let Ok(old_id) = conn.query_row::<String, _, _>(
-                    "SELECT id FROM sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
-                    [user_id],
-                    |row| row.get(0),
-                ) {
-                    runtime.write().await.remove(&old_id);
-                }
-                drop(conn);
-                // Create new session for user and return it
-                self.create_session(Some(user_id)).await
-            }
-        }
+        // Starting fresh must preserve the previous conversation and any active
+        // managed observer/tool journal in both storage modes.
+        self.create_session(Some(user_id)).await
     }
+
 }
 
 /// Format a Unix timestamp as relative time
@@ -1217,7 +1383,7 @@ mod tests {
         // Set history
         let history = vec![
             Message::User { content: "Hello".to_string() },
-            Message::Assistant { content: Some("Hi there!".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("Hi there!".to_string()), tool_calls: None },
         ];
         storage.set_history(&session.id, &history).await.unwrap();
 
@@ -1247,7 +1413,7 @@ mod tests {
         let history1 = vec![Message::User { content: "Session 1 message".to_string() }];
         let history2 = vec![
             Message::User { content: "Session 2 message".to_string() },
-            Message::Assistant { content: Some("Session 2 response".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("Session 2 response".to_string()), tool_calls: None },
         ];
 
         storage.set_history(&session1.id, &history1).await.unwrap();
@@ -1347,11 +1513,11 @@ mod tests {
 
         let history1 = vec![
             Message::User { content: "First session query".to_string() },
-            Message::Assistant { content: Some("First session response".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("First session response".to_string()), tool_calls: None },
         ];
         let history2 = vec![
             Message::User { content: "Second session query".to_string() },
-            Message::Assistant { content: Some("Second session response".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("Second session response".to_string()), tool_calls: None },
         ];
 
         storage.set_history(&session1.id, &history1).await.unwrap();
@@ -1397,6 +1563,7 @@ mod tests {
         for i in 0..100 {
             history.push(Message::User { content: format!("Message {}", i) });
             history.push(Message::Assistant {
+                native_output: None,
                 content: Some(format!("Response {}", i)),
                 tool_calls: None,
             });
@@ -1442,11 +1609,11 @@ mod tests {
         // Set different history for each
         let history1 = vec![
             Message::User { content: "Alice's secret message".to_string() },
-            Message::Assistant { content: Some("Alice's private response".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("Alice's private response".to_string()), tool_calls: None },
         ];
         let history2 = vec![
             Message::User { content: "Bob's confidential query".to_string() },
-            Message::Assistant { content: Some("Bob's private data".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("Bob's private data".to_string()), tool_calls: None },
         ];
 
         storage.set_history(&session1.id, &history1).await.unwrap();
@@ -1511,12 +1678,12 @@ mod tests {
 
         storage.set_history(&session2.id, &vec![
             Message::User { content: "Session 2 - Bug investigation".to_string() },
-            Message::Assistant { content: Some("Found the bug".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("Found the bug".to_string()), tool_calls: None },
         ]).await.unwrap();
 
         storage.set_history(&session3.id, &vec![
             Message::User { content: "Session 3 - Code review".to_string() },
-            Message::Assistant { content: Some("LGTM".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("LGTM".to_string()), tool_calls: None },
             Message::User { content: "Thanks!".to_string() },
         ]).await.unwrap();
 
@@ -1573,7 +1740,7 @@ mod tests {
         let original = storage.get_or_create_user_session(user).await.unwrap();
         storage.set_history(&original.id, &vec![
             Message::User { content: "This will be cleared".to_string() },
-            Message::Assistant { content: Some("Indeed".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("Indeed".to_string()), tool_calls: None },
         ]).await.unwrap();
 
         // Verify history exists
@@ -1590,9 +1757,9 @@ mod tests {
         let history_new = storage.get_history(&new_session.id).await.unwrap();
         assert!(history_new.is_empty());
 
-        // Old session's history should be cleared too (memory mode)
+        // New sessions preserve old history in both storage modes.
         let history_old = storage.get_history(&original.id).await.unwrap();
-        assert!(history_old.is_empty());
+        assert_eq!(serde_json::to_value(&history_old).unwrap(),serde_json::to_value(&history_before).unwrap());
     }
 
     #[tokio::test]
@@ -1640,14 +1807,14 @@ mod tests {
         // Set initial history
         let initial = vec![
             Message::User { content: "First message".to_string() },
-            Message::Assistant { content: Some("First response".to_string()), tool_calls: None },
+            Message::Assistant { native_output: None, content: Some("First response".to_string()), tool_calls: None },
         ];
         storage.set_history(&session.id, &initial).await.unwrap();
 
         // Append more messages
         let mut extended = initial.clone();
         extended.push(Message::User { content: "Second message".to_string() });
-        extended.push(Message::Assistant { content: Some("Second response".to_string()), tool_calls: None });
+        extended.push(Message::Assistant { native_output: None, content: Some("Second response".to_string()), tool_calls: None });
         storage.set_history(&session.id, &extended).await.unwrap();
 
         // Verify all messages are preserved
@@ -2426,5 +2593,156 @@ mod tests {
         assert!(json["agent_name"].is_null());
         assert!(json["run_status"].is_null());
         assert_eq!(json.as_object().unwrap().len(), 7);
+    }
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+    use crate::{
+        openai::agents::{ManagedSession, ToolResult},
+        runtime::Runtime,
+    };
+    #[tokio::test]
+    async fn sqlite_followup_does_not_duplicate_history_and_preserves_native_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sessions.db");
+        let path = path.to_str().unwrap();
+        let id;
+        let native = serde_json::json!({"type":"reasoning","encrypted_content":"opaque"});
+        {
+            let store = SessionStorage::new_sqlite(path).unwrap();
+            id = store.create_session(None).await.unwrap().id;
+            let mut history = vec![
+                Message::User {
+                    content: "one".into(),
+                },
+                Message::Assistant {
+                    native_output: Some(vec![native.clone()]),
+                    content: Some("answer".into()),
+                    tool_calls: None,
+                },
+            ];
+            store.set_history(&id, &history).await.unwrap();
+            history.push(Message::User {
+                content: "two".into(),
+            });
+            store.set_history(&id, &history).await.unwrap();
+            store.set_history(&id, &history).await.unwrap();
+        }
+        let store = SessionStorage::new_sqlite(path).unwrap();
+        let history = store.get_history(&id).await.unwrap();
+        assert_eq!(history.len(), 3);
+        assert_eq!(
+            serde_json::to_value(&history[1]).unwrap()["native_output"][0],
+            native
+        );
+        assert_eq!(store.list_sessions(None).await.unwrap()[0].turn_count, 3);
+    }
+    async fn checkpoint_contract(store: &SessionStorage) {
+        let id = store.create_agent_session("review").await.unwrap().id;
+        let binding = store
+            .bind_runtime(&id, Runtime::OpenaiAgents, "gpt-6-astra")
+            .await
+            .unwrap();
+        assert_eq!(binding.revision, 0);
+        let mut managed = ManagedSession {
+            id: Some("sess_1".into()),
+            active: true,
+            ..Default::default()
+        };
+        managed.journal.insert(
+            "t:c".into(),
+            ToolResult {
+                action: serde_json::json!({"call_id":"c"}),
+                result: None,
+                full_output: None,
+            },
+        );
+        let history = vec![Message::User {
+            content: "hello".into(),
+        }];
+        store
+            .save_managed(&id, 0, &managed, &history)
+            .await
+            .unwrap();
+        assert!(
+            store.save_managed(&id, 0, &managed, &[]).await.is_err(),
+            "stale worker overwrote a tool claim"
+        );
+        assert_eq!(store.get_history(&id).await.unwrap().len(), 1);
+        assert!(store
+            .bind_runtime(&id, Runtime::Eunice, "gpt-6-astra")
+            .await
+            .is_err());
+        assert!(store
+            .bind_runtime(&id, Runtime::OpenaiAgents, "gpt-5.6")
+            .await
+            .is_err());
+        let loaded = store
+            .bind_runtime(&id, Runtime::OpenaiAgents, "gpt-6-astra")
+            .await
+            .unwrap();
+        assert_eq!(loaded.revision, 1);
+        assert!(loaded.managed.journal["t:c"].result.is_none());
+        assert_eq!(store.pending_managed().await.unwrap().len(), 1);
+    }
+    #[tokio::test]
+    async fn sqlite_checkpoint_is_atomic_and_rejects_stale_workers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        checkpoint_contract(&SessionStorage::new_sqlite(path.to_str().unwrap()).unwrap()).await;
+        let reopened = SessionStorage::new_sqlite(path.to_str().unwrap()).unwrap();
+        assert_eq!(reopened.pending_managed().await.unwrap().len(), 1);
+        assert_eq!(
+            reopened.list_agent_sessions("review", 10).await.unwrap()[0].run_status,
+            Some(RunStatus::Running)
+        );
+    }
+    #[tokio::test]
+    async fn memory_checkpoint_matches_sqlite() {
+        checkpoint_contract(&SessionStorage::new_memory()).await;
+    }
+    #[tokio::test]
+    async fn pending_sessions_cannot_be_deleted_and_legacy_history_cannot_change_runtime() {
+        for store in [
+            SessionStorage::new_memory(),
+            SessionStorage::new_sqlite(":memory:").unwrap(),
+        ] {
+            let legacy = store.create_session(None).await.unwrap();
+            store
+                .set_history(
+                    &legacy.id,
+                    &[Message::User {
+                        content: "existing".into(),
+                    }],
+                )
+                .await
+                .unwrap();
+            assert!(store
+                .bind_runtime(&legacy.id, Runtime::OpenaiAgents, "gpt-6-astra")
+                .await
+                .is_err());
+            let managed = store.create_agent_session("review").await.unwrap();
+            store
+                .bind_runtime(&managed.id, Runtime::OpenaiAgents, "gpt-6-astra")
+                .await
+                .unwrap();
+            let mut remote = ManagedSession::default();
+            remote.active = true;
+            store
+                .save_managed(&managed.id, 0, &remote, &[])
+                .await
+                .unwrap();
+            assert!(store.delete_session(&managed.id).await.is_err());
+            assert!(store.has_pending_managed_agent("review").await.unwrap());
+            remote.active = false;
+            store
+                .save_managed(&managed.id, 1, &remote, &[])
+                .await
+                .unwrap();
+            assert!(store.delete_session(&managed.id).await.unwrap());
+            assert!(store.pending_managed().await.unwrap().is_empty());
+        }
     }
 }

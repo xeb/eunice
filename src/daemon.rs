@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 
 /// Options captured from the CLI at install time and baked into the unit's ExecStart.
 pub struct InstallOptions {
+    pub runtime: crate::runtime::Runtime,
     pub port: u16,
     pub host: String,
     pub agents_file: Option<String>,
@@ -71,6 +72,9 @@ pub fn build_exec_start(binary: &str, opts: &InstallOptions) -> String {
     parts.push("--host".to_string());
     parts.push(quote_arg(&opts.host));
 
+    if opts.runtime != crate::runtime::Runtime::Eunice {
+        parts.extend(["--runtime".into(), opts.runtime.as_str().into()]);
+    }
     if let Some(ref model) = opts.model {
         parts.push("--model".to_string());
         parts.push(quote_arg(model));
@@ -211,6 +215,7 @@ pub fn run_install(opts: &InstallOptions) -> Result<()> {
     }
 
     let resolved_opts = InstallOptions {
+        runtime: opts.runtime,
         port: opts.port,
         host: opts.host.clone(),
         agents_file,
@@ -375,6 +380,7 @@ mod tests {
 
     fn opts() -> InstallOptions {
         InstallOptions {
+            runtime: crate::runtime::Runtime::Eunice,
             port: 9000,
             host: "0.0.0.0".to_string(),
             agents_file: None,
@@ -382,6 +388,17 @@ mod tests {
             prompt: None,
             no_persist: false,
         }
+    }
+
+    #[test]
+    fn managed_runtime_is_persisted_in_service_arguments() {
+        let mut options = opts();
+        options.runtime = crate::runtime::Runtime::OpenaiAgents;
+        options.agents_file = Some("/tmp/agents.toml".into());
+        let command = build_exec_start("/usr/bin/eunice", &options);
+        assert!(command.contains("--runtime openai-agents"));
+        assert!(command.contains("--agents /tmp/agents.toml"));
+        assert!(command.contains("--webapp"));
     }
 
     #[test]
@@ -427,6 +444,7 @@ mod tests {
     #[test]
     fn test_build_exec_start_all_options() {
         let o = InstallOptions {
+            runtime: crate::runtime::Runtime::Eunice,
             port: 8811,
             host: "127.0.0.1".to_string(),
             agents_file: Some("/a/agents.toml".to_string()),

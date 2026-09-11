@@ -16,6 +16,7 @@ pub struct AgentSpec {
     pub schedule: String,
     #[serde(default)]
     pub model: Option<String>,
+    pub runtime: Option<crate::runtime::Runtime>,
     #[serde(default)]
     pub prompt: Option<String>,
     #[serde(default)]
@@ -46,6 +47,7 @@ pub struct LoadedAgent {
     pub schedule_normalized: String,
     pub schedule: cron::Schedule,
     pub model: Option<String>,
+    pub runtime: Option<crate::runtime::Runtime>,
     /// Fully resolved prompt text (inline, or the contents of prompt_file).
     pub prompt: String,
     /// Resolved absolute path of `prompt_file`, `None` for an inline prompt.
@@ -297,6 +299,7 @@ pub fn validate_text(
             schedule_normalized,
             schedule,
             model: spec.model,
+            runtime: spec.runtime,
             prompt,
             prompt_file,
             enabled: spec.enabled,
@@ -497,6 +500,7 @@ fn find_agent(doc: &DocumentMut, name: &str) -> Option<usize> {
 fn update_agent_table(table: &mut Table, spec: &AgentSpec) {
     assign(table, "schedule", Value::from(spec.schedule.as_str()));
     set_or_remove(table, "model", spec.model.as_deref());
+    set_or_remove(table, "runtime", spec.runtime.map(|r| r.as_str()));
 
     // The prompt of a prompt_file agent lives in that file; writing a `prompt` key
     // here would break the exactly-one-of rule the loader enforces.
@@ -532,6 +536,7 @@ fn assign(table: &mut Table, key: &str, new_value: Value) {
 fn fill_new_agent_table(table: &mut Table, spec: &AgentSpec) {
     table["name"] = value(spec.name.as_str());
     table["schedule"] = value(spec.schedule.as_str());
+    if let Some(runtime) = spec.runtime { table["runtime"] = value(runtime.as_str()); }
     if let Some(model) = &spec.model {
         table["model"] = value(model.as_str());
     }
@@ -1051,12 +1056,43 @@ prompt = "two"
             name: name.to_string(),
             schedule: schedule.to_string(),
             model: None,
+            runtime: None,
             prompt: Some(prompt.to_string()),
             prompt_file: None,
             enabled: true,
             timeout_secs: 600,
             working_dir: None,
         }
+    }
+
+    #[test]
+    fn runtime_round_trips_through_config_and_editor() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agents.toml");
+        let mut configured = spec("managed", "0 9 * * *", "Review this repository");
+        configured.runtime = Some(crate::runtime::Runtime::OpenaiAgents);
+        configured.model = Some("astra".into());
+        let text = apply_mutation("", &upsert(None, configured.clone())).unwrap();
+        let loaded = validate_text(&text, &path, &|_| Ok(())).unwrap();
+        assert_eq!(
+            loaded.agents[0].runtime,
+            Some(crate::runtime::Runtime::OpenaiAgents)
+        );
+        assert_eq!(loaded.agents[0].model.as_deref(), Some("astra"));
+        configured.runtime = Some(crate::runtime::Runtime::Eunice);
+        let text = apply_mutation(&text, &upsert(Some("managed"), configured.clone())).unwrap();
+        assert_eq!(
+            validate_text(&text, &path, &|_| Ok(())).unwrap().agents[0].runtime,
+            Some(crate::runtime::Runtime::Eunice)
+        );
+        configured.runtime = None;
+        let text = apply_mutation(&text, &upsert(Some("managed"), configured)).unwrap();
+        assert!(!text.contains("runtime"));
+        let invalid = text.replace(
+            "model = \"astra\"",
+            "model = \"astra\"\nruntime = \"unknown\"",
+        );
+        assert!(validate_text(&invalid, &path, &|_| Ok(())).is_err());
     }
 
     fn upsert(original_name: Option<&str>, spec: AgentSpec) -> AgentMutation {

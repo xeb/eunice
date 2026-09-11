@@ -31,6 +31,7 @@ impl Default for RetryConfig {
 /// OpenAI-compatible HTTP client for all providers
 #[derive(Clone)]
 pub struct Client {
+    runtime: crate::runtime::Runtime,
     http: reqwest::Client,
     base_url: String,
     key_pool: Arc<KeyPool>,
@@ -82,6 +83,7 @@ impl Client {
             .context("Failed to create HTTP client")?;
 
         Ok(Self {
+            runtime: crate::runtime::Runtime::Eunice,
             http,
             base_url: provider_info.base_url.clone(),
             key_pool,
@@ -100,6 +102,132 @@ impl Client {
     }
 
     pub fn set_effort(&mut self, effort: Option<String>) { self.effort = effort; }
+
+    pub fn runtime(&self) -> crate::runtime::Runtime { self.runtime }
+
+    pub fn set_runtime(&mut self, runtime: crate::runtime::Runtime) -> Result<()> {
+        runtime.validate(&self.provider)?;
+        self.runtime = runtime;
+        Ok(())
+    }
+
+    pub fn uses_responses(&self, model: &str) -> bool {
+        self.provider == Provider::OpenAI && crate::openai::is_astra(model)
+    }
+
+    pub(crate) fn effort(&self) -> Option<&str> { self.effort.as_deref() }
+
+    /// Stateful POSTs are deliberately sent once. An ambiguous failure must be
+    /// reconciled with the remote session before resubmitting work.
+    pub(crate) async fn agents_request(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let mut req = self
+            .add_auth(self.http.request(
+                method,
+                format!("{}{}", self.base_url.trim_end_matches('/'), path),
+            ))
+            .header("OpenAI-Beta", "agents=v1")
+            .timeout(Duration::from_secs(30));
+        if let Some(body) = body {
+            req = req.json(body);
+        }
+        let response = req
+            .send()
+            .await
+            .context("Agents API request failed; remote state may need reconciliation")?;
+        let status = response.status();
+        let text = response.text().await?;
+        if !status.is_success() {
+            return Err(anyhow!("Agents API HTTP {}: {}", status.as_u16(), text));
+        }
+        if text.trim().is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+        serde_json::from_str(&text).context("Invalid Agents API JSON response")
+    }
+
+    async fn responses<F: FnMut(&str)>(
+        &self,
+        model: &str,
+        messages: serde_json::Value,
+        tools: Option<&[Tool]>,
+        stream: bool,
+        mut on_chunk: F,
+    ) -> Result<ChatCompletionResponse> {
+        use futures::StreamExt;
+        let body = crate::openai::responses::request(model, messages, tools, self.effort(), stream)?;
+        let mut attempt = 0;
+        let response = loop {
+            let response = self
+                .add_auth(
+                    self.http
+                        .post(format!("{}/responses", self.base_url.trim_end_matches('/'))),
+                )
+                .json(&body)
+                .send()
+                .await?;
+            if Self::is_retryable_status(response.status().as_u16())
+                && attempt < self.retry_config.max_retries
+            {
+                tokio::time::sleep(self.backoff_delay(attempt)).await;
+                attempt += 1;
+                continue;
+            }
+            if !response.status().is_success() {
+                return Err(anyhow!(
+                    "Responses API HTTP {}: {}",
+                    response.status(),
+                    response.text().await?
+                ));
+            }
+            break response;
+        };
+        if !stream {
+            return crate::openai::responses::parse(response.json().await?);
+        }
+        let mut decoder = crate::openai::sse::Decoder::default();
+        let mut bytes = response.bytes_stream();
+        let mut streamed = String::new();
+        while let Some(chunk) = bytes.next().await {
+            for data in decoder.push(&chunk?)? {
+                if data == "[DONE]" {
+                    continue;
+                }
+                let event: serde_json::Value = serde_json::from_str(&data)?;
+                match event["type"].as_str() {
+                    Some("response.output_text.delta" | "response.refusal.delta") => {
+                        let delta = event["delta"]
+                            .as_str()
+                            .ok_or_else(|| anyhow!("Missing text delta"))?;
+                        streamed.push_str(delta);
+                        on_chunk(delta);
+                    }
+                    Some("response.completed") => {
+                        let parsed = crate::openai::responses::parse(event["response"].clone())?;
+                        // Some servers omit deltas; still render the canonical text.
+                        if streamed.is_empty() {
+                            if let Some(text) = &parsed.choices[0].message.content {
+                                on_chunk(text);
+                            }
+                        }
+                        return Ok(parsed);
+                    }
+                    Some("error" | "response.failed" | "response.incomplete") => {
+                        return Err(anyhow!("Responses stream failed: {}", event))
+                    }
+                    _ => {}
+                }
+            }
+        }
+        decoder.finish()?;
+        Err(anyhow!(
+            "Responses stream closed before completion; no tool calls were executed"
+        ))
+    }
 
     /// Preserve the already-resolved endpoint/provider in fallback REPL mode.
     pub fn session_info(&self, model: &str) -> ProviderInfo {
@@ -177,6 +305,14 @@ impl Client {
         messages: serde_json::Value,
         tools: Option<&[Tool]>,
     ) -> Result<ChatCompletionResponse> {
+        if self.uses_responses(model) {
+            return self.responses(model, messages, tools, false, |_| {}).await;
+        }
+        // Native Responses metadata is local state, never a legacy API field.
+        let mut messages = messages;
+        if let Some(messages) = messages.as_array_mut() {
+            for message in messages { if let Some(object) = message.as_object_mut() { object.remove("native_output"); } }
+        }
         // Check if using native Gemini API
         if self.use_native_gemini_api {
             let messages: Vec<Message> = serde_json::from_value(messages)?;
@@ -423,6 +559,9 @@ impl Client {
     where
         F: FnMut(&str),
     {
+        if self.uses_responses(model) {
+            return self.responses(model, messages, tools, true, on_chunk).await;
+        }
         // Only streaming for native Gemini API
         if !self.use_native_gemini_api {
             // Fall back to non-streaming for other providers
@@ -592,6 +731,7 @@ impl Client {
         Ok(ChatCompletionResponse {
             choices: vec![crate::models::Choice {
                 message: crate::models::AssistantMessage {
+                    native_output: None,
                     content: if all_text.is_empty() { None } else { Some(all_text) },
                     tool_calls,
                 },
@@ -601,6 +741,7 @@ impl Client {
                 completion_tokens: u.candidates_token_count,
                 total_tokens: u.total_token_count,
                 cached_tokens: u.cached_content_token_count,
+            cache_write_tokens: 0,
             }),
         })
     }
@@ -770,7 +911,7 @@ impl Client {
                         role: Some("user".to_string()),
                     });
                 }
-                Message::Assistant { content, tool_calls } => {
+                Message::Assistant { content, tool_calls, .. } => {
                     // Flush any pending tool responses before assistant message
                     flush_tool_parts(&mut contents, &mut pending_tool_parts);
 
@@ -991,6 +1132,7 @@ impl Client {
         Ok(ChatCompletionResponse {
             choices: vec![crate::models::Choice {
                 message: crate::models::AssistantMessage {
+                    native_output: None,
                     content: if text.is_empty() { None } else { Some(text) },
                     tool_calls,
                 },
@@ -1000,6 +1142,7 @@ impl Client {
                 completion_tokens: u.candidates_token_count,
                 total_tokens: u.total_token_count,
                 cached_tokens: u.cached_content_token_count,
+            cache_write_tokens: 0,
             }),
         })
     }
@@ -1167,6 +1310,7 @@ mod tests {
     fn test_convert_messages_to_gemini_assistant_message() {
         let client = create_test_client();
         let messages = vec![Message::Assistant {
+            native_output: None,
             content: Some("Hi there!".to_string()),
             tool_calls: None,
         }];
@@ -1189,6 +1333,7 @@ mod tests {
                 content: "What is 2+2?".to_string(),
             },
             Message::Assistant {
+                native_output: None,
                 content: Some("4".to_string()),
                 tool_calls: None,
             },
@@ -1358,6 +1503,7 @@ mod tests {
         let client = create_test_client();
         let messages = vec![
             Message::Assistant {
+                native_output: None,
                 content: None,
                 tool_calls: Some(vec![
                     crate::models::ToolCall {

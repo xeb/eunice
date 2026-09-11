@@ -58,7 +58,7 @@ pub fn estimate_tokens(messages: &[Message]) -> usize {
         .iter()
         .map(|m| match m {
             Message::User { content } => content.len() / 4,
-            Message::Assistant { content, tool_calls } => {
+            Message::Assistant { content, tool_calls, .. } => {
                 let content_tokens = content.as_ref().map(|c| c.len()).unwrap_or(0) / 4;
                 let tool_tokens = tool_calls
                     .as_ref()
@@ -124,7 +124,7 @@ fn format_conversation_for_summary(messages: &[Message]) -> String {
         .enumerate()
         .map(|(i, msg)| match msg {
             Message::User { content } => format!("[{}] USER:\n{}\n", i, content),
-            Message::Assistant { content, tool_calls } => {
+            Message::Assistant { content, tool_calls, .. } => {
                 let content_str = content.as_deref().unwrap_or("");
                 let tools_str = tool_calls
                     .as_ref()
@@ -409,6 +409,7 @@ mod tests {
                 content: "Hello world".to_string(), // ~3 tokens
             },
             Message::Assistant {
+                native_output: None,
                 content: Some("Hi there!".to_string()), // ~2 tokens
                 tool_calls: None,
             },
@@ -547,7 +548,7 @@ mod tests {
         let mut messages = Vec::new();
         for _ in 0..200 {
             messages.push(Message::User { content: big.clone() });
-            messages.push(Message::Assistant { content: Some(big.clone()), tool_calls: None });
+            messages.push(Message::Assistant { native_output: None, content: Some(big.clone()), tool_calls: None });
         }
         let target = (32768.0 * 0.6) as usize; // ~19660
         let trimmed = trim_to_token_budget(&messages, target);
@@ -570,6 +571,7 @@ mod tests {
                 content: "Hello".to_string(),
             },
             Message::Assistant {
+                native_output: None,
                 content: Some("Hi!".to_string()),
                 tool_calls: None,
             },

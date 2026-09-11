@@ -4,7 +4,6 @@ use crate::agent::{self, AgentStatus};
 use crate::client::Client;
 use crate::compact::CompactionConfig;
 use crate::display_sink::TuiDisplaySink;
-use crate::models::Message;
 use crate::models::ProviderInfo;
 use crate::output_store::OutputStore;
 use crate::theme;
@@ -182,7 +181,7 @@ async fn run_generation(
     prompt: &str,
     system_instructions: Option<&str>,
     tool_registry: &ToolRegistry,
-    conversation_history: &mut Vec<Message>,
+    conversation_history: &mut crate::runtime::Conversation,
     output_store: &mut OutputStore,
     session_usage: &mut SessionUsage,
 ) {
@@ -221,6 +220,8 @@ async fn run_generation(
             session_usage.total_output_tokens += r.usage.total_output_tokens;
             session_usage.total_cached_tokens += r.usage.total_cached_tokens;
             session_usage.api_calls += r.usage.api_calls;
+            session_usage.requests.extend(r.usage.requests.clone());
+    session_usage.aggregate_only |= r.usage.aggregate_only;
             if r.status == AgentStatus::Cancelled {
                 raw_print(&format!("\r\n{YELLOW}⚠ Stopped by user{RESET}\r\n"));
             } else {
@@ -244,7 +245,7 @@ async fn run_tui_framed(
     let model = &session.info.resolved_model;
     let tool_registry = ToolRegistry::new();
     let tool_count = tool_registry.get_tools().len();
-    let mut conversation_history: Vec<Message> = Vec::new();
+    let mut conversation_history = crate::runtime::Conversation::default();
     let mut input_history: Vec<String> = Vec::new();
     let mut output_store = OutputStore::new();
     let mut session_usage = SessionUsage::new();
@@ -385,7 +386,7 @@ async fn run_tui_classic(
     print_help(&mut shared_writer)?;
 
     // Conversation history
-    let mut conversation_history: Vec<Message> = Vec::new();
+    let mut conversation_history = crate::runtime::Conversation::default();
 
     // Output store for truncating large tool outputs
     let mut output_store = OutputStore::new();
@@ -613,7 +614,7 @@ async fn process_prompt(
     prompt: &str,
     system_instructions: Option<&str>,
     tool_registry: &ToolRegistry,
-    conversation_history: &mut Vec<Message>,
+    conversation_history: &mut crate::runtime::Conversation,
     output_store: &mut OutputStore,
     session_usage: &mut SessionUsage,
 ) -> Result<()> {
@@ -658,6 +659,8 @@ async fn process_prompt(
         session_usage.total_output_tokens += r.usage.total_output_tokens;
         session_usage.total_cached_tokens += r.usage.total_cached_tokens;
         session_usage.api_calls += r.usage.api_calls;
+            session_usage.requests.extend(r.usage.requests.clone());
+    session_usage.aggregate_only |= r.usage.aggregate_only;
         if r.status == AgentStatus::Cancelled { Some(true) } else { None }
     });
 

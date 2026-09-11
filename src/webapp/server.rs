@@ -16,6 +16,8 @@ use super::scheduler::{self, AgentRegistry};
 /// Shared application state
 #[allow(dead_code)]
 pub struct AppState {
+    pub cancellations: Mutex<std::collections::HashMap<String, watch::Sender<bool>>>,
+    pub session_locks: Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>,
     pub client: Arc<Client>,
     pub provider_info: ProviderInfo,
     pub tool_registry: Arc<ToolRegistry>,
@@ -70,7 +72,7 @@ pub async fn run_server(
         Some(config) => {
             let count = config.agents.len();
             let source = config.source_path.display().to_string();
-            let registry = AgentRegistry::new(config, &provider_info.resolved_model)?;
+            let registry = AgentRegistry::with_runtime(config, &provider_info.resolved_model, client.runtime())?;
             println!("Scheduled agents: {} (from {})", count, source);
             Some(Arc::new(registry))
         }
@@ -78,6 +80,8 @@ pub async fn run_server(
     };
 
     let state = Arc::new(AppState {
+        cancellations: Mutex::new(std::collections::HashMap::new()),
+        session_locks: Mutex::new(std::collections::HashMap::new()),
         client: Arc::new(client),
         provider_info,
         tool_registry: Arc::new(tool_registry),
@@ -88,6 +92,7 @@ pub async fn run_server(
         agents,
     });
 
+    handlers::recover_managed_sessions(state.clone()).await?;
     scheduler::spawn(state.clone());
 
     let app = Router::new()

@@ -26,7 +26,7 @@ const RELOAD_POLL: Duration = Duration::from_secs(3);
 
 /// How long a timed-out run gets to unwind and persist its transcript before it
 /// is abandoned outright.
-const TIMEOUT_GRACE: Duration = Duration::from_secs(30);
+const TIMEOUT_GRACE: Duration = Duration::from_secs(50);
 
 /// Characters of the prompt shown in the read-only agents UI.
 const PREVIEW_CHARS: usize = 240;
@@ -66,6 +66,7 @@ struct AgentContext {
     /// still match, because rebuilding one runs provider detection, which may probe
     /// Ollama over HTTP.
     model: Option<String>,
+    runtime: Option<crate::runtime::Runtime>,
     working_dir: Option<PathBuf>,
     client: Option<(Arc<Client>, Arc<ProviderInfo>)>,
     tool_registry: Option<Arc<ToolRegistry>>,
@@ -84,6 +85,7 @@ pub struct AgentRegistry {
     edit_lock: Mutex<()>,
     source_path: PathBuf,
     server_model: String,
+    server_runtime: crate::runtime::Runtime,
 }
 
 struct RegistryInner {
@@ -161,6 +163,15 @@ impl AgentRegistry {
     /// model differs from `server_model`, and a per-agent ToolRegistry only for agents
     /// with a `working_dir`. Agents needing neither share the server's.
     pub fn new(config: AgentsConfig, server_model: &str) -> Result<Self> {
+        Self::with_runtime(config, server_model, crate::runtime::Runtime::Eunice)
+    }
+
+    pub fn with_runtime(
+        config: AgentsConfig,
+        server_model: &str,
+        server_runtime: crate::runtime::Runtime,
+    ) -> Result<Self> {
+        validate_runtimes(&config.agents, server_model, server_runtime)?;
         let contexts = build_contexts(&config.agents, server_model, &HashMap::new())?;
         let source_path = config.source_path.clone();
         let fingerprint = fingerprint(&source_path, &config.agents);
@@ -178,6 +189,7 @@ impl AgentRegistry {
             edit_lock: Mutex::new(()),
             source_path,
             server_model: server_model.to_string(),
+            server_runtime,
         })
     }
 
@@ -240,6 +252,7 @@ impl AgentRegistry {
     /// Replace the live config. In-flight runs are left alone; only future scheduling
     /// reflects the new config.
     async fn swap(&self, config: AgentsConfig) -> Result<()> {
+        validate_runtimes(&config.agents, &self.server_model, self.server_runtime)?;
         let previous_contexts = self.inner.read().await.contexts.clone();
 
         // build_contexts resolves models, which joins a thread that may make a blocking
@@ -316,6 +329,10 @@ impl AgentRegistry {
         }
     }
 
+    pub(super) fn validate_runtime_config(&self, config: &AgentsConfig) -> Result<()> {
+        validate_runtimes(&config.agents, &self.server_model, self.server_runtime)
+    }
+
     pub fn source_path(&self) -> &Path {
         &self.source_path
     }
@@ -379,7 +396,7 @@ impl AgentRegistry {
 
     /// Claim the run slot for an agent. Returns false when a previous run is still in
     /// flight; that tick is recorded as skipped rather than queued.
-    async fn begin_run(&self, name: &str) -> bool {
+    pub(super) async fn begin_run(&self, name: &str) -> bool {
         let mut states = self.state.write().await;
         let entry = states.entry(name.to_string()).or_default();
 
@@ -398,7 +415,7 @@ impl AgentRegistry {
     /// Record a finished run. A run outlives a reload that deleted its agent, and the
     /// swap already dropped that agent's state, so an unknown name is a no-op rather
     /// than a resurrected entry.
-    async fn finish_run(
+    pub(super) async fn finish_run(
         &self,
         name: &str,
         status: RunStatus,
@@ -431,8 +448,10 @@ impl AgentRegistry {
             ),
         };
 
+        let mut client = (*client).clone();
+        client.set_runtime(ctx.runtime.unwrap_or(self.server_runtime)).ok()?;
         Some(RunContext {
-            client,
+            client: Arc::new(client),
             provider_info,
             tool_registry: ctx
                 .tool_registry
@@ -446,6 +465,35 @@ impl AgentRegistry {
 /// unchanged. Every agent gets an entry, including those that need neither a dedicated
 /// client nor a dedicated tool registry, so a later reload can recognise them as
 /// unchanged instead of re-running provider detection.
+
+fn validate_runtimes(
+    agents: &[LoadedAgent],
+    server_model: &str,
+    runtime: crate::runtime::Runtime,
+) -> Result<()> {
+    validate_runtimes_with(agents, server_model, runtime, &|model| {
+        detect_provider_isolated(model).map(|info| info.provider)
+    })
+}
+
+fn validate_runtimes_with(
+    agents: &[LoadedAgent],
+    server_model: &str,
+    runtime: crate::runtime::Runtime,
+    resolve: &impl Fn(&str) -> Result<crate::models::Provider>,
+) -> Result<()> {
+    for agent in agents {
+        let selected = agent.runtime.unwrap_or(runtime);
+        if selected == crate::runtime::Runtime::OpenaiAgents {
+            let provider = resolve(agent.model.as_deref().unwrap_or(server_model))?;
+            selected
+                .validate(&provider)
+                .map_err(|e| anyhow!("agent '{}': {}", agent.name, e))?;
+        }
+    }
+    Ok(())
+}
+
 fn build_contexts(
     agents: &[LoadedAgent],
     server_model: &str,
@@ -455,7 +503,7 @@ fn build_contexts(
 
     for agent in agents {
         if let Some(existing) = previous.get(&agent.name) {
-            if existing.model == agent.model && existing.working_dir == agent.working_dir {
+            if existing.model == agent.model && existing.runtime == agent.runtime && existing.working_dir == agent.working_dir {
                 contexts.insert(agent.name.clone(), existing.clone());
                 continue;
             }
@@ -487,6 +535,7 @@ fn build_contexts(
             agent.name.clone(),
             AgentContext {
                 model: agent.model.clone(),
+                runtime: agent.runtime,
                 working_dir: agent.working_dir.clone(),
                 client,
                 tool_registry,
@@ -570,9 +619,9 @@ fn due_agents<'a>(
 }
 
 /// Clears `running` even when the run panics or is dropped mid-flight by the timeout.
-struct RunGuard {
-    registry: Arc<AgentRegistry>,
-    name: String,
+pub(super) struct RunGuard {
+    pub(super) registry: Arc<AgentRegistry>,
+    pub(super) name: String,
 }
 
 impl Drop for RunGuard {
@@ -695,6 +744,15 @@ async fn run_loop(state: Arc<AppState>, registry: Arc<AgentRegistry>) {
                 continue;
             };
 
+            // A failed observer may leave remote work running after RunGuard drops.
+            // Do not create a second remote run while that durable state is pending.
+            match state.storage.has_pending_managed_agent(&agent.name).await {
+                Ok(false) => {},
+                pending => {
+                    log(&format!("[{}] managed recovery pending ({pending:?}), skipping this tick",agent.name));
+                    continue;
+                }
+            }
             if registry.begin_run(&agent.name).await {
                 let state = state.clone();
                 let registry = registry.clone();
@@ -881,6 +939,7 @@ async fn record_run_status(
 /// with no indication of why.
 async fn append_failure_note(state: &Arc<AppState>, session_id: &str, agent_name: &str, message: &str) {
     let note = Message::Assistant {
+        native_output: None,
         content: Some(format!("Agent '{}' run failed: {}", agent_name, message)),
         tool_calls: None,
     };
@@ -923,6 +982,7 @@ mod tests {
             schedule_normalized: normalized.clone(),
             schedule: cron::Schedule::from_str(&normalized).unwrap(),
             model: None,
+            runtime: None,
             prompt: "do the thing".to_string(),
             prompt_file: None,
             enabled,
@@ -958,7 +1018,75 @@ mod tests {
             edit_lock: Mutex::new(()),
             source_path: PathBuf::from("/tmp/agents.toml"),
             server_model: "server-model".to_string(),
+            server_runtime: crate::runtime::Runtime::Eunice,
         }
+    }
+
+    #[tokio::test]
+    async fn runtime_inheritance_and_override_rebuild_contexts() {
+        use crate::runtime::Runtime;
+        let scheduled = agent("review", "0 9 * * *", true);
+        let mut registry = registry(vec![scheduled.clone()]);
+        registry.server_runtime = Runtime::OpenaiAgents;
+        let contexts = build_contexts(&[scheduled.clone()], "gpt-6-astra", &HashMap::new()).unwrap();
+        registry.inner.write().await.contexts = contexts.clone();
+        let state = super::super::runtime_tests::app(
+            SessionStorage::new_memory(),
+            "http://127.0.0.1:1/v1/".into(),
+            None,
+        );
+        assert_eq!(
+            registry
+                .run_context("review", &state)
+                .await
+                .unwrap()
+                .client
+                .runtime(),
+            Runtime::OpenaiAgents
+        );
+        let mut scheduled = scheduled;
+        scheduled.runtime = Some(Runtime::Eunice);
+        registry.inner.write().await.contexts =
+            build_contexts(&[scheduled], "gpt-6-astra", &contexts).unwrap();
+        assert_eq!(
+            registry
+                .run_context("review", &state)
+                .await
+                .unwrap()
+                .client
+                .runtime(),
+            Runtime::Eunice
+        );
+        assert_eq!(state.client.runtime(), Runtime::OpenaiAgents);
+    }
+
+    #[test]
+    fn rejects_incompatible_inherited_or_explicit_managed_runtime() {
+        use crate::{models::Provider, runtime::Runtime};
+        let mut scheduled = agent("review", "0 9 * * *", true);
+        let resolve = |_: &str| Ok(Provider::Gemini);
+        assert!(validate_runtimes_with(
+            &[scheduled.clone()],
+            "gemini",
+            Runtime::OpenaiAgents,
+            &resolve
+        )
+        .is_err());
+        scheduled.runtime = Some(Runtime::Eunice);
+        validate_runtimes_with(
+            &[scheduled.clone()],
+            "gemini",
+            Runtime::OpenaiAgents,
+            &resolve,
+        )
+        .unwrap();
+        scheduled.runtime = Some(Runtime::OpenaiAgents);
+        assert!(
+            validate_runtimes_with(&[scheduled], "gemini", Runtime::Eunice, &resolve)
+                .unwrap_err()
+                .to_string()
+                .contains("review")
+        );
     }
 
     /// A registry backed by a real agents.toml, for the reload paths.
