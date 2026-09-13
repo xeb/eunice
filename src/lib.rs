@@ -13,6 +13,7 @@ pub mod interactive;
 pub mod instructions;
 pub mod key_rotation;
 pub mod local;
+pub mod local_stream;
 pub mod models;
 pub mod output_store;
 pub mod provider;

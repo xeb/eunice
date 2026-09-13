@@ -36,6 +36,7 @@ pub struct HfModelInfo {
     pub ctx: u32,
     /// Minimum VRAM (GB) needed to run MTP on-GPU; below this we fall back to plain decode.
     pub min_vram_gb: u32,
+    pub qwen: bool,
 }
 
 /// Paths to the local GGUF weights (target model + optional MTP drafter).
@@ -45,8 +46,18 @@ pub struct LocalModelPaths {
 }
 
 /// Resolve a model alias like "gemma4:e4b" to HuggingFace coordinates
-pub fn resolve_hf_alias(alias: &str) -> HfModelInfo {
-    match alias {
+pub fn resolve_hf_alias(alias: &str) -> Result<HfModelInfo> {
+    Ok(match alias {
+        "qwen3.5:2b" | "qwen3.5:0.8b" => {
+            let size = if alias.ends_with(":2b") { "2B" } else { "0.8B" };
+            HfModelInfo {
+                repo: format!("unsloth/Qwen3.5-{size}-GGUF"),
+                filename: format!("Qwen3.5-{size}-Q4_K_M.gguf"),
+                display_name: format!("Qwen3.5-{size}-Q4_K_M"),
+                size_hint: if size == "2B" { "1.28 GB" } else { "~0.5 GB" },
+                ctx: 4096, qwen: true, ..Default::default()
+            }
+        },
         "gemma4:e4b" | "gemma4:e4b-q4" => HfModelInfo {
             repo: "unsloth/gemma-4-E4B-it-GGUF".to_string(),
             filename: "gemma-4-E4B-it-Q4_K_M.gguf".to_string(),
@@ -93,15 +104,10 @@ pub fn resolve_hf_alias(alias: &str) -> HfModelInfo {
             mtp: true,
             ctx: 8192,
             min_vram_gb: 24,
+            qwen: false,
         },
-        _ => HfModelInfo {
-            repo: "unsloth/gemma-4-E4B-it-GGUF".to_string(),
-            filename: "gemma-4-E4B-it-Q4_K_M.gguf".to_string(),
-            display_name: alias.to_string(),
-            size_hint: "unknown",
-            ..Default::default()
-        },
-    }
+        _ => bail!("Unknown local model '{alias}'. Use hf:qwen3.5:2b, hf:qwen3.5:0.8b, or a supported hf:gemma4:* alias."),
+    })
 }
 
 /// The ~/.eunice base directory
@@ -115,29 +121,70 @@ fn models_dir() -> PathBuf {
     eunice_dir().join("models")
 }
 
-/// Find the gemma4-server binary in ~/.eunice/bin/ or PATH
+/// Find a standard llama-server, with a legacy Gemma fallback.
+/// An explicit override never silently falls back to another binary.
 pub fn find_server_binary() -> Option<PathBuf> {
-    // Check ~/.eunice/bin/ first
-    let home = dirs::home_dir()?;
-    let eunice_bin = home.join(".eunice").join("bin").join(SERVER_BINARY_NAME);
-    if eunice_bin.exists() {
-        return Some(eunice_bin);
+    if let Some(path) = env::var_os("EUNICE_LLAMA_SERVER") {
+        let path = PathBuf::from(path);
+        return path.is_file().then_some(path);
     }
-
-    // Check PATH
-    if let Ok(output) = std::process::Command::new("which")
-        .arg(SERVER_BINARY_NAME)
-        .output()
-    {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
+    for name in ["llama-server", SERVER_BINARY_NAME] {
+        let cached = eunice_dir().join("bin").join(name);
+        if cached.is_file() { return Some(cached); }
+        if let Some(paths) = env::var_os("PATH") {
+            for dir in env::split_paths(&paths) {
+                let path = dir.join(name);
+                if path.is_file() { return Some(path); }
             }
         }
     }
-
     None
+}
+
+/// Own the inference process even across errors and cancelled startup futures.
+pub struct LocalServer(Child);
+impl std::ops::Deref for LocalServer {
+    type Target = Child;
+    fn deref(&self) -> &Child { &self.0 }
+}
+impl std::ops::DerefMut for LocalServer {
+    fn deref_mut(&mut self) -> &mut Child { &mut self.0 }
+}
+impl Drop for LocalServer {
+    fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+}
+
+fn positive_setting(name: &str, default: u32, maximum: u32) -> Result<u32> {
+    match env::var(name) {
+        Ok(value) => value.parse::<u32>().ok().filter(|n| *n > 0 && *n <= maximum)
+            .ok_or_else(|| anyhow!("{name} must be an integer from 1 to {maximum}")),
+        Err(env::VarError::NotPresent) => Ok(default),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn output_limit(model: &str) -> Result<Option<u32>> {
+    if model.to_ascii_lowercase().contains("qwen3.5") {
+        Ok(Some(positive_setting("EUNICE_LOCAL_PREDICT", 1024, 32768)?))
+    } else { Ok(None) }
+}
+
+/// Qwen CPU defaults can be tuned without changing existing Gemma profiles.
+fn local_server_args(info: &HfModelInfo, port: u16) -> Result<Vec<String>> {
+    let mut args = vec!["--port".into(), port.to_string(), "--host".into(), "127.0.0.1".into(), "--jinja".into()];
+    if info.qwen {
+        let threads = positive_setting("EUNICE_LOCAL_THREADS", 2, 256)?;
+        let batch_threads = positive_setting("EUNICE_LOCAL_BATCH_THREADS", threads, 256)?;
+        let ctx = positive_setting("EUNICE_LOCAL_CTX", info.ctx, 131072)?;
+        let predict = positive_setting("EUNICE_LOCAL_PREDICT", 1024, 32768)?;
+        args.extend(["-c".into(), ctx.to_string(), "-t".into(), threads.to_string(),
+            "-tb".into(), batch_threads.to_string(), "-n".into(), predict.to_string(),
+            "-np".into(), "1".into(), "-b".into(), "256".into(), "-ub".into(), "128".into(),
+            "--chat-template-kwargs".into(), r#"{"enable_thinking":false}"#.into(),
+            "--temp".into(), "0.7".into(), "--top-p".into(), "0.8".into(),
+            "--top-k".into(), "20".into(), "--presence-penalty".into(), "1.5".into()]);
+    }
+    Ok(args)
 }
 
 /// Check if an NVIDIA GPU is available
@@ -180,13 +227,13 @@ async fn download_gguf(repo: &str, filename: &str, size_hint: &str) -> Result<Pa
 
 /// Download model weights from HuggingFace (target GGUF only)
 pub async fn download_model(alias: &str) -> Result<PathBuf> {
-    let info = resolve_hf_alias(alias);
+    let info = resolve_hf_alias(alias)?;
     download_gguf(&info.repo, &info.filename, info.size_hint).await
 }
 
 /// Download the target model and (if applicable) the MTP drafter.
 pub async fn download_model_full(alias: &str) -> Result<LocalModelPaths> {
-    let info = resolve_hf_alias(alias);
+    let info = resolve_hf_alias(alias)?;
     let model = download_gguf(&info.repo, &info.filename, info.size_hint).await?;
     let drafter = match (info.drafter_repo.as_ref(), info.drafter_filename.as_ref()) {
         (Some(repo), Some(file)) => Some(download_gguf(repo, file, "~0.5 GB drafter").await?),
@@ -195,46 +242,57 @@ pub async fn download_model_full(alias: &str) -> Result<LocalModelPaths> {
     Ok(LocalModelPaths { model, drafter })
 }
 
-/// Start the (stock) gemma4-server subprocess for non-MTP local models (E4B / 26B).
-pub fn start_server(model_path: &std::path::Path, port: u16) -> Result<Child> {
-    let server_bin = find_server_binary()
-        .ok_or_else(|| anyhow!(
-            "gemma4-server not found. Install it via:\n  \
-             curl -sSf https://longrunningagents.com/install.sh | bash\n  \
-             Or download llama-server from https://github.com/ggerganov/llama.cpp/releases \
-             and place it at ~/.eunice/bin/gemma4-server"
-        ))?;
+/// Start a regular llama.cpp server; the specialized Gemma MTP path stays separate.
+pub fn start_server(model_path: &Path, info: &HfModelInfo, port: u16) -> Result<LocalServer> {
+    let server_bin = find_server_binary().ok_or_else(|| anyhow!(
+        "llama-server not found. Install llama.cpp or set EUNICE_LLAMA_SERVER to its executable path."))?;
+    let mut cmd = Command::new(&server_bin);
+    // Linux also terminates the inference child if the terminal/client is killed.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        let parent = std::process::id() as libc::pid_t;
+        unsafe {
+            cmd.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() != parent { libc::_exit(1); }
+                Ok(())
+            });
+        }
+    }
 
-    let mut cmd = std::process::Command::new(&server_bin);
-
-    // Set LD_LIBRARY_PATH to the server binary's directory (shared libs live alongside it)
     if let Some(bin_dir) = server_bin.parent() {
-        let existing = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
-        let new_path = if existing.is_empty() {
-            bin_dir.to_string_lossy().to_string()
-        } else {
-            format!("{}:{}", bin_dir.to_string_lossy(), existing)
-        };
-        cmd.env("LD_LIBRARY_PATH", new_path);
+        let mut paths = vec![bin_dir.to_path_buf()];
+        if let Some(old) = env::var_os("LD_LIBRARY_PATH") { paths.extend(env::split_paths(&old)); }
+        cmd.env("LD_LIBRARY_PATH", env::join_paths(paths)?);
     }
+    cmd.arg("-m").arg(model_path).args(local_server_args(info, port)?);
+    cmd.args(["-ngl", if has_nvidia_gpu() { "999" } else { "0" }]);
+    std::fs::create_dir_all(eunice_dir())?;
+    let log = std::fs::File::create(local_log_path(port))?;
+    cmd.stdout(Stdio::from(log.try_clone()?)).stderr(Stdio::from(log));
+    Ok(LocalServer(cmd.spawn().map_err(|e| anyhow!("Failed to start {}: {e}", server_bin.display()))?))
+}
 
-    cmd.arg("-m").arg(model_path)
-        .arg("--port").arg(port.to_string())
-        .arg("--host").arg("127.0.0.1");
+fn local_log_path(port: u16) -> PathBuf { eunice_dir().join(format!("llama-server-{port}.log")) }
 
-    // Enable GPU layers if NVIDIA GPU detected
-    if has_nvidia_gpu() {
-        cmd.arg("-ngl").arg("999");
+async fn wait_for_local(child: &mut Child, port: u16) -> Result<()> {
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build()?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(HEALTH_TIMEOUT_SECS);
+    loop {
+        let exited = child.try_wait()?;
+        if exited.is_some() || tokio::time::Instant::now() > deadline {
+            let log = std::fs::read_to_string(local_log_path(port)).unwrap_or_default();
+            let tail = log.lines().rev().take(15).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+            bail!("llama-server failed to become ready ({exited:?}).\n{tail}\nLog: {}", local_log_path(port).display());
+        }
+        if let Ok(response) = client.get(format!("http://127.0.0.1:{port}/health")).send().await {
+            if response.status().is_success() { return Ok(()); }
+        }
+        tokio::time::sleep(Duration::from_millis(HEALTH_POLL_INTERVAL_MS)).await;
     }
-
-    // Suppress server output (it's noisy)
-    cmd.stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    let child = cmd.spawn()
-        .map_err(|e| anyhow!("Failed to start gemma4-server: {}", e))?;
-
-    Ok(child)
 }
 
 /// Path to the server's log file (MTP path captures stdout/stderr here for diagnostics).
@@ -405,20 +463,25 @@ fn log_tail(n: usize) -> String {
 }
 
 /// Full setup: validate (MTP), download model(s), build (MTP) if needed, start server, wait ready.
-pub async fn setup_local_model(alias: &str) -> Result<(Child, PathBuf)> {
+pub async fn setup_local_model(alias: &str) -> Result<(LocalServer, PathBuf)> {
     setup_local_model_on_port(alias, DEFAULT_PORT).await
 }
 
 /// Same as [`setup_local_model`] but on a specific port (used by `--serve`).
-pub async fn setup_local_model_on_port(alias: &str, port: u16) -> Result<(Child, PathBuf)> {
-    let info = resolve_hf_alias(alias);
+pub async fn setup_local_model_on_port(alias: &str, port: u16) -> Result<(LocalServer, PathBuf)> {
+    let info = resolve_hf_alias(alias)?;
 
     if !info.mtp {
-        // Existing E4B / 26B path — unchanged behavior.
+        // Validate settings and runtime before downloading any weights.
+        local_server_args(&info, port)?;
+        find_server_binary().ok_or_else(|| anyhow!("Install llama-server or set EUNICE_LLAMA_SERVER before downloading a local model."))?;
+        let reservation = std::net::TcpListener::bind(("127.0.0.1", port))
+            .map_err(|e| anyhow!("Local inference port {port} is unavailable: {e}"))?;
         let model_path = download_model(alias).await?;
-        eprint!("Starting gemma4-server...");
-        let child = start_server(&model_path, port)?;
-        wait_for_ready(port).await?;
+        drop(reservation);
+        eprint!("Starting llama-server ({})...", info.display_name);
+        let mut child = start_server(&model_path, &info, port)?;
+        wait_for_local(&mut child, port).await?;
         eprintln!(" Ready.");
         return Ok((child, model_path));
     }
@@ -452,7 +515,7 @@ pub async fn setup_local_model_on_port(alias: &str, port: u16) -> Result<(Child,
 
     // 5. Start the server and wait, detecting early crashes.
     eprint!("Starting {} (loading weights, may take a minute)...", MTP_SERVER_LABEL);
-    let mut child = start_mtp_server(&server_bin, &paths, port, info.ctx, MTP_DRAFT_N_MAX, pf.run_mtp)?;
+    let mut child = LocalServer(start_mtp_server(&server_bin, &paths, port, info.ctx, MTP_DRAFT_N_MAX, pf.run_mtp)?);
     if let Err(e) = wait_for_ready_or_exit(&mut child, port, MTP_HEALTH_TIMEOUT_SECS).await {
         let _ = child.kill();
         let _ = child.wait();
@@ -879,7 +942,7 @@ pub fn list_local_models() -> Result<Vec<(String, u64)>> {
 
 /// Remove a downloaded model
 pub fn remove_model(alias: &str) -> Result<()> {
-    let info = resolve_hf_alias(alias);
+    let info = resolve_hf_alias(alias)?;
     let path = models_dir().join(&info.filename);
     if path.exists() {
         std::fs::remove_file(&path)?;
@@ -940,7 +1003,7 @@ mod tests {
 
     #[test]
     fn test_resolve_hf_alias_e4b() {
-        let info = resolve_hf_alias("gemma4:e4b");
+        let info = resolve_hf_alias("gemma4:e4b").unwrap();
         assert_eq!(info.repo, "unsloth/gemma-4-E4B-it-GGUF");
         assert_eq!(info.filename, "gemma-4-E4B-it-Q4_K_M.gguf");
         assert_eq!(info.display_name, "gemma-4-E4B-it-Q4_K_M");
@@ -951,7 +1014,7 @@ mod tests {
 
     #[test]
     fn test_resolve_hf_alias_e4b_q8() {
-        let info = resolve_hf_alias("gemma4:e4b-q8");
+        let info = resolve_hf_alias("gemma4:e4b-q8").unwrap();
         assert_eq!(info.repo, "unsloth/gemma-4-E4B-it-GGUF");
         assert_eq!(info.filename, "gemma-4-E4B-it-Q8_0.gguf");
         assert!(!info.mtp);
@@ -959,7 +1022,7 @@ mod tests {
 
     #[test]
     fn test_resolve_hf_alias_26b() {
-        let info = resolve_hf_alias("gemma4:26b");
+        let info = resolve_hf_alias("gemma4:26b").unwrap();
         assert_eq!(info.repo, "unsloth/gemma-4-26B-A4B-it-GGUF");
         assert_eq!(info.filename, "gemma-4-26B-A4B-it-Q4_K_M.gguf");
         assert!(!info.mtp);
@@ -967,7 +1030,7 @@ mod tests {
 
     #[test]
     fn test_resolve_hf_alias_26b_q8() {
-        let info = resolve_hf_alias("gemma4:26b-q8");
+        let info = resolve_hf_alias("gemma4:26b-q8").unwrap();
         assert_eq!(info.repo, "unsloth/gemma-4-26B-A4B-it-GGUF");
         assert_eq!(info.filename, "gemma-4-26B-A4B-it-Q8_0.gguf");
     }
@@ -975,7 +1038,7 @@ mod tests {
     #[test]
     fn test_resolve_hf_alias_31b_mtp() {
         for alias in ["gemma4:31b", "gemma4:31b-mtp"] {
-            let info = resolve_hf_alias(alias);
+            let info = resolve_hf_alias(alias).unwrap();
             assert!(info.mtp, "{} should be mtp", alias);
             assert_eq!(info.ctx, 8192);
             assert_eq!(info.min_vram_gb, 24);
@@ -987,16 +1050,35 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_hf_alias_unknown_falls_back() {
-        let info = resolve_hf_alias("unknown:model");
-        assert_eq!(info.display_name, "unknown:model");
-        assert!(!info.mtp);
+    fn unknown_local_model_is_rejected() {
+        assert!(resolve_hf_alias("unknown:model").is_err());
+    }
+
+    #[test]
+    fn qwen_uses_correct_weights_and_cpu_profile() {
+        for size in ["2b", "0.8b"] {
+            let info = resolve_hf_alias(&format!("qwen3.5:{size}")).unwrap();
+            assert!(info.qwen && !info.mtp);
+            assert!(info.filename.starts_with("Qwen3.5-"));
+            let args = local_server_args(&info, 18921).unwrap();
+            assert!(args.contains(&"--jinja".into()));
+            assert!(args.contains(&r#"{"enable_thinking":false}"#.into()));
+            assert!(args.contains(&"127.0.0.1".into()));
+        }
+    }
+
+    #[test]
+    fn dropping_server_reaps_child() {
+        let child = Command::new("sleep").arg("60").spawn().unwrap();
+        let pid = child.id();
+        drop(LocalServer(child));
+        assert!(!Path::new(&format!("/proc/{pid}")).exists());
     }
 
     #[test]
     fn test_existing_aliases_not_mtp() {
-        for alias in ["gemma4:e4b", "gemma4:e4b-q8", "gemma4:e4b-q5", "gemma4:26b", "gemma4:26b-q8", "weird:thing"] {
-            let info = resolve_hf_alias(alias);
+        for alias in ["gemma4:e4b", "gemma4:e4b-q8", "gemma4:e4b-q5", "gemma4:26b", "gemma4:26b-q8"] {
+            let info = resolve_hf_alias(alias).unwrap();
             assert!(!info.mtp, "{} must not be mtp", alias);
             assert_eq!(info.ctx, 0, "{} ctx must be 0", alias);
             assert!(info.drafter_repo.is_none(), "{} must have no drafter", alias);
@@ -1033,14 +1115,14 @@ mod tests {
 
     #[test]
     fn test_required_disk_gb_is_bounded() {
-        let info = resolve_hf_alias("gemma4:31b");
+        let info = resolve_hf_alias("gemma4:31b").unwrap();
         let gb = required_disk_gb(&info);
         assert!(gb >= 1 && gb <= 35);
     }
 
     #[test]
     fn test_preflight_includes_core_checks() {
-        let info = resolve_hf_alias("gemma4:31b");
+        let info = resolve_hf_alias("gemma4:31b").unwrap();
         let pf = preflight_gemma4_mtp(&info);
         for name in ["git", "cmake", "c++", "nvcc", "nvidia-smi", "disk", "vram"] {
             assert!(pf.checks.iter().any(|c| c.name == name), "missing check: {}", name);

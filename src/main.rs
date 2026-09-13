@@ -14,6 +14,7 @@ mod interactive;
 mod instructions;
 mod key_rotation;
 mod local;
+mod local_stream;
 mod models;
 mod output_store;
 mod provider;
@@ -428,7 +429,7 @@ async fn main() -> Result<()> {
     // Handle --download hf:gemma4:*  (also gemma4:31b without prefix)
     if let Some(ref dl_model) = args.download {
         let alias = dl_model.strip_prefix("hf:").unwrap_or(dl_model);
-        let info = local::resolve_hf_alias(alias);
+        let info = local::resolve_hf_alias(alias)?;
         if info.mtp {
             // Validate first, then fetch both GGUFs and pre-warm the build.
             let pf = local::preflight_gemma4_mtp(&info);
@@ -531,8 +532,8 @@ async fn main() -> Result<()> {
     let provider_info = detect_provider(&model)?;
     args.runtime.validate(&provider_info.provider)?;
 
-    // If local provider, start gemma4-server
-    let mut _local_server: Option<std::process::Child> = if provider_info.provider == models::Provider::Local {
+    // Own the local inference process for the lifetime of this session.
+    let mut _local_server: Option<local::LocalServer> = if provider_info.provider == models::Provider::Local {
         let alias = model.strip_prefix("hf:").unwrap_or(&model);
         let (child, _path) = local::setup_local_model(alias).await?;
         Some(child)

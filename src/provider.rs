@@ -26,7 +26,7 @@ pub fn supports_tools(provider: &Provider, model: &str) -> bool {
         // Azure OpenAI models support tools (same as OpenAI)
         Provider::AzureOpenAI => true,
 
-        // Local Gemma 4 models support tools via llama-server
+        // Local models expose structured tools through llama-server
         Provider::Local => true,
 
         // gemmad implements OpenAI-style function calling: it returns standard
@@ -275,9 +275,9 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
         });
     }
 
-    // 4. Check for HuggingFace local models (hf:gemma4:*)
+    // 4. Explicit HuggingFace local aliases bypass Ollama and cloud providers.
     if let Some(hf_model) = model.strip_prefix("hf:") {
-        let resolved = crate::local::resolve_hf_alias(hf_model);
+        let resolved = crate::local::resolve_hf_alias(hf_model)?;
         return Ok(ProviderInfo {
             provider: Provider::Local,
             base_url: format!("http://127.0.0.1:{}/v1/", crate::local::DEFAULT_PORT),
@@ -292,7 +292,7 @@ pub fn detect_provider(model: &str) -> Result<ProviderInfo> {
     // NOTE: bare gemma4:e4b / gemma4:26b intentionally still fall through to Ollama (step 5),
     // since the 31B is the only Gemma 4 size with no working Ollama route.
     if model == "gemma4:31b" || model == "gemma4:31b-mtp" {
-        let resolved = crate::local::resolve_hf_alias(model);
+        let resolved = crate::local::resolve_hf_alias(model)?;
         return Ok(ProviderInfo {
             provider: Provider::Local,
             base_url: format!("http://127.0.0.1:{}/v1/", crate::local::DEFAULT_PORT),
@@ -495,8 +495,10 @@ pub fn get_available_models() -> Vec<(Provider, Vec<String>, bool)> {
     let ollama_available = !ollama_models.is_empty();
     result.push((Provider::Ollama, ollama_models, ollama_available));
 
-    // Local (HuggingFace / gemma4-server)
+    // Local (HuggingFace / llama.cpp)
     let local_models = vec![
+        "hf:qwen3.5:2b (Qwen3.5 2B Q4_K_M, 1.28 GB)".to_string(),
+        "hf:qwen3.5:0.8b (Qwen3.5 0.8B Q4_K_M, ~0.5 GB)".to_string(),
         "hf:gemma4:e4b (Gemma 4 E4B Q4_K_M, ~4.5 GB)".to_string(),
         "hf:gemma4:e4b-q8 (Gemma 4 E4B Q8_0, ~8 GB)".to_string(),
         "hf:gemma4:e4b-q5 (Gemma 4 E4B Q5_K_M, ~5.5 GB)".to_string(),
@@ -565,6 +567,15 @@ mod tests {
         assert_eq!(catalog[0].1, ["Fable", "sonnet"]);
         assert_eq!(catalog[1].1, ["Cyber", "pro"]);
         assert_eq!(catalog[2].1, ["Alpha:latest", "zeta:latest"]);
+    }
+
+    #[test]
+    fn qwen_local_routes_without_ollama_and_rejects_unknown_aliases() {
+        let info = detect_provider("hf:qwen3.5:2b").unwrap();
+        assert_eq!(info.provider, Provider::Local);
+        assert_eq!(info.resolved_model, "Qwen3.5-2B-Q4_K_M");
+        assert!(supports_tools(&info.provider, &info.resolved_model));
+        assert!(detect_provider("hf:qwen3.5:missing").is_err());
     }
 
     #[test]

@@ -344,8 +344,8 @@ impl Client {
             reasoning_effort: self.effort.clone().or_else(|| matches!(self.provider, Provider::Abliteration)
                 .then(|| crate::abliteration::REASONING_EFFORT.to_string())),
             include_reasoning: matches!(self.provider, Provider::Abliteration).then_some(false),
-            max_completion_tokens: matches!(self.provider, Provider::Abliteration)
-                .then_some(crate::abliteration::MAX_COMPLETION_TOKENS),
+            max_completion_tokens: if self.provider == Provider::Local { crate::local::output_limit(model)? } else {
+                matches!(self.provider, Provider::Abliteration).then_some(crate::abliteration::MAX_COMPLETION_TOKENS) },
         };
 
         let mut attempt = 0u32;
@@ -562,6 +562,9 @@ impl Client {
         if self.uses_responses(model) {
             return self.responses(model, messages, tools, true, on_chunk).await;
         }
+        if self.provider == Provider::Local {
+            return self.local_stream(model, messages, tools, on_chunk).await;
+        }
         // Only streaming for native Gemini API
         if !self.use_native_gemini_api {
             // Fall back to non-streaming for other providers
@@ -746,9 +749,42 @@ impl Client {
         })
     }
 
+    /// llama.cpp streams OpenAI-style text and fragmented structured tool calls.
+    async fn local_stream<F>(&self, model: &str, mut messages: serde_json::Value,
+        tools: Option<&[Tool]>, mut on_chunk: F) -> Result<ChatCompletionResponse>
+    where F: FnMut(&str) {
+        use futures::StreamExt;
+        if let Some(rows) = messages.as_array_mut() {
+            for row in rows { if let Some(object) = row.as_object_mut() { object.remove("native_output"); } }
+        }
+        let mut body = serde_json::json!({"model":model,"messages":messages,
+            "stream":true,"stream_options":{"include_usage":true}});
+        if let Some(tools) = tools {
+            body["tools"] = serde_json::to_value(tools)?;
+            body["tool_choice"] = "auto".into();
+        }
+        if let Some(limit) = crate::local::output_limit(model)? { body["max_tokens"] = limit.into(); }
+        let response = self.http.post(format!("{}chat/completions",self.base_url))
+            .json(&body).send().await.context("Failed to connect to local inference server")?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(anyhow!("Local inference request failed with status {status}: {text}"));
+        }
+        let mut bytes=response.bytes_stream();
+        let mut decoder=crate::local_stream::SseDecoder::default();
+        let mut completion=crate::local_stream::CompletionStream::default();
+        while let Some(chunk)=bytes.next().await {
+            for event in decoder.feed(&chunk?)? {
+                if let Some(text)=completion.push(&event)? { on_chunk(&text); }
+            }
+        }
+        completion.finish()
+    }
+
     /// Check if streaming is supported for the current provider
     pub fn supports_streaming(&self) -> bool {
-        self.use_native_gemini_api
+        self.use_native_gemini_api || self.provider == Provider::Local
     }
 
     /// Send a chat completion request with an image

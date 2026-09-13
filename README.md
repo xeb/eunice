@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**15,440 lines of code** - **12.6 MiB binary** - Emphasizing "sophisticated simplicity".
+**15,178 lines of code** - **12.7 MiB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -94,6 +94,43 @@ eunice --hax "Inspect this project and run the tests"
 # Start webapp
 eunice --webapp
 ```
+
+## Qwen3.5 locally, without Ollama
+
+Install a recent CPU-compatible `llama-server` (on Arch: `sudo pacman -S llama-cpp`), then:
+
+```bash
+eunice --model hf:qwen3.5:2b --chat
+# Smaller alternative:
+eunice --model hf:qwen3.5:0.8b --chat
+```
+
+Eunice downloads Q4_K_M weights on first use, starts a localhost-only llama.cpp
+server, and runs its normal Bash/Read/Write/Skill agent loop in the terminal.
+Responses stream as they arrive. Tools execute only after their arguments and the
+stream are complete. No API key or Ollama service is required. Exiting Eunice
+stops its inference process and releases the model memory.
+
+The 2B weights are about 1.28 GB; runtime memory also includes context and working
+buffers. Defaults use a 4096-token context, one slot, non-thinking mode, and a
+1024-token generation limit per turn. A token-limited tool call is rejected rather
+than executed partially. Unknown `hf:` aliases are errors, never a substitute model.
+
+Settings for local Qwen runs:
+
+| Environment variable | Purpose |
+|---|---|
+| `EUNICE_LLAMA_SERVER` | Explicit path to the inference executable |
+| `EUNICE_LOCAL_THREADS` | CPU generation threads |
+| `EUNICE_LOCAL_BATCH_THREADS` | Prompt-processing threads; defaults to generation threads |
+| `EUNICE_LOCAL_CTX` | Context size; default 4096 |
+| `EUNICE_LOCAL_PREDICT` | Maximum generated tokens per turn; default 1024 |
+
+Weights are cached under `~/.eunice/models/`; diagnostics are written to
+`~/.eunice/llama-server-18921.log`. Port conflicts and early server exits are
+reported. Existing Gemma aliases and the specialized MTP runtime remain available.
+Choose local weights when starting Eunice; in-session local model switching is
+not supported yet.
 
 ## Built-in Tools
 
@@ -394,7 +431,7 @@ eunice --uninstall-service          # stop, disable, and remove the unit
 
 ## Architecture
 
-Eunice v1.0.14 follows a "sophisticated simplicity" design:
+Eunice v1.0.15 follows a "sophisticated simplicity" design:
 
 1. **No configuration files** - just environment variables for API keys
 2. **No external MCP servers** - 4 built-in tools cover most use cases
@@ -413,6 +450,7 @@ MIT License
 
 ## Version History
 
+- **v1.0.15**: Qwen3.5 through CPU llama.cpp, streamed terminal responses and validated function calls, explicit model resolution, and owned inference-process cleanup
 - **v1.0.14**: Automatic per-project `AGENTS.md` system instructions
 - **v1.0.13**: Cerebras support and collapsible webapp system instructions
 - **v1.0.12**: Current model catalogs/defaults for every provider and Azure OpenAI v1 endpoint support
