@@ -137,3 +137,46 @@ async fn cancelling_local_stream_never_executes_an_unfinished_write() {
     assert_eq!(result.status, agent::AgentStatus::Cancelled);
     assert!(!dir.path().join("must-not-exist.txt").exists());
 }
+
+#[tokio::test]
+async fn local_stream_retries_a_connection_closed_before_response() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        for attempt in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut input = Vec::new();
+            loop {
+                let mut chunk = [0u8; 4096];
+                let n = socket.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                input.extend_from_slice(&chunk[..n]);
+                if let Some(end) = input.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&input[..end]).to_lowercase();
+                    let length: usize = header.lines().find_map(|line| line.strip_prefix("content-length: ")).unwrap().parse().unwrap();
+                    if input.len() >= end + 4 + length { break; }
+                }
+            }
+            if attempt == 0 { continue; } // Reproduce a server closing before headers.
+            let payload = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Recovered.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", payload.len(), payload);
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    let client = Client::new(&ProviderInfo {
+        provider: Provider::Local,
+        base_url: format!("http://{address}/v1/"),
+        api_key: "local".into(),
+        resolved_model: "Qwen3.5-2B-Q4_K_M".into(),
+        use_native_gemini_api: false,
+        azure_api_version: None,
+    }).unwrap();
+    let mut visible = String::new();
+    tokio::time::timeout(std::time::Duration::from_secs(5), client.chat_completion_streaming(
+        "Qwen3.5-2B-Q4_K_M", json!([{"role":"user","content":"Hello"}]), None,
+        |chunk| visible.push_str(chunk),
+    )).await.unwrap().unwrap();
+    assert_eq!(visible, "Recovered.");
+    server.await.unwrap();
+}

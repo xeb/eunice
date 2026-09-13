@@ -764,8 +764,18 @@ impl Client {
             body["tool_choice"] = "auto".into();
         }
         if let Some(limit) = crate::local::output_limit(model)? { body["max_tokens"] = limit.into(); }
-        let response = self.http.post(format!("{}chat/completions",self.base_url))
-            .json(&body).send().await.context("Failed to connect to local inference server")?;
+        let request = || self.http.post(format!("{}chat/completions", self.base_url)).json(&body);
+        let response = match request().send().await {
+            Ok(response) => response,
+            Err(_) => {
+                // A local server can close an idle HTTP connection between tool rounds.
+                // Retry only before receiving a response: never replay a partial stream
+                // or an executed tool. A second transport failure is surfaced to the user.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                request().header(reqwest::header::CONNECTION, "close").send().await
+                    .context("Failed to connect to local inference server after retry")?
+            }
+        };
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
