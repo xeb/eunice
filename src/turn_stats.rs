@@ -8,6 +8,7 @@ pub struct TurnStats {
     pub known_usage: bool,
     pub generation_tokens: u64,
     pub generation_ms: f64,
+    pub generation_work: f64,
     pub timed_responses: u64,
     pub responses: u64,
     pub elapsed_seconds: f64,
@@ -26,6 +27,12 @@ impl TurnStats {
             if timing.predicted_ms.is_finite() && timing.predicted_ms > 0.0 {
                 self.generation_tokens += timing.predicted_n;
                 self.generation_ms += timing.predicted_ms;
+                // llama.cpp excludes the first token from its generation-rate sample.
+                // Preserve its reported rate, weighted by each response's duration.
+                self.generation_work += timing.predicted_per_second
+                    .filter(|rate| rate.is_finite() && *rate >= 0.0)
+                    .map(|rate| rate * timing.predicted_ms / 1000.0)
+                    .unwrap_or(timing.predicted_n as f64);
                 self.timed_responses += 1;
             }
         }
@@ -33,7 +40,7 @@ impl TurnStats {
 
     pub fn line(&self, session_bytes: usize, compactions: u64) -> String {
         let speed = if self.responses > 0 && self.timed_responses == self.responses {
-            format!("{:.1} tok/s", self.generation_tokens as f64 * 1000.0 / self.generation_ms)
+            format!("{:.1} tok/s", self.generation_work * 1000.0 / self.generation_ms)
         } else if self.known_usage && self.elapsed_seconds > 0.0 {
             format!("{:.1} eff tok/s", self.output_tokens as f64 / self.elapsed_seconds)
         } else { "— tok/s".into() };
@@ -53,6 +60,12 @@ pub fn format_bytes(bytes: usize) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn uses_reported_native_rate_including_its_first_token_convention() {
+        let mut stats = TurnStats::default();
+        stats.observe(&serde_json::from_value(json!({"choices":[],"timings":{"predicted_n":8,"predicted_ms":1000,"predicted_per_second":7.0}})).unwrap());
+        assert!(stats.line(0, 0).contains("7.0 tok/s"));
+    }
     #[test]
     fn weights_native_speed_across_tool_rounds() {
         let mut stats = TurnStats::default();

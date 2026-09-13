@@ -146,6 +146,8 @@ pub struct InferenceTimings {
     pub predicted_n: u64,
     #[serde(default)]
     pub predicted_ms: f64,
+    #[serde(default)]
+    pub predicted_per_second: Option<f64>,
 }
 
 /// Token usage statistics from API response
