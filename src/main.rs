@@ -497,7 +497,7 @@ async fn main() -> Result<()> {
     // This is deliberately a single-directory lookup: no parent traversal.
     let working_dir = std::env::current_dir()
         .map_err(|e| anyhow!("Failed to determine current working directory: {}", e))?;
-    let project_instructions = instructions::load_agents_md(&working_dir)?;
+    let project_instructions = instructions::load_startup_instructions(dirs::home_dir().as_deref(), &working_dir)?;
 
     // Determine if we need TUI mode
     let use_tui = args.chat || (prompt.is_none() && atty::is(atty::Stream::Stdin));

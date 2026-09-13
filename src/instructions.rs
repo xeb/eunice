@@ -3,6 +3,30 @@ use std::path::Path;
 
 pub const AGENTS_FILE: &str = "AGENTS.md";
 
+/// User-wide instructions precede exact-directory project instructions. A symlink
+/// may share one source with a project; include that file only once.
+pub fn load_startup_instructions(home: Option<&Path>, dir: &Path) -> Result<Option<String>> {
+    let global_dir = home.map(|home| home.join(".eunice"));
+    let global = match &global_dir {
+        Some(global_dir) => load_agents_md(global_dir)?,
+        None => None,
+    };
+    if global.is_some() {
+        if let Some(global_dir) = &global_dir {
+            if let (Ok(global_path), Ok(project_path)) = (
+                std::fs::canonicalize(global_dir.join(AGENTS_FILE)),
+                std::fs::canonicalize(dir.join(AGENTS_FILE)),
+            ) {
+                if global_path == project_path {
+                    return Ok(global);
+                }
+            }
+        }
+    }
+    let project = load_agents_md(dir)?;
+    Ok(combine_system_instructions(global.as_deref(), project.as_deref()))
+}
+
 /// Load project instructions from `AGENTS.md` in exactly the supplied directory.
 /// Parent directories are intentionally not searched.
 pub fn load_agents_md(dir: &Path) -> Result<Option<String>> {
@@ -65,6 +89,38 @@ pub fn compose_first_user_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn global_instructions_apply_outside_home_and_precede_project() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join(".eunice")).unwrap();
+        std::fs::write(home.path().join(".eunice/AGENTS.md"), "global rules").unwrap();
+        assert_eq!(load_startup_instructions(Some(home.path()), project.path()).unwrap().as_deref(), Some("global rules"));
+        std::fs::write(project.path().join(AGENTS_FILE), "project rules").unwrap();
+        assert_eq!(load_startup_instructions(Some(home.path()), project.path()).unwrap().as_deref(), Some("global rules\n\n---\n\nproject rules"));
+        assert_eq!(load_startup_instructions(None, project.path()).unwrap().as_deref(), Some("project rules"));
+    }
+
+    #[test]
+    fn missing_global_keeps_project_and_unreadable_global_is_reported() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(home.path().join(AGENTS_FILE), "project rules").unwrap();
+        assert_eq!(load_startup_instructions(Some(home.path()), home.path()).unwrap().as_deref(), Some("project rules"));
+        std::fs::create_dir(home.path().join(".eunice")).unwrap();
+        std::fs::write(home.path().join(".eunice/AGENTS.md"), [0xff]).unwrap();
+        assert!(load_startup_instructions(Some(home.path()), home.path()).unwrap_err().to_string().contains(".eunice/AGENTS.md"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn global_symlink_to_home_agents_is_not_duplicated() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join(".eunice")).unwrap();
+        std::fs::write(home.path().join(AGENTS_FILE), "shared rules").unwrap();
+        std::os::unix::fs::symlink("../AGENTS.md", home.path().join(".eunice/AGENTS.md")).unwrap();
+        assert_eq!(load_startup_instructions(Some(home.path()), home.path()).unwrap().as_deref(), Some("shared rules"));
+    }
 
     #[test]
     fn loads_agents_md_from_only_the_supplied_directory() {

@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**15,471 lines of code** - **12.8 MiB binary** - Emphasizing "sophisticated simplicity".
+**15,495 lines of code** - **12.8 MiB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -18,7 +18,7 @@ Named after the AI character in William Gibson's novel *Agency* (2020). In the b
 - **Astra and OpenAI Agents API**: Native Astra Responses support plus an optional managed runtime for CLI, webapp, and scheduled runs
 - **4 Built-in Tools**: Bash, Read, Write, and Skill - always available, no configuration needed
 - **Skills System**: User-defined prompts in `~/.eunice/skills/` for reusable capabilities
-- **Project Instructions**: Automatically applies `AGENTS.md` from the current directory
+- **Startup Instructions**: Automatically applies user-wide `~/.eunice/AGENTS.md` and current-directory `AGENTS.md`
 - **Smart Defaults**: Automatically selects the best available model (prefers Gemini)
 - **Interactive Chat**: TUI mode with command history and autocomplete
 - **Webapp Mode**: Browser-based interface with real-time streaming
@@ -378,12 +378,16 @@ server (and needs the GPU's VRAM free).
 
 ### Prompt Discovery
 
-On every agentic startup, Eunice checks the current working directory for
-`AGENTS.md`. When present, its contents are included as system instructions on
-the first turn in single-shot, chat, webapp, and scheduled-agent runs. Eunice
-checks only the current directory—it does not search parent directories. In
-webapp mode, `AGENTS.md` is applied before any system instructions supplied by
-`--prompt`.
+On every agentic startup, Eunice loads optional user-wide instructions from
+`~/.eunice/AGENTS.md`, followed by `AGENTS.md` in the current working directory.
+Their contents are included as system instructions on the first turn in
+single-shot, chat, webapp, and scheduled-agent runs. Parent directories are not
+searched. In webapp mode, these instructions precede those supplied by `--prompt`.
+
+To share a home-directory instruction file everywhere, run
+`ln -s ../AGENTS.md ~/.eunice/AGENTS.md` (create `~/.eunice` first if needed).
+When both paths resolve to the same file, Eunice includes it only once.
+Changes take effect in newly started processes, including after compaction.
 
 If no prompt is provided, eunice auto-discovers prompt files in the current directory:
 - `prompt.txt`, `prompt.md`
@@ -505,6 +509,7 @@ MIT License
 
 ## Version History
 
+- **v1.2.1**: User-wide startup instructions with symlink deduplication.
 - **v1.2.0**: TUI turn telemetry, native local generation speed, session payload size, successful compaction counters, and `/compact`.
 - **v1.1.1**: Give local Qwen an explicit terminal-agent role so ordinary filesystem questions use available tools; preserve user instructions and text-only requests.
 - **v1.1.0**: Optional per-user default model in `~/.eunice/config.toml`; explicit model flags override it.

@@ -1,6 +1,6 @@
 [package]
 name = "eunice"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2021"
 description = "Agentic CLI runner with Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local model support"
 license = "MIT"
