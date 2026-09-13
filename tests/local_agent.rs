@@ -75,6 +75,8 @@ async fn local_stream_executes_read_and_returns_result_to_model() {
     .await;
     task.abort();
     result.unwrap();
+    assert_eq!(conversation.turn_stats.calls, 2);
+    assert_eq!(conversation.turn_stats.responses, 2);
     assert_eq!(requests.lock().unwrap().len(), 2);
     let events = display.0.lock().unwrap();
     assert!(events
@@ -203,5 +205,86 @@ async fn nonstreaming_local_qwen_also_receives_agent_role_and_all_tools() {
     }).unwrap();
     let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
     client.chat_completion("Qwen3.5-2B-Q4_K_M", json!([{"role":"user","content":"what directory is this"}]), Some(&ToolRegistry::new().get_tools())).await.unwrap();
+    task.abort();
+}
+
+#[tokio::test]
+async fn compaction_is_atomic_and_preserves_explicit_instructions() {
+    use eunice::models::Message;
+    let app = Router::new().route("/v1/chat/completions", post(|Json(body): Json<Value>| async move {
+        assert!(body.get("tools").is_none_or(|v| v.is_null()));
+        Json(json!({"choices":[{"message":{"role":"assistant","content":"The user is reviewing files. The secret is PHOSPHOR."}}]}))
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = Client::new(&ProviderInfo {
+        provider: Provider::Local, base_url: format!("http://{}/v1/", listener.local_addr().unwrap()),
+        api_key:"local".into(), resolved_model:"Qwen3.5-2B-Q4_K_M".into(), use_native_gemini_api:false, azure_api_version:None,
+    }).unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+    let mut history: Conversation = vec![Message::User { content: "Detailed review notes. ".repeat(500) }].into();
+    history.turn_stats.calls = 3;
+    eunice::compact::compact_manually(&client, "Qwen3.5-2B-Q4_K_M", &mut history, Some("Never modify files.")).await.unwrap();
+    assert_eq!(history.compactions, 1);
+    assert_eq!(history.turn_stats.calls, 3);
+    let text = serde_json::to_string(&history).unwrap();
+    assert!(text.contains("Never modify files.") && text.contains("PHOSPHOR"));
+    // An empty/smaller conversation cannot grow from compaction.
+    history.clear(); history.push(Message::User { content:"Hi".into() });
+    let before = serde_json::to_value(&history).unwrap();
+    eunice::compact::compact_manually(&client, "Qwen3.5-2B-Q4_K_M", &mut history, None).await.unwrap();
+    assert_eq!(serde_json::to_value(&history).unwrap(), before);
+    assert_eq!(history.compactions, 0);
+    task.abort();
+    let result = eunice::compact::compact_manually(&client, "Qwen3.5-2B-Q4_K_M", &mut history, None).await;
+    assert!(result.is_err());
+    assert_eq!(serde_json::to_value(&history).unwrap(), before);
+}
+
+#[tokio::test]
+async fn cancelling_manual_compaction_preserves_history() {
+    use eunice::models::Message;
+    let ready = Arc::new(tokio::sync::Notify::new());
+    let app = Router::new().route("/v1/chat/completions", post(|State(ready): State<Arc<tokio::sync::Notify>>| async move {
+        ready.notify_one();
+        std::future::pending::<Json<Value>>().await
+    })).with_state(ready.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = Client::new(&ProviderInfo {
+        provider:Provider::Local, base_url:format!("http://{}/v1/",listener.local_addr().unwrap()), api_key:"local".into(), resolved_model:"Qwen3.5-2B-Q4_K_M".into(),use_native_gemini_api:false,azure_api_version:None,
+    }).unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+    let mut history: Conversation = vec![Message::User { content:"Preserve these instructions".into() }].into();
+    let before = serde_json::to_value(&history).unwrap();
+    tokio::select! {
+        _ = ready.notified() => {},
+        r = eunice::compact::compact_manually(&client,"Qwen3.5-2B-Q4_K_M",&mut history,None) => panic!("unexpected completion: {r:?}"),
+    }
+    assert_eq!(serde_json::to_value(&history).unwrap(),before);
+    assert_eq!(history.compactions,0);
+    task.abort();
+}
+
+#[tokio::test]
+async fn automatic_compaction_counts_successful_cycles_and_retry_rounds() {
+    use eunice::{compact::CompactionConfig, models::Message};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let app = Router::new().route("/v1/chat/completions",post(|State(count):State<Arc<AtomicUsize>>|async move {
+        if count.fetch_add(1,Ordering::SeqCst)==0 {
+            Response::builder().status(400).body(Body::from("request exceeds context window; n_ctx is 4096")).unwrap()
+        } else {
+            Response::builder().header("content-type","text/event-stream").body(Body::from("data: {\"choices\":[{\"delta\":{\"content\":\"Recovered\"},\"finish_reason\":\"stop\"}],\"usage\":{\"completion_tokens\":10},\"timings\":{\"predicted_n\":10,\"predicted_ms\":1000}}\n\ndata: [DONE]\n\n")).unwrap()
+        }
+    })).with_state(attempts.clone());
+    let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client=Client::new(&ProviderInfo{provider:Provider::Local,base_url:format!("http://{}/v1/",listener.local_addr().unwrap()),api_key:"local".into(),resolved_model:"Qwen3.5-2B-Q4_K_M".into(),use_native_gemini_api:false,azure_api_version:None}).unwrap();
+    let task=tokio::spawn(async move{axum::serve(listener,app).await.unwrap();});
+    let mut history:Conversation=vec![Message::User{content:"Old verbose context ".repeat(1000)}].into();
+    history.compactions=2;
+    agent::run_agent_cancellable(&client,"Qwen3.5-2B-Q4_K_M","Continue",50,&ToolRegistry::new(),Arc::new(Display::default()),&mut history,None,Some(CompactionConfig::default()),None).await.unwrap();
+    assert_eq!(attempts.load(Ordering::SeqCst),2);
+    assert_eq!(history.turn_stats.calls,2);
+    assert_eq!(history.compactions,3);
+    assert_eq!(history.turn_stats.generation_tokens,10);
     task.abort();
 }

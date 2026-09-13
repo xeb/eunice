@@ -735,6 +735,7 @@ impl Client {
         };
 
         Ok(ChatCompletionResponse {
+            timings: None,
             choices: vec![crate::models::Choice {
                 message: crate::models::AssistantMessage {
                     native_output: None,
@@ -1180,6 +1181,7 @@ impl Client {
 
         // Build OpenAI-compatible response
         Ok(ChatCompletionResponse {
+            timings: None,
             choices: vec![crate::models::Choice {
                 message: crate::models::AssistantMessage {
                     native_output: None,

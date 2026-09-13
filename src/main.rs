@@ -26,6 +26,7 @@ mod theme;
 mod tools;
 mod tui;
 mod usage;
+mod turn_stats;
 mod webapp;
 
 use crate::client::Client;

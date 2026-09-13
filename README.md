@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**15,272 lines of code** - **12.7 MiB binary** - Emphasizing "sophisticated simplicity".
+**15,462 lines of code** - **12.7 MiB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -176,6 +176,36 @@ Local Qwen receives a terminal-agent system instruction whenever tools are suppl
 Bash, Read, Write, and Skill are exposed automatically; no `yolo` setting is needed.
 For example, “what directory is this” can invoke Bash `pwd` and report its result.
 Tool selection remains automatic, so ordinary conversation does not require a tool call.
+
+## Turn statistics and compaction
+
+The TUI shows the completed turn's stats above the input and before the next
+response, without buffering streamed text:
+
+```text
+last turn · 11.5 tok/s · 36.2s · 2 calls · session 4.2 KiB · compact 1
+```
+
+- **tok/s**: weighted output generation rate from llama.cpp's native timings.
+  Other providers show **eff tok/s** (reported output tokens / wall-clock turn
+  duration), or a dash when token usage is unavailable.
+- **Duration**: the previous user turn, including prompt processing, tool execution,
+  retries, and automatic compaction; excludes typing and initial model startup.
+- **Calls**: agent model-request rounds, including tool follow-ups and context-error
+  retries, plus successful model-assisted compaction requests. Internal HTTP
+  transport retries are not separate rounds.
+- **Session**: retained JSON conversation bytes plus full tool-output payloads
+  (including temporary-file payloads). Excludes model weights, schemas, and runtime
+  allocation overhead. This is storage size, not the model's context token count.
+- **Compact**: successful context reductions since `/clear`, manual and automatic.
+
+Use `/compact` to reduce retained context. It first tries shortening tool results,
+then a model-generated summary. Explicit project instructions are preserved.
+History is replaced only if smaller; errors, cancellation, and non-reducing
+summaries leave it intact. Full tool outputs remain available for retrieval, so
+session storage may shrink less than model context. `/clear` resets both history
+and stored tool outputs. `/compact` is for Eunice-managed conversation history;
+remote managed sessions are not compacted through this command.
 
 ## Default model
 
@@ -475,6 +505,7 @@ MIT License
 
 ## Version History
 
+- **v1.2.0**: TUI turn telemetry, native local generation speed, session payload size, successful compaction counters, and `/compact`.
 - **v1.1.1**: Give local Qwen an explicit terminal-agent role so ordinary filesystem questions use available tools; preserve user instructions and text-only requests.
 - **v1.1.0**: Optional per-user default model in `~/.eunice/config.toml`; explicit model flags override it.
 - **v1.0.15**: Qwen3.5 through CPU llama.cpp, streamed terminal responses and validated function calls, explicit model resolution, and owned inference-process cleanup

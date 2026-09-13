@@ -60,6 +60,7 @@ fn print_status(
 const COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show this help"),
     ("/clear", "Clear conversation history"),
+    ("/compact", "Compact conversation history"),
     ("/status", "Show current status"),
     ("/model", "Switch model: /model <id> [effort]"),
     ("/effort", "Set reasoning effort: /effort <level>"),
@@ -173,6 +174,29 @@ async fn monitor_cancel_raw(cancel_tx: watch::Sender<bool>) {
     }
 }
 
+fn stats_line(history: &crate::runtime::Conversation, store: &OutputStore) -> String {
+    let bytes = serde_json::to_vec(&history.messages).map(|b| b.len()).unwrap_or(0) + store.total_bytes();
+    if history.turn_stats.complete {
+        history.turn_stats.line(bytes, history.compactions)
+    } else {
+        format!("session {} · compact {}", crate::turn_stats::format_bytes(bytes), history.compactions)
+    }
+}
+
+async fn manual_compaction(
+    client: &Client, model: &str, history: &mut crate::runtime::Conversation,
+    instructions: Option<&str>,
+) -> String {
+    let (tx, mut rx) = watch::channel(false);
+    let monitor = tokio::spawn(async move { monitor_cancel_raw(tx).await; });
+    let result = tokio::select! {
+        r = crate::compact::compact_manually(client, model, history, instructions) => r.map_err(|e| format!("Compaction failed: {e:#}; history kept.")),
+        _ = rx.changed() => Err("Compaction cancelled; history kept.".into()),
+    };
+    monitor.abort(); let _ = monitor.await;
+    result.unwrap_or_else(|message| message)
+}
+
 /// Run one prompt through the agent with a raw-mode-safe sink + cancel monitor.
 #[allow(clippy::too_many_arguments)]
 async fn run_generation(
@@ -185,6 +209,10 @@ async fn run_generation(
     output_store: &mut OutputStore,
     session_usage: &mut SessionUsage,
 ) {
+    if conversation_history.turn_stats.complete {
+        raw_print(&format!("{DIM}{}\n{RESET}", stats_line(conversation_history, output_store)));
+    }
+    let started = Instant::now();
     let (cancel_tx, cancel_rx) = watch::channel(false);
     let cancel_handle = tokio::spawn(async move { monitor_cancel_raw(cancel_tx).await; });
 
@@ -214,6 +242,18 @@ async fn run_generation(
     // Wait for the monitor to actually stop so it can't race the editor's stdin reads next turn.
     let _ = cancel_handle.await;
 
+    conversation_history.turn_stats.elapsed_seconds = started.elapsed().as_secs_f64();
+    conversation_history.turn_stats.complete = true;
+    conversation_history.turn_stats.outcome = match &result {
+        Err(_) => "error", Ok(r) if r.status == AgentStatus::Cancelled => "cancelled", _ => "",
+    }.into();
+    if let Ok(r) = &result {
+        if conversation_history.turn_stats.calls == 0 {
+            conversation_history.turn_stats.calls = r.usage.api_calls;
+            conversation_history.turn_stats.known_usage = r.usage.has_usage();
+            conversation_history.turn_stats.output_tokens = r.usage.total_output_tokens;
+        }
+    }
     match result {
         Ok(r) => {
             session_usage.total_input_tokens += r.usage.total_input_tokens;
@@ -256,7 +296,7 @@ async fn run_tui_framed(
     println!("{DIM}  model: {model}  ·  tools: {tool_count}{RESET}");
     println!("{DIM}  /help for commands · /quit or Ctrl+D to exit{RESET}");
 
-    let footer = "↵ send · esc clear · /help · ctrl+d exit · /model";
+    let footer = "↵ send · /help · /compact · ctrl+d exit";
 
     crossterm::terminal::enable_raw_mode()
         .map_err(|e| anyhow!("Failed to enable raw mode: {}", e))?;
@@ -272,6 +312,8 @@ async fn run_tui_framed(
     }
 
     loop {
+        let status = stats_line(&conversation_history, &output_store);
+        raw_print(&format!("{DIM}{status}\n{RESET}"));
         let line = match frame_editor::read_line_framed(&input_history, "eunice", footer) {
             Ok(LineResult::Line(s)) => s,
             Ok(LineResult::Eof) | Ok(LineResult::Interrupted) => break,
@@ -295,11 +337,18 @@ async fn run_tui_framed(
         let model = &session.info.resolved_model;
         match input.as_str() {
             "/help" | "/h" | "/?" => {
-                raw_print(&format!("\r\n{DIM}Commands:{RESET}\r\n  /help  /clear  /status  /model <id> [effort]  /effort <level>  /quit\r\n"));
+                raw_print(&format!("\r\n{DIM}Commands:{RESET}\r\n  /help  /clear  /compact  /status  /model <id> [effort]  /effort <level>  /quit\r\n"));
+                continue;
+            }
+            "/compact" => {
+                raw_print(&format!("\n{DIM}Compacting… Esc to cancel.{RESET}\n"));
+                let message = manual_compaction(&session.client, model, &mut conversation_history, system_instructions).await;
+                raw_print(&format!("{DIM}{message}{RESET}\n"));
                 continue;
             }
             "/clear" | "/c" => {
                 conversation_history.clear();
+                output_store = OutputStore::new();
                 raw_print(&format!("\r\n{GREEN}Conversation history cleared.{RESET}\r\n"));
                 continue;
             }
@@ -464,8 +513,14 @@ async fn run_tui_classic(
                         "/help" | "/h" | "/?" => {
                             print_help(&mut sw)?;
                         }
+                        "/compact" => {
+                            writeln!(sw, "{DIM}Compacting…{RESET}")?;
+                            let message = manual_compaction(&session.client, &session.info.resolved_model, &mut conversation_history, system_instructions).await;
+                            writeln!(sw, "{message}")?;
+                        }
                         "/clear" | "/c" => {
                             conversation_history.clear();
+                            output_store = OutputStore::new();
                             writeln!(sw, "\n{GREEN}Conversation history cleared.{RESET}\n")?;
                         }
                         "/status" | "/s" => {
@@ -620,6 +675,10 @@ async fn process_prompt(
 ) -> Result<()> {
     let mut shared_writer = ctx.clone_shared_writer();
     writeln!(shared_writer)?;
+    if conversation_history.turn_stats.complete {
+        writeln!(shared_writer, "{DIM}{}{RESET}", stats_line(conversation_history, output_store))?;
+    }
+    let started = Instant::now();
 
     // Create TuiDisplaySink using the SharedWriter for coordinated output
     let display: Arc<dyn crate::display_sink::DisplaySink> = Arc::new(
@@ -654,6 +713,11 @@ async fn process_prompt(
     )
     .await
     .map(|r| {
+        if conversation_history.turn_stats.calls == 0 {
+            conversation_history.turn_stats.calls = r.usage.api_calls;
+            conversation_history.turn_stats.known_usage = r.usage.has_usage();
+            conversation_history.turn_stats.output_tokens = r.usage.total_output_tokens;
+        }
         // Accumulate usage from this run
         session_usage.total_input_tokens += r.usage.total_input_tokens;
         session_usage.total_output_tokens += r.usage.total_output_tokens;
@@ -663,6 +727,11 @@ async fn process_prompt(
     session_usage.aggregate_only |= r.usage.aggregate_only;
         if r.status == AgentStatus::Cancelled { Some(true) } else { None }
     });
+
+    conversation_history.turn_stats.elapsed_seconds = started.elapsed().as_secs_f64();
+    conversation_history.turn_stats.complete = true;
+    conversation_history.turn_stats.outcome = match &result { Err(_) => "error", Ok(Some(true)) => "cancelled", _ => "" }.into();
+    writeln!(shared_writer, "{DIM}{}{RESET}", stats_line(conversation_history, output_store))?;
 
     // Stop cancel key monitoring
     cancel_handle.abort();

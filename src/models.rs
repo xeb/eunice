@@ -132,9 +132,20 @@ pub struct ChatCompletionRequest {
 #[derive(Debug, Deserialize)]
 pub struct ChatCompletionResponse {
     pub choices: Vec<Choice>,
+    #[serde(default)]
+    pub timings: Option<InferenceTimings>,
     /// Token usage statistics (optional, not all providers return this)
     #[serde(default)]
     pub usage: Option<UsageStats>,
+}
+
+/// Optional llama.cpp generation timing (prefill and tool execution excluded).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct InferenceTimings {
+    #[serde(default)]
+    pub predicted_n: u64,
+    #[serde(default)]
+    pub predicted_ms: f64,
 }
 
 /// Token usage statistics from API response

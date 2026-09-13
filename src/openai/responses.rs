@@ -132,6 +132,7 @@ pub fn parse(value: Value) -> Result<ChatCompletionResponse> {
         bail!("Responses completed without text or function calls");
     }
     Ok(ChatCompletionResponse {
+            timings: None,
         choices: vec![Choice {
             message: AssistantMessage {
                 content: (!texts.is_empty()).then(|| texts.join("\n")),

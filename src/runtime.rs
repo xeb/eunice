@@ -48,13 +48,27 @@ pub trait Checkpoint: Send + Sync {
 
 #[derive(Default)]
 pub struct Conversation {
+    pub turn_stats: crate::turn_stats::TurnStats,
+    pub compactions: u64,
     pub messages: Vec<Message>,
     pub managed: ManagedSession,
     pub checkpoint: Option<Arc<dyn Checkpoint>>,
 }
 
 impl Conversation {
+    /// Commit a smaller context while preserving telemetry and runtime metadata.
+    pub fn apply_compaction(&mut self, messages: Vec<Message>) -> anyhow::Result<bool> {
+        if serde_json::to_vec(&messages)?.len() >= serde_json::to_vec(&self.messages)?.len() {
+            return Ok(false);
+        }
+        self.messages = messages;
+        self.compactions += 1;
+        Ok(true)
+    }
+
     pub fn clear(&mut self) {
+        self.turn_stats = crate::turn_stats::TurnStats::default();
+        self.compactions = 0;
         self.messages.clear();
         self.managed = ManagedSession::default();
     }

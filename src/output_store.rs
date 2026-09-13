@@ -50,6 +50,9 @@ impl OutputStore {
         }
     }
 
+    /// Payload bytes retained in memory or temporary files (excludes allocator overhead).
+    pub fn total_bytes(&self) -> usize { self.outputs.values().map(|o| o.total_bytes).sum() }
+
     /// Store output and return truncated version for LLM
     ///
     /// Returns (output_id, truncated_content) where truncated_content shows

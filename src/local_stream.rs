@@ -45,6 +45,7 @@ struct PartialCall {
 }
 #[derive(Default)]
 pub struct CompletionStream {
+    timings: Option<crate::models::InferenceTimings>,
     text: String,
     calls: BTreeMap<u64, PartialCall>,
     usage: Option<UsageStats>,
@@ -66,6 +67,9 @@ impl CompletionStream {
         }
         if let Some(usage) = value.get("usage").filter(|v| !v.is_null()) {
             self.usage = Some(serde_json::from_value(usage.clone())?);
+        }
+        if let Some(timings) = value.get("timings").filter(|v| !v.is_null()) {
+            self.timings = Some(serde_json::from_value(timings.clone())?);
         }
         let mut displayed = String::new();
         if let Some(choices) = value["choices"].as_array() {
@@ -150,6 +154,7 @@ impl CompletionStream {
             });
         }
         Ok(ChatCompletionResponse {
+            timings: self.timings,
             choices: vec![Choice {
                 message: AssistantMessage {
                     content: (!self.text.is_empty()).then_some(self.text),
@@ -166,6 +171,16 @@ impl CompletionStream {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn retains_native_generation_timings_from_final_usage_chunk() {
+        let mut stream = CompletionStream::default();
+        stream.push(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":"stop"}]}"#).unwrap();
+        stream.push(r#"{"choices":[],"usage":{"completion_tokens":20},"timings":{"predicted_n":20,"predicted_ms":2000}}"#).unwrap();
+        stream.push("[DONE]").unwrap();
+        let response = stream.finish().unwrap();
+        assert_eq!(response.timings.unwrap().predicted_n, 20);
+        assert_eq!(response.usage.unwrap().completion_tokens, 20);
+    }
     #[test]
     fn fragmented_utf8_and_crlf() {
         let mut decoder = SseDecoder::default();

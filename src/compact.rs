@@ -160,7 +160,9 @@ fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...[truncated]", &s[..max_len])
+        let mut end = max_len;
+        while !s.is_char_boundary(end) { end -= 1; }
+        format!("{}...[truncated]", &s[..end])
     }
 }
 
@@ -193,7 +195,8 @@ async fn generate_summary(
         .first()
         .and_then(|c| c.message.content.as_ref())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| "Failed to generate summary".to_string());
+        .filter(|s| !s.trim().is_empty())
+        .context("Compaction returned no summary; history was kept")?;
 
     Ok(content)
 }
@@ -295,6 +298,34 @@ pub async fn compact_context(
         compaction_ratio: ratio,
         used_full_summarization: true,
     })
+}
+
+/// Explicit /compact: prepare a replacement, then commit only if smaller.
+/// Dropping this future while awaiting the model leaves history untouched.
+pub async fn compact_manually(
+    client: &Client,
+    model: &str,
+    history: &mut crate::runtime::Conversation,
+    system_instructions: Option<&str>,
+) -> Result<String> {
+    if client.runtime() == crate::runtime::Runtime::OpenaiAgents {
+        anyhow::bail!("/compact is available for Eunice-managed conversation history, not remote managed sessions");
+    }
+    if history.is_empty() { return Ok("Nothing to compact yet.".into()); }
+    let before = serde_json::to_vec(&history.messages)?.len();
+    let config = CompactionConfig { preserve_recent_messages: 0, ..CompactionConfig::default() };
+    let mut result = compact_context(client, model, history, &config).await?;
+    if result.used_full_summarization {
+        if let Some(Message::User { content }) = result.messages.first_mut() {
+            *content = crate::instructions::compose_first_user_message(system_instructions, true, content);
+        }
+    }
+    let after = serde_json::to_vec(&result.messages)?.len();
+    if after >= before {
+        return Ok(format!("History kept: compaction did not reduce its {} size.", crate::turn_stats::format_bytes(before)));
+    }
+    history.apply_compaction(result.messages)?;
+    Ok(format!("Compacted history: {} → {} · compact {}", crate::turn_stats::format_bytes(before), crate::turn_stats::format_bytes(after), history.compactions))
 }
 
 /// Check if an error message indicates a rate limit (429 / quota exceeded)

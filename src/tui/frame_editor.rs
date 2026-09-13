@@ -20,7 +20,7 @@ const PROMPT_COLS: usize = 2;
 const CHROME_ROWS: u16 = 3;
 
 /// Slash commands offered for Tab-completion.
-const SLASH_COMMANDS: &[&str] = &["/help", "/clear", "/status", "/model", "/effort", "/quit"];
+const SLASH_COMMANDS: &[&str] = &["/help", "/clear", "/compact", "/status", "/model", "/effort", "/quit"];
 
 pub enum LineResult {
     Line(String),

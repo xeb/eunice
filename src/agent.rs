@@ -114,6 +114,7 @@ pub async fn run_agent_cancellable(
     compaction_config: Option<CompactionConfig>,
     mut output_store: Option<&mut OutputStore>,
 ) -> Result<AgentResult> {
+    conversation_history.turn_stats = crate::turn_stats::TurnStats::default();
     if client.runtime() == crate::runtime::Runtime::OpenaiAgents {
         return crate::openai::agents::run(client, model, prompt, tool_registry, display,
             conversation_history, cancel_rx, tool_output_limit).await;
@@ -143,6 +144,7 @@ pub async fn run_agent_cancellable(
         // Track whether we used streaming (to skip duplicate Response display)
         let mut used_streaming = false;
 
+        conversation_history.turn_stats.calls += 1;
         // Call the LLM - use streaming if available
         let response = if client.supports_streaming() || client.uses_responses(model) {
             // Streaming mode - show thinking until first chunk arrives
@@ -227,6 +229,7 @@ pub async fn run_agent_cancellable(
         // Handle errors with potential context compression
         let response = match response {
             Ok(r) => {
+                conversation_history.turn_stats.observe(&r);
                 compaction_attempted = false; // Reset on success
                 // Track usage if available
                 if let Some(ref usage) = r.usage {
@@ -305,8 +308,7 @@ pub async fn run_agent_cancellable(
                             .unwrap_or(0);
                         if target >= 2000 {
                             let compacted = crate::compact::trim_to_token_budget(conversation_history, target);
-                            conversation_history.clear();
-                            conversation_history.extend(compacted);
+                            if !conversation_history.apply_compaction(compacted)? { return Err(e); }
 
                             compaction_attempted = true;
                             continue; // Retry with compacted context
@@ -315,9 +317,9 @@ pub async fn run_agent_cancellable(
                         // Attempt compaction
                         match compact_context(client, model, conversation_history, config).await {
                             Ok(compacted) => {
+                                if compacted.used_full_summarization { conversation_history.turn_stats.calls += 1; }
                                 // Replace conversation history with compacted version
-                                conversation_history.clear();
-                                conversation_history.extend(compacted.messages);
+                                if !conversation_history.apply_compaction(compacted.messages)? { return Err(e); }
 
                                 compaction_attempted = true;
                                 continue; // Retry with compacted context
