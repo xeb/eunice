@@ -16,6 +16,7 @@ mod instructions;
 mod key_rotation;
 mod local;
 mod local_stream;
+mod local_prompt;
 mod models;
 mod output_store;
 mod provider;

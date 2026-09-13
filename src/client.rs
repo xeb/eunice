@@ -313,6 +313,9 @@ impl Client {
         if let Some(messages) = messages.as_array_mut() {
             for message in messages { if let Some(object) = message.as_object_mut() { object.remove("native_output"); } }
         }
+        if self.provider == Provider::Local {
+            crate::local_prompt::prepare_messages(model, &mut messages, tools);
+        }
         // Check if using native Gemini API
         if self.use_native_gemini_api {
             let messages: Vec<Message> = serde_json::from_value(messages)?;
@@ -757,6 +760,7 @@ impl Client {
         if let Some(rows) = messages.as_array_mut() {
             for row in rows { if let Some(object) = row.as_object_mut() { object.remove("native_output"); } }
         }
+        crate::local_prompt::prepare_messages(model, &mut messages, tools);
         let mut body = serde_json::json!({"model":model,"messages":messages,
             "stream":true,"stream_options":{"include_usage":true}});
         if let Some(tools) = tools {

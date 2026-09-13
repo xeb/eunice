@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**15,238 lines of code** - **12.7 MiB binary** - Emphasizing "sophisticated simplicity".
+**15,272 lines of code** - **12.7 MiB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -171,6 +171,11 @@ EOF
 ```
 
 The Skill tool searches these directories to find relevant skills for a task.
+
+Local Qwen receives a terminal-agent system instruction whenever tools are supplied.
+Bash, Read, Write, and Skill are exposed automatically; no `yolo` setting is needed.
+For example, “what directory is this” can invoke Bash `pwd` and report its result.
+Tool selection remains automatic, so ordinary conversation does not require a tool call.
 
 ## Default model
 
@@ -470,6 +475,7 @@ MIT License
 
 ## Version History
 
+- **v1.1.1**: Give local Qwen an explicit terminal-agent role so ordinary filesystem questions use available tools; preserve user instructions and text-only requests.
 - **v1.1.0**: Optional per-user default model in `~/.eunice/config.toml`; explicit model flags override it.
 - **v1.0.15**: Qwen3.5 through CPU llama.cpp, streamed terminal responses and validated function calls, explicit model resolution, and owned inference-process cleanup
 - **v1.0.14**: Automatic per-project `AGENTS.md` system instructions

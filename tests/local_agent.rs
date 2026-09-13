@@ -25,12 +25,15 @@ async fn local_stream_executes_read_and_returns_result_to_model() {
         let mut history=requests.lock().unwrap();
         assert_eq!(body["stream"],true);
         assert_eq!(body["tool_choice"],"auto");
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert!(body["messages"][0]["content"].as_str().unwrap().contains("terminal agent"));
+        assert_eq!(body["messages"].as_array().unwrap().iter().filter(|m| m["role"]=="system").count(), 1);
         assert!(body["tools"].as_array().unwrap().iter().any(|t|t["function"]["name"]=="Read"));
         let chunks=if history.is_empty() {
             vec![json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"read_1","type":"function","function":{"name":"Read","arguments":"{\"path\":"}}]}}]}),
                  json!({"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"notes.txt\"}"}}]},"finish_reason":"tool_calls"}]})]
         } else {
-            assert_eq!(body["messages"][1]["tool_calls"][0]["id"],"read_1");
+            assert_eq!(body["messages"][2]["tool_calls"][0]["id"],"read_1");
             assert!(body["messages"].as_array().unwrap().iter().any(|m|m["role"]=="tool" && m["tool_call_id"]=="read_1" && m["content"].as_str().unwrap().contains("PHOSPHOR")));
             vec![json!({"choices":[{"index":0,"delta":{"content":"The note says PHOSPHOR."},"finish_reason":"stop"}]})]
         };
@@ -179,4 +182,26 @@ async fn local_stream_retries_a_connection_closed_before_response() {
     )).await.unwrap().unwrap();
     assert_eq!(visible, "Recovered.");
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn nonstreaming_local_qwen_also_receives_agent_role_and_all_tools() {
+    let app = Router::new().route("/v1/chat/completions", post(|Json(body): Json<Value>| async move {
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert!(body["messages"][0]["content"].as_str().unwrap().contains("terminal agent"));
+        assert_eq!(body["messages"][1]["content"], "what directory is this");
+        let names: Vec<_> = body["tools"].as_array().unwrap().iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["Bash", "Read", "Write", "Skill"]);
+        assert_eq!(body["tool_choice"], "auto");
+        Json(json!({"choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}]}))
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = Client::new(&ProviderInfo {
+        provider: Provider::Local, base_url: format!("http://{}/v1/", listener.local_addr().unwrap()),
+        api_key: "local".into(), resolved_model: "Qwen3.5-2B-Q4_K_M".into(),
+        use_native_gemini_api: false, azure_api_version: None,
+    }).unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+    client.chat_completion("Qwen3.5-2B-Q4_K_M", json!([{"role":"user","content":"what directory is this"}]), Some(&ToolRegistry::new().get_tools())).await.unwrap();
+    task.abort();
 }
