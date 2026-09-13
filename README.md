@@ -4,7 +4,7 @@
 
 An agentic CLI runner in Rust with unified support for Abliteration AI, Cerebras, OpenAI, Azure OpenAI, Gemini, Claude, Ollama, and local models.
 
-**15,188 lines of code** - **12.7 MiB binary** - Emphasizing "sophisticated simplicity".
+**15,238 lines of code** - **12.7 MiB binary** - Emphasizing "sophisticated simplicity".
 
 **Homepage**: [longrunningagents.com](https://longrunningagents.com)
 
@@ -171,6 +171,26 @@ EOF
 ```
 
 The Skill tool searches these directories to find relevant skills for a task.
+
+## Default model
+
+Set a per-user default in `~/.eunice/config.toml`:
+
+```toml
+default_model = "hf:qwen3.5:2b"
+```
+
+Now `eunice` opens the terminal UI with that model, and `eunice "your task"`
+uses it for a single task. This works with local aliases and cloud model IDs.
+Explicit `--model`, `--hax`, `--gemma`, or `--gemmad` choices take precedence.
+Without this file or `default_model`, the existing automatic selection remains.
+Malformed configuration is reported with its path instead of silently selecting
+another provider. Explicit model flags bypass the default file.
+
+`--install` snapshots the configured default into the service's model argument.
+The selected model must support the requested runtime; `--runtime openai-agents`
+still requires a compatible OpenAI model. API keys and local runtime installation
+requirements are unchanged.
 
 ## Supported Providers
 
@@ -433,7 +453,7 @@ eunice --uninstall-service          # stop, disable, and remove the unit
 
 Eunice v1.0.15 follows a "sophisticated simplicity" design:
 
-1. **No configuration files** - just environment variables for API keys
+1. **Optional configuration** - per-user model defaults; environment variables for API keys
 2. **No external MCP servers** - 4 built-in tools cover most use cases
 3. **No multi-agent orchestration** - one agent, focused execution
 4. **Skills for extensibility** - user prompts, not complex plugins
@@ -450,6 +470,7 @@ MIT License
 
 ## Version History
 
+- **v1.1.0**: Optional per-user default model in `~/.eunice/config.toml`; explicit model flags override it.
 - **v1.0.15**: Qwen3.5 through CPU llama.cpp, streamed terminal responses and validated function calls, explicit model resolution, and owned inference-process cleanup
 - **v1.0.14**: Automatic per-project `AGENTS.md` system instructions
 - **v1.0.13**: Cerebras support and collapsible webapp system instructions

@@ -6,6 +6,7 @@ mod agents;
 mod cerebras;
 mod client;
 mod compact;
+mod config;
 mod daemon;
 mod display;
 mod display_sink;
@@ -45,7 +46,7 @@ struct Args {
     #[arg(long, value_enum, default_value = "eunice")]
     runtime: runtime::Runtime,
 
-    /// AI model to use
+    /// AI model to use (overrides ~/.eunice/config.toml default_model)
     #[arg(long)]
     model: Option<String>,
 
@@ -358,8 +359,9 @@ async fn main() -> Result<()> {
 
     // Handle --install
     if args.install {
+        let model = config::model_or_default(args.requested_model()?)?;
         if args.runtime == runtime::Runtime::OpenaiAgents {
-            let info = agents::detect_provider_isolated(args.requested_model()?.unwrap_or("astra"))?;
+            let info = agents::detect_provider_isolated(model.as_deref().unwrap_or("astra"))?;
             args.runtime.validate(&info.provider)?;
         }
         return daemon::run_install(&daemon::InstallOptions {
@@ -367,7 +369,7 @@ async fn main() -> Result<()> {
             port: args.port,
             host: args.host.clone(),
             agents_file: args.agents.clone(),
-            model: args.requested_model()?.map(str::to_string),
+            model,
             prompt: args.prompt.clone(),
             no_persist: args.no_persist,
         });
@@ -498,7 +500,7 @@ async fn main() -> Result<()> {
     // Determine if we need TUI mode
     let use_tui = args.chat || (prompt.is_none() && atty::is(atty::Stream::Stdin));
 
-    // Select model. The smart default is the global default; --gemmad selects the
+    // Explicit flags override the optional per-user default; --gemmad selects the
     // local daemon, --gemma still builds the 31B MTP server. Only --gemmad probes,
     // so a bare invocation no longer pays the daemon round-trip on every startup.
     let need_probe = args.gemmad;
@@ -517,7 +519,11 @@ async fn main() -> Result<()> {
             .await
             .unwrap_or_else(gemmad::model_id),
         gemmad::ModelChoice::Gemma31b => "gemma4:31b".to_string(),
-        gemmad::ModelChoice::SmartDefault => if args.runtime == runtime::Runtime::OpenaiAgents { "astra".into() } else { get_smart_default_model()? },
+        gemmad::ModelChoice::SmartDefault => match config::default_model()? {
+            Some(model) => model,
+            None if args.runtime == runtime::Runtime::OpenaiAgents => "astra".into(),
+            None => get_smart_default_model()?,
+        },
     };
     if used_gemmad {
         eprintln!(
